@@ -10,6 +10,17 @@ P2b adds ElevenLabs speech per scene, alignment validation/mapping, a speech cac
 with narration. The first live speech request was refused: the four configured voices are ElevenLabs Voice Library
 ("professional") voices, which the free plan cannot use through the API (see "P2b status" below).
 
+## Repository layout (npm workspaces, F01)
+
+| Folder | What it holds |
+|---|---|
+| `packages/pipeline/` (`@bytereel/pipeline`) | AI engine: contracts, planning, providers, timing/captions compiler, validation, storage, config, `theme.ts` |
+| `packages/video/` (`@bytereel/video`) | Remotion animation code: composition, 8 patterns, primitives, fonts, captions |
+| `tools/cli/` | The `npm run pipeline -- …` developer commands |
+| `apps/web/` | The website (Next.js), from F02 |
+| `tests/`, `fixtures/`, `examples/` | Tests and sample inputs |
+| `docs/features/` | Feature tracker (build plan) |
+
 ## Setup
 
 Requires Node.js 24+.
@@ -52,12 +63,12 @@ Exit codes: `0` success, `1` validation/check failure, `2` usage error.
 
 | Folder | What it does |
 |---|---|
-| `src/contracts/` | Zod schemas + types: plan, scene, approval, manifest, scene alignment (ElevenLabs-compatible), timeline, captions. |
-| `src/planning/` | Component catalog (allowed kinds/actions/limits per motion pattern), semantic validation, canonical plan hash, approval check. |
-| `src/storage/` | `ArtifactStore` interface + local filesystem store: atomic writes, content hashes, one writer per run. |
-| `src/pipeline/` | Manifest create/load/save with allowed state transitions only; the fixture run. |
-| `src/config/` | Reads env vars (optionally from `.env`), reports what is missing, never prints secrets. Four voice IDs: Hinglish presets use the Hindi voices. |
-| `src/cli/` | `preflight` and `fixture` commands. |
+| `packages/pipeline/src/contracts/` | Zod schemas + types: plan, scene, approval, manifest, scene alignment (ElevenLabs-compatible), timeline, captions. |
+| `packages/pipeline/src/planning/` | Component catalog (allowed kinds/actions/limits per motion pattern), semantic validation, canonical plan hash, approval check. |
+| `packages/pipeline/src/storage/` | `ArtifactStore` interface + local filesystem store: atomic writes, content hashes, one writer per run. |
+| `packages/pipeline/src/pipeline/` | Manifest create/load/save with allowed state transitions only; the fixture run. |
+| `packages/pipeline/src/config/` | Reads env vars (optionally from `.env`), reports what is missing, never prints secrets. Four voice IDs: Hinglish presets use the Hindi voices. |
+| `tools/cli/` | `preflight` and `fixture` commands. |
 | `fixtures/` | Hand-written test plans (one valid, five invalid). Not live results. |
 | `examples/` | Topic files for evaluation runs. |
 | `tests/` | Vitest tests for all of the above. |
@@ -80,10 +91,10 @@ Run artifacts go to `runs/<owner>/<project>/<version>/` (ignored by git):
 
 | Folder | What it does |
 |---|---|
-| `src/timing/` | Deterministic compiler: alignment validation, alignment → word mapping (Intl.Segmenter, many-to-many atoms for `97%` ↔ "ninety-seven percent"), event resolution, frame accounting, caption phrases (max 2 lines, number + unit kept together, no lone last word), the synthetic timing fixture. |
-| `src/video/` | Remotion composition `Explainer` (1080×1920, 30 fps, duration from the timeline), style tokens and safe zones (`theme.ts`), primitives, local icon set, packaged fonts (Inter + Noto Sans Devanagari), the 8 pattern components, captions, fixture badge. |
-| `src/pipeline/render*.ts` | Render stage (bundle, render H.264, preview PNGs) and the fixture run: compile → render → validate with manifest stages. |
-| `src/validation/` | MP4 probe with Remotion's bundled ffprobe: codec, resolution, fps, decoded frame count, duration vs timeline. Writes `qa.json`. |
+| `packages/pipeline/src/timing/` | Deterministic compiler: alignment validation, alignment → word mapping (Intl.Segmenter, many-to-many atoms for `97%` ↔ "ninety-seven percent"), event resolution, frame accounting, caption phrases (max 2 lines, number + unit kept together, no lone last word), the synthetic timing fixture. |
+| `packages/video/src/` | Remotion composition `Explainer` (1080×1920, 30 fps, duration from the timeline), style tokens and safe zones (`theme.ts`), primitives, local icon set, packaged fonts (Inter + Noto Sans Devanagari), the 8 pattern components, captions, fixture badge. |
+| `packages/pipeline/src/pipeline/render*.ts` | Render stage (bundle, render H.264, preview PNGs) and the fixture run: compile → render → validate with manifest stages. |
+| `packages/pipeline/src/validation/` | MP4 probe with Remotion's bundled ffprobe: codec, resolution, fps, decoded frame count, duration vs timeline. Writes `qa.json`. |
 
 A `render-fixture` run adds to the run folder: `alignment/<scene>.synthetic.json`, `timeline.json`, `captions.json`,
 `output.mp4`, `preview-frames/*.png` and `qa.json`; `manifest.json` records `timingSource: "synthetic-silent-fixture"`.
@@ -101,12 +112,12 @@ the real font); the caption component re-measures in the browser and fails the r
 
 | Where | What it does |
 |---|---|
-| `src/providers/` | Gemini planner adapter (official `@google/genai`, pinned), provider error policy (≤2 retries for transient errors honoring Retry-After; invalid key, unknown model and safety blocks stop at once), ElevenLabs **read-only** checks (models, voice lookup). |
-| `src/planning/planner-output.ts` | The planner-output contract: the plan minus everything code owns (ownership/lineage, schemaVersion, language, voice, sources; no approval or paths). Converted to a JSON schema for structured output. `assemblePlan` drops reserved fields the model returns anyway. |
-| `src/planning/prompts.ts`, `planner.ts` | Prompts with the component catalog, icon set, explanation rules and the 60–90 s length rule (~150 wpm). One bounded repair attempt that sends the validation errors back; still invalid → `needs-input`. |
-| `src/planning/review-html.ts` | `plan-review.html`: self-contained storyboard page (title, objective, language/voice, estimated duration, scene cards with narration, highlighted + numbered event anchors, objects, events, warnings, approve command). |
-| `src/pipeline/plan-run.ts` | `plan`: new run `runs/local-dev/<project>/v1/`, IDs from code, writes `plan.json` + `plan-review.html`, records the plan hash, state `awaiting-approval`. |
-| `src/pipeline/approval-gate.ts` | `approve` (rejects a stale hash; writes `approval.json` with actor `local-developer`; state `plan-approved`) and the generation gate (plan.json and approval.json unchanged on disk, approval hash = current plan hash). |
+| `packages/pipeline/src/providers/` | Gemini planner adapter (official `@google/genai`, pinned), provider error policy (≤2 retries for transient errors honoring Retry-After; invalid key, unknown model and safety blocks stop at once), ElevenLabs **read-only** checks (models, voice lookup). |
+| `packages/pipeline/src/planning/planner-output.ts` | The planner-output contract: the plan minus everything code owns (ownership/lineage, schemaVersion, language, voice, sources; no approval or paths). Converted to a JSON schema for structured output. `assemblePlan` drops reserved fields the model returns anyway. |
+| `packages/pipeline/src/planning/prompts.ts`, `planner.ts` | Prompts with the component catalog, icon set, explanation rules and the 60–90 s length rule (~150 wpm). One bounded repair attempt that sends the validation errors back; still invalid → `needs-input`. |
+| `packages/pipeline/src/planning/review-html.ts` | `plan-review.html`: self-contained storyboard page (title, objective, language/voice, estimated duration, scene cards with narration, highlighted + numbered event anchors, objects, events, warnings, approve command). |
+| `packages/pipeline/src/pipeline/plan-run.ts` | `plan`: new run `runs/local-dev/<project>/v1/`, IDs from code, writes `plan.json` + `plan-review.html`, records the plan hash, state `awaiting-approval`. |
+| `packages/pipeline/src/pipeline/approval-gate.ts` | `approve` (rejects a stale hash; writes `approval.json` with actor `local-developer`; state `plan-approved`) and the generation gate (plan.json and approval.json unchanged on disk, approval hash = current plan hash). |
 
 **Run ID** = `<owner>/<project>/<version>`, e.g. `local-dev/how-the-water-cycle-works-3fa9c1/v1` (its folder below `runs/`).
 
@@ -114,7 +125,7 @@ the real font); the caption component re-measures in the browser and fails the r
 runs outright (they will use `generate`); fixture runs behave as in P1. New run state `plan-approved` sits between
 `awaiting-approval` and `running`.
 
-**Icons:** the keyword table that picks an icon from a label moved to `src/planning/icon-catalog.ts` so the planner
+**Icons:** the keyword table that picks an icon from a label moved to `packages/pipeline/src/planning/icon-catalog.ts` so the planner
 prompt and the renderer share one list (the plan contract is unchanged).
 
 **Live calls:** `preflight --network` never generates anything and never calls text-to-speech. `plan` makes one
@@ -125,12 +136,12 @@ fetch only. Keys are read from `.env`, sent only to the provider SDK/header, and
 
 | Where | What it does |
 |---|---|
-| `src/providers/speech.ts` | ElevenLabs text-to-speech **with timestamps** (documented REST endpoint `POST /v1/text-to-speech/{voice_id}/with-timestamps`, no SDK dependency). One request per scene, `previous_text`/`next_text` from the neighbouring scenes, explicit voice settings, `mp3_44100_128`, fixed seed. ≤2 retries for transient errors (honoring Retry-After); invalid key, voice not found, quota, unusual activity and library-voice/paid-plan refusals stop at once. **No fallback voice.** |
-| `src/timing/provider-alignment.ts` | Validates the original and the normalized alignment (lengths, finite ordered times, end ≥ start, within the decoded MP3 duration). Uses the original if it spells the sent text; otherwise maps the normalized alignment back word by word (many-to-many: `97%` ↔ "ninety-seven percent", repeated words, punctuation, apostrophes). Uncertain → recoverable alignment error (`needs-input`), never stretched timings. |
-| `src/validation/audio.ts` | Probes the real MP3 (decoded frames × 1152 / sample rate). Scene length = decoded audio + hold. |
-| `src/storage/speech-cache.ts` | Owner-scoped, content-addressed speech cache `runs/<owner>/.speech-cache/<key>.mp3/.json`. Key = speech text + pronunciation mapping + voice ID + model + settings + format + seed + normalization mode (continuity context excluded, so editing one scene re-synthesizes only that scene). Every response is cached the moment it arrives. |
-| `src/pipeline/generate-run.ts`, `speech.ts` | `generate`/`resume`: approval gate → speech per scene (reuse run copy → cache → provider) → compile with real durations → Remotion render with one `<Audio>` per scene at its compiled start (decoded once, encoded once to AAC) → MP4 validation (now also: one AAC track, audio length ≈ video length ±0.1 s) → preview frames → `ready-for-review`. Render/validate failures resume without speech calls. |
-| object `icon` field | Optional `icon` (from `src/planning/icon-catalog.ts`) on plan objects; the planner must fill it (or `"none"`) and keep labels as readable on-screen text. The renderer prefers `icon`, falling back to label keywords. Labels that look like keyword lists ("sun heat solar") get a non-blocking review warning (CLI + `plan-review.html`). Plans without `icon` keep their exact hash. |
+| `packages/pipeline/src/providers/speech.ts` | ElevenLabs text-to-speech **with timestamps** (documented REST endpoint `POST /v1/text-to-speech/{voice_id}/with-timestamps`, no SDK dependency). One request per scene, `previous_text`/`next_text` from the neighbouring scenes, explicit voice settings, `mp3_44100_128`, fixed seed. ≤2 retries for transient errors (honoring Retry-After); invalid key, voice not found, quota, unusual activity and library-voice/paid-plan refusals stop at once. **No fallback voice.** |
+| `packages/pipeline/src/timing/provider-alignment.ts` | Validates the original and the normalized alignment (lengths, finite ordered times, end ≥ start, within the decoded MP3 duration). Uses the original if it spells the sent text; otherwise maps the normalized alignment back word by word (many-to-many: `97%` ↔ "ninety-seven percent", repeated words, punctuation, apostrophes). Uncertain → recoverable alignment error (`needs-input`), never stretched timings. |
+| `packages/pipeline/src/validation/audio.ts` | Probes the real MP3 (decoded frames × 1152 / sample rate). Scene length = decoded audio + hold. |
+| `packages/pipeline/src/storage/speech-cache.ts` | Owner-scoped, content-addressed speech cache `runs/<owner>/.speech-cache/<key>.mp3/.json`. Key = speech text + pronunciation mapping + voice ID + model + settings + format + seed + normalization mode (continuity context excluded, so editing one scene re-synthesizes only that scene). Every response is cached the moment it arrives. |
+| `packages/pipeline/src/pipeline/generate-run.ts`, `speech.ts` | `generate`/`resume`: approval gate → speech per scene (reuse run copy → cache → provider) → compile with real durations → Remotion render with one `<Audio>` per scene at its compiled start (decoded once, encoded once to AAC) → MP4 validation (now also: one AAC track, audio length ≈ video length ±0.1 s) → preview frames → `ready-for-review`. Render/validate failures resume without speech calls. |
+| object `icon` field | Optional `icon` (from `packages/pipeline/src/planning/icon-catalog.ts`) on plan objects; the planner must fill it (or `"none"`) and keep labels as readable on-screen text. The renderer prefers `icon`, falling back to label keywords. Labels that look like keyword lists ("sun heat solar") get a non-blocking review warning (CLI + `plan-review.html`). Plans without `icon` keep their exact hash. |
 
 **Character budget.** Every request (retries included) is counted in `manifest.json` → `speechUsage` *before* it is
 sent. A request that would take the run past `--max-characters` (default 1.5 × the plan's narration) is never sent.
