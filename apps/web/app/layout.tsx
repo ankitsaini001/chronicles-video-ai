@@ -4,13 +4,15 @@ import { fontVariables } from "./fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ByteReel",
+  // Pages set a short title ("Log in") and get "Log in · ByteReel".
+  title: { default: "ByteReel", template: "%s · ByteReel" },
   description: "Turn any topic into a ready-to-post explainer Reel.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={fontVariables}>
+    // data-scroll-behavior: Next 16 then turns smooth scrolling off during page changes.
+    <html lang="en" className={fontVariables} data-scroll-behavior="smooth">
       <body>{children}</body>
     </html>
   );

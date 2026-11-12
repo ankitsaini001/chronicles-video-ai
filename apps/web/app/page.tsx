@@ -8,7 +8,7 @@ import { SiteHeader } from "@/components/home/SiteHeader";
 // (docs/design/stitch/home.html).
 
 export const metadata: Metadata = {
-  title: "ByteReel · Turn any topic into a ready-to-post Reel",
+  title: { absolute: "ByteReel · Turn any topic into a ready-to-post Reel" },
   description:
     "Type an idea or paste your notes. ByteReel writes the script, animates every concept and adds a natural voice in English, Hindi or Hinglish.",
 };
