@@ -34,10 +34,10 @@
   /* Depth (§4) */
   --shadow-card: 0 20px 50px #00000066;
   --shadow-glow: 0 10px 30px #f5a52466;
-  --shadow-tile: inset 0 2px 0 #ffffff2a, inset 0 -6px 12px #00000066, 0 12px 26px #00000088, 0 0 22px #f5a52433;
+  --shadow-tile: inset 0 1px 1px 0 #ffe2a859, 0 15px 35px #00000099;
 
   /* Motion (§7): glossy tiles float gently. Disabled by prefers-reduced-motion (base layer). */
-  --animate-float: float 6s ease-in-out infinite;
+  --animate-float: float 5s ease-in-out infinite;
 
   @keyframes float {
     0%,
@@ -45,7 +45,7 @@
       translate: 0 0;
     }
     50% {
-      translate: 0 -8px;
+      translate: 0 -7px;
     }
   }
 }
@@ -90,7 +90,7 @@
 
 /* Gold text for the glossy tiles (§5). */
 @utility text-gradient-tile {
-  background-image: linear-gradient(180deg, #fff0cc, #f5a524);
+  background-image: linear-gradient(90deg, #fff0cc, #f5a524);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
