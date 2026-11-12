@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔄 In progress |
+| **Status** | 🧪 Ready for founder testing |
 | **Phase** | A1 · Foundation (project setup) |
 | **Depends on** | F02 |
 | **Design** | Stitch: ByteReel — Home v2 |
@@ -30,19 +30,20 @@ The full home page: hero, How it works, Examples, Languages, Why ByteReel, FAQ, 
 - Real sample videos (placeholder images until we have real reels)
 
 ## Steps
-- [ ] Build sections one by one
-- [ ] Check mobile
+- [x] Build sections one by one
+- [x] Check mobile
 - [ ] Founder review
 
 ## How we test it (done when all are ticked)
-- [ ] Page matches the design on desktop
-- [ ] Page works on a phone-width screen
-- [ ] No voice names, prices or invented stats
+- [x] Page matches the design on desktop
+- [x] Page works on a phone-width screen
+- [x] No voice names, prices or invented stats
 - [ ] Links go to the right routes
-- [ ] Code review passed (code-reviewer agent)
+- [x] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
-| | |
+| 2026-11-12 | Built in one go (founder's per-feature cadence). Sections from the approved `docs/design/stitch/home.html`, copy word for word (checked by a word-level diff; only differences: CSS-uppercase labels and "Sign in" → "Log in"). Components: `components/Logo.tsx` (Exo 2 700), `components/home/{SiteHeader,Hero,sections,SiteFooter}.tsx`; globals: tile gradient/shadow, gold tile text, float animation (motion-safe), smooth scroll. Sample-reel artwork: the 4 SVG illustrations from the Stitch project, self-hosted in `apps/web/public/examples/` (the design's PNG versions were only 200×200; SVGs checked for scripts: none). Deliberate: voice labels on language cards are non-interactive until F13 (samples); links to /login, /signup, /privacy, /terms, /contact 404 until those pages exist. Fixed during build: headline wrapped as "ready- / to-post" (kept the phrase together, 1240px container like the design) and the Explainer tile overlapped the phone label (tiles now positioned around the phone). Checked with screenshots of a production build: desktop 1440 matches the design; phone 390 (via a 390px frame — desktop Chrome can't open a window that narrow) stacks cleanly with no overflow. Note: the founder's running `npm run dev` served a stale stylesheet after the last hero edit — restart the dev server if styles look old. |
+| 2026-11-12 | Code review: nothing blocking. Fixed, each in its own commit: headline wraps below 360px instead of being cut off; `data-scroll-behavior="smooth"` so page changes don't scroll-animate (Next 16); title template `%s · ByteReel`; phone mockup read as one image by screen readers; footer links 44px tap targets; header links use `/#…` so they work from other pages; voice labels look non-clickable (same muted style, no amber ▶); bold Hindi weight 700 loaded; examples use one `lang` field, icon names typed. Re-checked: typecheck, production build, screenshots at 320 / 1440. Open question for the founder: no Contact page is planned — what should "Contact" do? |
