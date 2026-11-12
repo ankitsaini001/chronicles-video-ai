@@ -47,7 +47,7 @@ const STEPS: { title: string; text: string; icon: IconName; noteIcon: IconName; 
     text: "AI voice, motion graphics and captions come together. Preview it and fix any caption.",
     icon: "video",
     noteIcon: "captions",
-    note: "Word-sync captions",
+    note: "Synced captions",
   },
   {
     title: "Publish",
@@ -141,16 +141,16 @@ export function Examples() {
         {EXAMPLES.map((ex) => {
           const lang = "lang" in ex ? ex.lang : undefined;
           return (
-            <li key={ex.title} className={cn(cardBase, "group flex flex-col overflow-hidden hover:border-amber/50")}>
+            <li key={ex.title} className="flex flex-col overflow-hidden rounded-2xl border border-line bg-surface">
               <div className="relative flex aspect-[9/16] flex-col justify-between overflow-hidden bg-[#0e0a07] p-5">
                 <Image
                   src={ex.image}
                   alt=""
                   fill
                   sizes="(min-width: 1024px) 300px, (min-width: 480px) 50vw, 100vw"
-                  className="object-cover opacity-60 transition-transform duration-500 motion-safe:group-hover:scale-105"
+                  className="object-cover opacity-60"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80" />
+                <div className="absolute inset-0 bg-gradient-to-t from-bg from-10% via-bg/40 via-45% to-bg/80" />
                 <div className="relative flex items-center justify-between">
                   <span
                     lang={lang}
@@ -160,10 +160,10 @@ export function Examples() {
                   </span>
                   <span className="rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-muted">{ex.seconds}s</span>
                 </div>
-                {/* Decorative: sample videos aren't playable yet. */}
+                {/* Decorative: sample videos aren't playable yet, so no hover effects (nothing to click). */}
                 <span
                   aria-hidden="true"
-                  className="relative mx-auto flex size-12 items-center justify-center rounded-full bg-amber/90 text-on-amber shadow-[0_0_20px_#f5a52499] transition-transform motion-safe:group-hover:scale-110"
+                  className="relative mx-auto flex size-12 items-center justify-center rounded-full bg-amber/90 text-on-amber shadow-[0_0_20px_#f5a52499]"
                 >
                   <PlayIcon className="ml-0.5 size-5" />
                 </span>
