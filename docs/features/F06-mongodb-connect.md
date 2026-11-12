@@ -35,6 +35,7 @@ A small dev-only check page/command that writes and reads one test record.
 ## How we test it (done when all are ticked)
 - [ ] Founder opens Atlas → Browse Collections and sees the test record
 - [ ] App shows a clear error if the database is unreachable
+- [ ] Missing `MONGODB_URI` shows a clear message (no crash dump)
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
