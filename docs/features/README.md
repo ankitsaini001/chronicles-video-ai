@@ -34,7 +34,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | 🧪 Testing |
+| F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | ✅ Done |
 | F02 | [Web app skeleton (Next.js + Ember Gold styles)](F02-web-app-skeleton.md) | F01 | ⬜ Not started |
 | F03 | [Home page (landing)](F03-home-page.md) | F02 | ⬜ Not started |
 
@@ -98,4 +98,4 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F01 (after the founder says go). F04 (database doc) can be written any time before F05.
+**Next up:** F02 (after the founder says go). F04 (database doc) can be written any time before F05.
