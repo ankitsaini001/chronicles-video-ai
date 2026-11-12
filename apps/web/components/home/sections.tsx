@@ -1,6 +1,7 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
 import { Button, cn, Icon, type IconName, PlayIcon } from "@/components/ui";
+import { SITE } from "@/lib/site";
 
 // Home page sections below the hero. Layout and look from the Stitch "ByteReel — Home Landing
 // Page" (docs/design/stitch/home-landing-v1.html). Copy follows the design, except claims V1 can't
@@ -30,7 +31,7 @@ const cardBase = "rounded-2xl border border-line bg-surface transition duration-
 const STEPS: { title: string; text: string; icon: IconName; noteIcon: IconName; note: string }[] = [
   {
     title: "Idea",
-    text: "Type a topic or paste your notes. ByteReel drafts a storyboard made for vertical viewing.",
+    text: `Type a topic or paste your notes. ${SITE.name} drafts a storyboard made for vertical viewing.`,
     icon: "bulb",
     noteIcon: "clock",
     note: "About 30 seconds",
@@ -267,7 +268,7 @@ export function Languages() {
   );
 }
 
-/* ---------- Why ByteReel ---------- */
+/* ---------- Why us ---------- */
 
 const REASONS: { icon: IconName; title: string; text: ReactNode }[] = [
   {
@@ -281,7 +282,7 @@ const REASONS: { icon: IconName; title: string; text: ReactNode }[] = [
     text: (
       <>
         Don&apos;t like a scene? Just say <strong className="text-gold-cream">“make scene 3 simpler”</strong> or{" "}
-        <strong className="text-gold-cream">“add a cricket analogy”</strong> and ByteReel updates the storyboard.
+        <strong className="text-gold-cream">“add a cricket analogy”</strong> and {SITE.name} updates the storyboard.
       </>
     ),
   },
@@ -297,11 +298,11 @@ const REASONS: { icon: IconName; title: string; text: ReactNode }[] = [
   },
 ];
 
-export function WhyByteReel() {
+export function WhyUs() {
   return (
     <Section band>
       <div className="mb-16 max-w-2xl">
-        <Eyebrow>Why ByteReel</Eyebrow>
+        <Eyebrow>Why {SITE.name}</Eyebrow>
         <Heading>Designed for depth, speed, and total creator control</Heading>
       </div>
       <ul className="grid gap-8 md:grid-cols-2">
@@ -324,7 +325,7 @@ export function WhyByteReel() {
 const FAQ: { q: string; a: ReactNode }[] = [
   {
     q: "Do I need video editing or animation skills?",
-    a: "None at all. ByteReel handles the script, motion graphics, voice and captions. You bring the idea or your notes.",
+    a: `None at all. ${SITE.name} handles the script, motion graphics, voice and captions. You bring the idea or your notes.`,
   },
   {
     q: "Which languages are supported?",
@@ -339,7 +340,7 @@ const FAQ: { q: string; a: ReactNode }[] = [
     q: "Can I post directly to Instagram?",
     a: "Yes. Connect your Instagram professional account to post now or schedule. You can also download the MP4.",
   },
-  { q: "Is ByteReel free during the beta?", a: "Yes, ByteReel is free during the private beta." },
+  { q: `Is ${SITE.name} free during the beta?`, a: `Yes, ${SITE.name} is free during the private beta.` },
 ];
 
 export function Faq() {

@@ -5,7 +5,7 @@ import { Button, Card, Chip, Input } from "@/components/ui";
 // Developer-only style sheet: every basic building block with the Ember Gold tokens, to compare
 // against the approved Stitch designs. Not available in production builds.
 
-export const metadata: Metadata = { title: "Style sheet · ByteReel", robots: { index: false } };
+export const metadata: Metadata = { title: "Style sheet", robots: { index: false } };
 
 const SWATCHES = [
   ["bg", "bg-bg", "#0B0806"],

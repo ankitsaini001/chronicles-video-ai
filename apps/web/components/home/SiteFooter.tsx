@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
+import { SITE } from "@/lib/site";
 
 // Footer (Stitch "ByteReel — Home Landing Page"): logo + copyright line, and links. The design's
 // "AI Ethics & Voices" and "Creator Community" have no pages, so they're left out. Privacy and
@@ -19,7 +20,7 @@ export function SiteFooter() {
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 px-4 py-12 sm:px-6 md:flex-row">
         <div className="flex flex-col items-center md:items-start">
           <Logo href="/" size="sm" />
-          <p className="mt-2 text-center text-sm text-muted md:text-left">© 2026 ByteReel · by Tech Byte Chronicles</p>
+          <p className="mt-2 text-center text-sm text-muted md:text-left">© {SITE.copyrightYear} {SITE.name} · {SITE.endorsement}</p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap items-center justify-center gap-x-6">
           {LINKS.map((l) => (

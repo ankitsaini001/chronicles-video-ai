@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { cn } from "@/components/ui";
+import { SITE } from "@/lib/site";
 
 // ByteReel logo (docs/BRAND.md §6): amber play triangle in a dark circle with a faint amber glow,
 // wordmark "Byte" + gold-gradient "Reel" in Exo 2 700, optional "by Tech Byte Chronicles".
 
 type LogoProps = {
-  /** Show "by Tech Byte Chronicles" under the wordmark. */
+  /** Show the endorsement line (SITE.endorsement) under the wordmark. */
   endorsement?: boolean;
   size?: "md" | "sm";
   /** Wrap in a link to the home page. */
@@ -35,17 +36,18 @@ export function Logo({ endorsement = false, size = "md", href, className }: Logo
       <LogoMark size={size} />
       <span className="flex flex-col leading-none">
         <span className={cn("font-display font-bold", size === "md" ? "text-xl" : "text-base")}>
-          Byte<span className="text-gradient-gold">Reel</span>
+          {SITE.wordmark.plain}
+          <span className="text-gradient-gold">{SITE.wordmark.accent}</span>
         </span>
         {endorsement && (
-          <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted">by Tech Byte Chronicles</span>
+          <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted">{SITE.endorsement}</span>
         )}
       </span>
     </span>
   );
   if (!href) return content;
   return (
-    <Link href={href} aria-label="ByteReel home" className="rounded-lg">
+    <Link href={href} aria-label={`${SITE.name} home`} className="rounded-lg">
       {content}
     </Link>
   );

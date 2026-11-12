@@ -131,3 +131,17 @@ Body text max width: ~65 characters.
 - Visible focus ring (2px `gold-cream`, 3px offset) on every interactive element.
 - Minimum touch target 44×44px; mobile-first layouts.
 - Hindi text always uses Noto Sans Devanagari and is checked for correct conjuncts and matras.
+
+## 10. Renaming the product
+
+"ByteReel" is a working name and may change. To keep a rename cheap:
+
+- **Web app (everything users see):** the name lives only in `apps/web/lib/site.ts` (`SITE.name`, `SITE.wordmark`, `SITE.endorsement`). Never type the product name into a component, page title or copy; use `SITE.name`. Changing that file renames every page, title and the logo wordmark (verified on 2026-11-12 by building with a test name: 0 leftovers on `/` and `/contact`).
+- **Checklist for a real rename** (outside the web app):
+  1. `apps/web/lib/site.ts` (name, wordmark split, endorsement).
+  2. Domain, Vercel project, email sender/contact address (F38).
+  3. Meta app name and Instagram Login screens; Meta App Review if already submitted (F28/F38).
+  4. AI prompt text in `packages/pipeline/src/planning/prompts.ts` (says "storyboard planner for ByteReel"; not shown to users).
+  5. CLI banner text in `tools/cli/*.ts` (developer-only).
+  6. Optional, internal only: npm package names `@bytereel/*`, temp-folder prefixes, repo name. Safe to leave.
+  7. Docs (`PRD.md`, `docs/*.md`) and the Stitch designs: find-and-replace when convenient.

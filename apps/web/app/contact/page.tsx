@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import { SiteFooter } from "@/components/home/SiteFooter";
 import { SiteHeader } from "@/components/home/SiteHeader";
 import { Button, Card } from "@/components/ui";
-import { CONTACT_EMAIL } from "@/lib/site";
+import { SITE } from "@/lib/site";
 
 // Contact page (F03). No Stitch design; built from the home page's parts and brand tokens.
-// The email address is a dummy for now (see lib/site.ts).
+// The email address is a dummy for now (SITE.contactEmail in lib/site.ts).
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Questions, feedback or beta access? Email the ByteReel team.",
+  description: `Questions, feedback or beta access? Email the ${SITE.name} team.`,
 };
 
 export default function ContactPage() {
@@ -27,9 +27,9 @@ export default function ContactPage() {
           </p>
           <Card className="mt-10">
             <p className="font-mono text-xs uppercase tracking-[0.08em] text-muted">Email</p>
-            <p className="mt-2 font-display text-xl font-bold break-all">{CONTACT_EMAIL}</p>
+            <p className="mt-2 font-display text-xl font-bold break-all">{SITE.contactEmail}</p>
             <div className="mt-6">
-              <Button href={`mailto:${CONTACT_EMAIL}`}>Email us</Button>
+              <Button href={`mailto:${SITE.contactEmail}`}>Email us</Button>
             </div>
           </Card>
         </div>
