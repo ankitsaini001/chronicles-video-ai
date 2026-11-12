@@ -4,6 +4,9 @@
   "private": true,
   "description": "ByteReel explainer-reel pipeline prototype (P0 foundation, P1 visual skeleton, P2a live Gemini planning + approval gate, P2b ElevenLabs speech + generate/resume).",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=24"
   },

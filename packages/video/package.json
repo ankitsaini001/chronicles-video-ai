@@ -1,0 +1,7 @@
+{
+  "name": "@bytereel/video",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ByteReel animation engine: Remotion composition, the 8 motion patterns, primitives, fonts and captions.",
+  "type": "module"
+}

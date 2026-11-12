@@ -1,0 +1,7 @@
+{
+  "name": "@bytereel/pipeline",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ByteReel AI engine: plan contracts, planning (Gemini), speech (ElevenLabs), timing/caption compiler, validation, artifact storage.",
+  "type": "module"
+}
