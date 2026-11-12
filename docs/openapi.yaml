@@ -21,7 +21,7 @@ info:
       Inngest signing key). **Conditional, not listed:** `GET /api/v1/media/{token}` (only built if Meta
       rejects presigned R2 URLs for `video_url`, decision D5).
   license:
-    name: Proprietary (Tech Byte Chronicles)
+    name: Proprietary (TechByte Chronicles)
     url: https://bytereel.app/terms
   contact:
     name: ByteReel team

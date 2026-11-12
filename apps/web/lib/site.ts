@@ -8,7 +8,7 @@ export const SITE = {
   /** The logo wordmark: `plain` in the text colour, `accent` in gold. Together they spell `name`. */
   wordmark: { plain: "Byte", accent: "Reel" },
   /** Endorsement line under the logo and in the footer. */
-  endorsement: "by Tech Byte Chronicles",
+  endorsement: "by TechByte Chronicles",
   /** Year shown in the footer copyright. */
   copyrightYear: 2026,
   /**

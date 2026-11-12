@@ -5,7 +5,7 @@
 | **Version** | 1.0 · 2026-11-12 |
 | **Status** | ✅ Approved by the founder |
 | **Reference** | [`docs/brand/ember-gold-reference.html`](brand/ember-gold-reference.html) (approved hero + brand sheet) |
-| **Product** | ByteReel, by Tech Byte Chronicles: turns any topic into a ready-to-post explainer Reel |
+| **Product** | ByteReel, by TechByte Chronicles: turns any topic into a ready-to-post explainer Reel |
 
 ---
 
@@ -111,7 +111,7 @@ Body text max width: ~65 characters.
 ## 6. Logo
 - **Mark:** a play triangle in **amber** inside a dark circle (`#1A1A2E`) with a faint amber glow.
 - **Wordmark:** "Byte" in `text` + "**Reel**" in the headline gradient, Exo 2 700.
-- Optional endorsement: "by Tech Byte Chronicles" in `small` muted text.
+- Optional endorsement: "by TechByte Chronicles" in `small` muted text.
 - Keep clear space ≥ the mark's height; never stretch, recolor or add effects beyond the glow.
 
 ## 7. Imagery and motion

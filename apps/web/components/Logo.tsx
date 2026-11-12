@@ -3,7 +3,7 @@ import { cn } from "@/components/ui";
 import { SITE } from "@/lib/site";
 
 // ByteReel logo (docs/BRAND.md §6): amber play triangle in a dark circle with a faint amber glow,
-// wordmark "Byte" + gold-gradient "Reel" in Exo 2 700, optional "by Tech Byte Chronicles".
+// wordmark "Byte" + gold-gradient "Reel" in Exo 2 700, optional "by TechByte Chronicles".
 
 type LogoProps = {
   /** Show the endorsement line (SITE.endorsement) under the wordmark. */
