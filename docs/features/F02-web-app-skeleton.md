@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (waiting for founder OK) |
+| **Status** | ✅ Done |
 | **Phase** | A1 · Foundation (project setup) |
 | **Depends on** | F01 |
 | **Design** | docs/BRAND.md |
@@ -41,14 +41,14 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 - [x] 3. Add the 4 fonts (self-hosted)
 - [x] 4. Build the 5 basic components + style sheet page
 - [x] 5. Typecheck/tests cover the web app; prototype tests still pass
-- [ ] 6. Founder opens localhost:3000
+- [x] 6. Founder opens localhost:3000
 
 ## How we test it (done when all are ticked)
 - [x] `npm run dev` opens the page
-- [ ] Colours and fonts match the Stitch designs
-- [ ] Buttons/inputs look like the designs
+- [x] Colours and fonts match the Stitch designs
+- [x] Buttons/inputs look like the designs
 - [x] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
@@ -60,3 +60,4 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 | 2026-11-12 | Step 4: `apps/web/components/ui/` — `Button` (primary with ↗ circle + glow, small primary, secondary; renders a `<button>` or a Next `<Link>` when `href` is given; full-width centres the label like the Stitch auth screens), `Card`, `Input` (label, helper, error with aria-describedby/aria-invalid; `id` required), `Chip` (selectable, aria-pressed, optional ▶ icon), `cn` helper. All hook-free, so they work in server and client components (password show/hide comes with F08). Developer-only style sheet at `/styleguide` (404 in production builds); home page back to a simple placeholder. Checked by screenshot; web `tsc` clean; prototype tests 186/186. |
 | 2026-11-12 | Founder chose **one review per feature** (all steps in one go, report once). Step 5: root `npm run typecheck` = root `tsc` + `npm run typecheck -w @bytereel/web` (web has its own `tsc --noEmit`). Proved it catches web errors with a temporary broken file (exit 1), then removed it. Production build `next build` passes (incl. Next's TypeScript step with TS 7); `next start`: `/` 200, `/styleguide` 404 (developer-only works). Vitest still only runs `tests/` (web has no tests yet). Tests 186/186. |
 | 2026-11-12 | **Code review: passed, no blocking issues.** Fixed: (1) removed `aria-disabled` styling from Button (a link can't be truly disabled; disabled actions use `<button>`, `disabled` on the link variant is a type error); (2) placeholder colour `text-muted` (AA contrast, was ~4.4:1); (3) Input helper no longer vanishes when `error=""`; (4) Input merges the caller's `aria-describedby`; (5) web tsconfig now as strict as the root (noUncheckedIndexedAccess, exactOptionalPropertyTypes, noUnused*, verbatimModuleSyntax, …); plus `cursor-pointer` on Button/Chip, `typescript` 7.0.2 declared in apps/web, Input comments (wrapper className, intentional 0-offset focus ring), `lang="hi"` on the style sheet's Hindi. Notes for later moved to F03 (Logo component 700 weight, tile gradient/shadow, lang="hi", "Log in" wording) and F12 (radiogroup chips). Re-check: typecheck clean, next build passes, style sheet screenshot OK, tests 186/186. |
+| 2026-11-12 | Founder reviewed and moved on ("start F03"). **F02 ✅ Done.** Pushed to `dev`. |

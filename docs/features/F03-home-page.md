@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A1 · Foundation (project setup) |
 | **Depends on** | F02 |
 | **Design** | Stitch: ByteReel — Home v2 |
