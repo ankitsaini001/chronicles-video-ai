@@ -878,7 +878,7 @@ paths:
     get:
       operationId: getPlanVersion
       summary: Full plan version (or `current`)
-      description: D2. The plan exactly as the code contract (src/contracts/plan.ts), validation issues/warnings, stats, approval and changed scenes. 404 with details.reason = no_plan_yet before the first plan exists.
+      description: D2. The plan exactly as the code contract (packages/pipeline/src/contracts/plan.ts), validation issues/warnings, stats, approval and changed scenes. 404 with details.reason = no_plan_yet before the first plan exists.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -2629,7 +2629,7 @@ components:
     SafeId:
       type: string
       pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
-      description: Plan-internal id (src/contracts/common.ts SAFE_ID_PATTERN).
+      description: Plan-internal id (packages/pipeline/src/contracts/common.ts SAFE_ID_PATTERN).
     Sha256:
       type: string
       pattern: '^sha256:[0-9a-f]{64}$'
@@ -2656,7 +2656,7 @@ components:
       enum: [title-hook, labeled-diagram, process-flow, comparison, timeline, chart, step-sequence, takeaway]
     ObjectKind:
       type: string
-      description: Allowed kinds per pattern are defined by COMPONENT_CATALOG (src/planning/component-catalog.ts).
+      description: Allowed kinds per pattern are defined by COMPONENT_CATALOG (packages/pipeline/src/planning/component-catalog.ts).
       enum: [headline, subtitle, icon, diagram, part, arrow, node, particles, column, point, axis, milestone, bar, line-point, pie-slice, counter, step, bullet]
     EventAction:
       type: string
@@ -2799,7 +2799,7 @@ components:
         at:
           $ref: '#/components/schemas/Timestamp'
 
-    # ---------- plan contract (src/contracts/plan.ts) ----------
+    # ---------- plan contract (packages/pipeline/src/contracts/plan.ts) ----------
     NarrationBlock:
       type: object
       additionalProperties: false

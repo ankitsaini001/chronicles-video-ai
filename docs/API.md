@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 1.0 · 2026-11-12 |
 | **Status** | Draft for founder review |
-| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #21) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `src/contracts/*.ts`, `src/planning/planner-output.ts`, `src/planning/component-catalog.ts`, `src/planning/icon-catalog.ts` |
+| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #21) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts` |
 | **Machine-readable spec** | [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1): same endpoints, schemas and examples |
 | **Companion** | [`DATABASE.md`](DATABASE.md): collections, validators, indexes, transactions |
 
@@ -53,7 +53,7 @@
 | Topic | Rule |
 |---|---|
 | Field names | **camelCase** everywhere (plan/scene fields are exactly the code contract names: `narration`, `objects`, `events`, `anchor.narrationId`, `voicePreset`, …). **Only exception:** the Meta data-deletion response uses Meta's required snake_case (`confirmation_code`) |
-| IDs | Strings. Database IDs are MongoDB ObjectIds as **24 lowercase hex characters** (`"67330d5e9f1e4b2a7c0d2a10"`). Plan-internal IDs (`scene.id`, `narration[].id`, `objects[].id`, `events[].id`) are **SafeIds**: `^[a-z0-9][a-z0-9-]{0,63}$` (`src/contracts/common.ts`). An ObjectId hex string is also a valid SafeId, which is why `plan.projectId/ownerId/versionId` can hold the database IDs |
+| IDs | Strings. Database IDs are MongoDB ObjectIds as **24 lowercase hex characters** (`"67330d5e9f1e4b2a7c0d2a10"`). Plan-internal IDs (`scene.id`, `narration[].id`, `objects[].id`, `events[].id`) are **SafeIds**: `^[a-z0-9][a-z0-9-]{0,63}$` (`packages/pipeline/src/contracts/common.ts`). An ObjectId hex string is also a valid SafeId, which is why `plan.projectId/ownerId/versionId` can hold the database IDs |
 | Timestamps | ISO-8601 **UTC** with milliseconds and `Z`: `"2026-11-12T09:30:00.000Z"`. The UI converts to the user's timezone (default `Asia/Kolkata`). Request timestamps (e.g. `scheduledAt`) must include an offset or `Z` |
 | Hashes | `"sha256:<64 lowercase hex>"` (`Sha256Schema`): `planHash`, `mp4Sha256`, `captionHash` |
 | Enums | Lowercase snake_case for app enums (`storyboard_ready`), the exact code enums for plan contracts (`"title-hook"`, `"indian-english-female"`), Meta's own values where they come from Meta (`BUSINESS`, `MEDIA_CREATOR`) |
@@ -536,7 +536,7 @@ Idempotent-Replayed: true
 | `type` | `plan` \| `revise` \| `generate` \| `caption` \| `publish` | ARCHITECTURE §8.9 |
 | `state` | `queued` \| `running` \| `succeeded` \| `failed` \| `needs_input` \| `cancelled` | ARCHITECTURE §7.3. **Terminal:** `succeeded`, `failed`, `needs_input`, `cancelled` |
 | `attempt` | int ≥ 1 | +1 on each retry (E2/I9). A retry resumes: succeeded stages are skipped (`status: skipped` is never re-run work) |
-| `stages[].status` | `pending` \| `running` \| `succeeded` \| `failed` \| `skipped` \| `cancelled` | Same enum as the pipeline (`STAGE_STATUSES` in `src/contracts/manifest.ts`) |
+| `stages[].status` | `pending` \| `running` \| `succeeded` \| `failed` \| `skipped` \| `cancelled` | Same enum as the pipeline (`STAGE_STATUSES` in `packages/pipeline/src/contracts/manifest.ts`) |
 | `stages[].error` | `{ code, message }` \| null | |
 | `progress` | `{ stage, percent 0–100, message }` | `message` is shown as is in the UI |
 | `error` | `{ code, message, retryable: boolean }` \| null | Set when `state = failed` or `cancelled` (`CANCELLED`). `retryable = true` → show **Retry** |
@@ -544,7 +544,7 @@ Idempotent-Replayed: true
 | `result` | `{ planVersionId?, renderId?, revisionId?, postId? }` \| null | Set on success (and `revisionId`/`postId` from the start for revise/publish jobs) |
 | `pollAfterMs` | 2000 \| null | `null` once the job is terminal |
 
-**Stages per job type** (stage names come from `STAGE_NAMES` in `src/contracts/manifest.ts`; publish stages mirror `publishAttempts.step`):
+**Stages per job type** (stage names come from `STAGE_NAMES` in `packages/pipeline/src/contracts/manifest.ts`; publish stages mirror `publishAttempts.step`):
 
 | Job type | Stages (in order) | Started by |
 |---|---|---|
@@ -590,7 +590,7 @@ Idempotent-Replayed: true
 
 | Approval | Client sends | Server checks (all in one transaction) | Stored as | Invalidated by |
 |---|---|---|---|---|
-| **#1 Storyboard** (D8) | `planVersionId`, `planHash` (both from the plan version the user is looking at), `expectedStateVersion` | `planVersionId == project.currentPlanVersionId` · `planHash == planVersions.planHash` (canonical hash, `src/planning/plan-hash.ts`) · `validation.valid == true` · state `storyboard_ready`/`generate_failed` · no active job · quota/spend | `storyboardApprovals { planVersionId, planHash, approvedBy, approvedAt }` (immutable, unique per version) | Any new plan version (narration edit, voice change, revision, restore) → the new version has no approval |
+| **#1 Storyboard** (D8) | `planVersionId`, `planHash` (both from the plan version the user is looking at), `expectedStateVersion` | `planVersionId == project.currentPlanVersionId` · `planHash == planVersions.planHash` (canonical hash, `packages/pipeline/src/planning/plan-hash.ts`) · `validation.valid == true` · state `storyboard_ready`/`generate_failed` · no active job · quota/spend | `storyboardApprovals { planVersionId, planHash, approvedBy, approvedAt }` (immutable, unique per version) | Any new plan version (narration edit, voice change, revision, restore) → the new version has no approval |
 | **#2 Publish** (H2) | `renderId`, `mp4Sha256`, `connectionId`, `caption`, `mode`, `scheduledAt?`, `expectedStateVersion` | `renderId == project.currentRenderId` and render `ready` · `mp4Sha256 == renders.mp4Sha256` · connection is the user's, `active`, token not expired · server computes `captionHash = sha256(NFC(caption))` · copies `igUserId` from the connection | `posts.approval { renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` | New render (re-render, caption edit, revision), caption change, disconnect/reconnect/other account. A `scheduled` post becomes `approval_invalidated` and the creator gets a notification |
 
 - Approvals are created **only** by the signed-in creator through these two endpoints. Jobs, admins and the model can never create them (ARCHITECTURE §18).
@@ -668,7 +668,7 @@ Types use TypeScript notation; `| null` fields are always present. Full JSON Sch
 | `AllowedAction` | `rename`, `archive`, `edit_storyboard`, `request_revision`, `approve_storyboard`, `cancel_job`, `retry_job`, `edit_captions`, `download`, `publish`, `cancel_post`, `retry_post` | derived server side (principle "the server owns state") |
 | `NotificationType` | `storyboard_ready`, `video_ready`, `needs_input`, `generate_failed`, `post_published`, `post_failed`, `approval_invalidated`, `instagram_reconnect` | §14.2 |
 
-### 11.2 Plan contract (exact code field names: `src/contracts/plan.ts`)
+### 11.2 Plan contract (exact code field names: `packages/pipeline/src/contracts/plan.ts`)
 
 ```ts
 Plan = {
@@ -695,7 +695,7 @@ Scene = {
 NarrationBlock = { id: SafeId; text: string /*1–300*/; speech: string | null; display: string | null }
 VisualObject  = { id: SafeId; kind: ObjectKind; label: string /*≤32 or ≤60 by kind*/; icon?: IconName /*omitted when none*/; value: number | null /*chart kinds only*/ }
 SceneEvent    = { id: SafeId; anchor: { narrationId: SafeId; phrase: string }; action: EventAction; target: SafeId /*object id in the same scene*/ }
-ValidationIssue = { sceneId: string | null; path: string; message: string }   // src/planning/validation-issue.ts
+ValidationIssue = { sceneId: string | null; path: string; message: string }   // packages/pipeline/src/planning/validation-issue.ts
 ```
 Objects are **strict** (unknown keys rejected). Label limits: `headline`, `subtitle`, `point`, `step`, `bullet` ≤ 60; all other kinds ≤ 32; `bar`, `line-point`, `pie-slice`, `counter` require a numeric `value`, the others need `value: null`. Hindi on-screen text must be Devanagari; Hinglish on-screen text must be Roman (Devanagari only in `speech`).
 

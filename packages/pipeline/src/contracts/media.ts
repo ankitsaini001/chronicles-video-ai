@@ -28,7 +28,7 @@ export type AudioArtifact = z.infer<typeof AudioArtifactSchema>;
 /**
  * Character-level alignment, field names exactly as ElevenLabs returns them
  * (`alignment` / `normalized_alignment` in the text-to-speech "with-timestamps" response).
- * Shape only; ordering/bounds are checked by validateCharacterAlignment() in src/timing.
+ * Shape only; ordering/bounds are checked by validateCharacterAlignment() in packages/pipeline/src/timing.
  */
 export const CharacterAlignmentSchema = z.strictObject({
   characters: z.array(z.string()),

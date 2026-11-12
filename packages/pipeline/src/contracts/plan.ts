@@ -7,7 +7,7 @@ import { LanguageSchema, SafeIdSchema, SCENE_TYPES, VoicePresetSchema } from "./
  *
  * The schema checks *shape*. Rules that need the whole plan (first/last scene,
  * anchors, targets, catalog limits, duration, script) live in
- * src/planning/semantic-validation.ts.
+ * packages/pipeline/src/planning/semantic-validation.ts.
  *
  * Objects are strict: unknown keys are rejected so a typo never passes silently.
  */
@@ -36,7 +36,7 @@ export const VisualObjectSchema = z.strictObject({
   /** Short, human-readable on-screen text (never a list of icon search words). */
   label: z.string().trim().min(1, "label cannot be empty"),
   /**
-   * Optional icon from the local icon set (src/planning/icon-catalog.ts). When absent the renderer
+   * Optional icon from the local icon set (packages/pipeline/src/planning/icon-catalog.ts). When absent the renderer
    * falls back to the label keyword table. Optional (not nullable-with-default) on purpose: plans
    * approved before this field existed parse and hash exactly as before.
    */

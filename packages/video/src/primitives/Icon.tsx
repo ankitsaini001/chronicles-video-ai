@@ -7,7 +7,7 @@ import { COLORS } from "@bytereel/pipeline/theme";
  * No icon is ever fetched or generated at render time.
  *
  * The icon is picked from an object's label with the fixed keyword table in
- * src/planning/icon-catalog.ts (shared with the planner prompt).
+ * packages/pipeline/src/planning/icon-catalog.ts (shared with the planner prompt).
  */
 
 const B = COLORS.accent;

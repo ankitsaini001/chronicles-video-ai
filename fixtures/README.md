@@ -16,5 +16,5 @@ Fixture plans use `ownerId: "fixture-owner"` and project IDs starting with `fixt
 Each invalid fixture is a copy of the valid plan with exactly one defect.
 
 **Synthetic timing (P1).** `npm run pipeline -- render-fixture` invents a deterministic, *silent* per-character
-alignment for a fixture plan (2.8 words/s; `src/timing/synthetic-alignment.ts`) and stores it as
+alignment for a fixture plan (2.8 words/s; `packages/pipeline/src/timing/synthetic-alignment.ts`) and stores it as
 `alignment/<scene-id>.synthetic.json` in the run folder. It is never real speech and never a live result.

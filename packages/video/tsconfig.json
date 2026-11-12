@@ -1,8 +1,9 @@
 {
-  "//": "Remotion treats this folder (nearest package.json) as its root and feeds this file RAW to esbuild, which ignores `extends`. So the options esbuild reads (jsx, strict, verbatimModuleSyntax) are repeated here; keep them in sync with ../../tsconfig.json.",
+  "//": "Remotion treats this folder (nearest package.json) as its root and feeds this file RAW to esbuild, which ignores `extends`. So the options esbuild reads (jsx, target, strict, verbatimModuleSyntax) are repeated here; keep them in sync with ../../tsconfig.json.",
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "jsx": "react-jsx",
+    "target": "ES2023",
     "strict": true,
     "verbatimModuleSyntax": true
   },
