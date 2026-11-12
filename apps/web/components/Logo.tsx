@@ -37,7 +37,9 @@ export function Logo({ endorsement = false, size = "md", href, className }: Logo
         <span className={cn("font-display font-bold", size === "md" ? "text-xl" : "text-base")}>
           Byte<span className="text-gradient-gold">Reel</span>
         </span>
-        {endorsement && <span className="mt-1 text-[11px] text-muted">by Tech Byte Chronicles</span>}
+        {endorsement && (
+          <span className="mt-1 font-mono text-[9px] uppercase tracking-wider text-muted">by Tech Byte Chronicles</span>
+        )}
       </span>
     </span>
   );
