@@ -20,3 +20,7 @@ coverage/
 # OS / editor noise
 .DS_Store
 *.log
+
+# Next.js (apps/web)
+.next/
+next-env.d.ts

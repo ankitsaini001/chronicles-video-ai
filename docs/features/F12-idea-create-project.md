@@ -21,6 +21,10 @@ The 'ByteReel — Step 1 Idea' screen (without the Brainstorm panel yet).
 - Voice: Female / Male
 - 'Create storyboard' saves the project in MongoDB
 
+## Notes from the F02 code review
+- Language and voice chips are single choices: wrap each set in a labelled `role="radiogroup"` (the `Chip` uses `aria-pressed` today).
+- Wrap Hindi labels in `<span lang="hi">`.
+
 ## Not in this feature
 - AI storyboard (F15)
 - Brainstorm (F14)

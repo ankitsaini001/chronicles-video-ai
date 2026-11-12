@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+
+<html class="dark scroll-smooth" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ByteReel — Turn any topic into a ready-to-post Reel</title>
+<!-- Google Fonts: Exo 2, Ubuntu, JetBrains Mono, Noto Sans Devanagari -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,600;0,700;0,800;1,700&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;family=Noto+Sans+Devanagari:wght@400;600;700&amp;family=Ubuntu:wght@400;500;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-dim": "#19120a",
+            "primary-fixed": "#ffddb5",
+            "on-surface-variant": "#d7c3ae",
+            "on-tertiary": "#003549",
+            "line": "#F5A52426",
+            "primary-fixed-dim": "#ffb957",
+            "on-surface": "#efe0d2",
+            "on-tertiary-fixed-variant": "#004c69",
+            "on-secondary-fixed-variant": "#683c00",
+            "on-error-container": "#ffdad6",
+            "outline-variant": "#524434",
+            "surface-bright": "#40382e",
+            "background": "#19120a",
+            "on-primary": "#462b00",
+            "bg": "#0B0806",
+            "tertiary": "#9ad9ff",
+            "on-secondary-fixed": "#2c1700",
+            "success-bg": "#0F2E1E",
+            "tertiary-container": "#36c2ff",
+            "primary-container": "#f5a524",
+            "on-tertiary-fixed": "#001e2c",
+            "surface-container-high": "#302920",
+            "tertiary-fixed": "#c4e7ff",
+            "warning-bg": "#2E2410",
+            "surface-variant": "#3c332a",
+            "on-amber": "#1A1005",
+            "error-text": "#FB7185",
+            "surface-container-lowest": "#130d06",
+            "amber-deep": "#E8901A",
+            "on-secondary": "#492900",
+            "on-primary-fixed": "#2a1800",
+            "success-text": "#4ADE80",
+            "on-tertiary-container": "#004d69",
+            "text-muted": "#B5A795",
+            "secondary-fixed": "#ffdcbc",
+            "on-background": "#efe0d2",
+            "secondary": "#ffb86c",
+            "inverse-surface": "#efe0d2",
+            "inverse-on-surface": "#372f26",
+            "secondary-fixed-dim": "#ffb86c",
+            "outline": "#9f8e7a",
+            "primary": "#ffc77f",
+            "tertiary-fixed-dim": "#7bd0ff",
+            "warning-text": "#FFD27A",
+            "error": "#ffb4ab",
+            "surface-2": "#1A120A",
+            "on-error": "#690005",
+            "text": "#F7EFE6",
+            "inverse-primary": "#835400",
+            "on-primary-fixed-variant": "#643f00",
+            "surface": "#15100B",
+            "surface-container": "#261e16",
+            "gold-cream": "#FFE2A8",
+            "surface-container-low": "#211a12",
+            "surface-tint": "#ffb957",
+            "error-bg": "#33141B",
+            "on-primary-container": "#643f00",
+            "on-secondary-container": "#462700",
+            "secondary-container": "#d78202",
+            "surface-container-highest": "#3c332a",
+            "error-container": "#93000a"
+          },
+          borderRadius: {
+            "DEFAULT": "1rem",
+            "lg": "2rem",
+            "xl": "3rem",
+            "full": "9999px"
+          },
+          spacing: {
+            "space-md": "0.75rem",
+            "space-xs": "0.25rem",
+            "space-lg": "1rem",
+            "margin": "1.5rem",
+            "space-2xl": "3rem",
+            "space-3xl": "6rem",
+            "space-xl": "1.5rem",
+            "space-sm": "0.5rem",
+            "gutter": "1rem"
+          },
+          fontFamily: {
+            "body-lg": ["Ubuntu", "sans-serif"],
+            "tagline": ["\"Exo 2\"", "sans-serif"],
+            "h1-mobile": ["\"Exo 2\"", "sans-serif"],
+            "small": ["Ubuntu", "sans-serif"],
+            "display": ["\"Exo 2\"", "sans-serif"],
+            "display-mobile": ["\"Exo 2\"", "sans-serif"],
+            "h3": ["\"Exo 2\"", "sans-serif"],
+            "label": ["\"JetBrains Mono\"", "monospace"],
+            "h1": ["\"Exo 2\"", "sans-serif"],
+            "h2-mobile": ["\"Exo 2\"", "sans-serif"],
+            "body": ["Ubuntu", "sans-serif"],
+            "h3-mobile": ["\"Exo 2\"", "sans-serif"],
+            "h2": ["\"Exo 2\"", "sans-serif"],
+            "devanagari": ["\"Noto Sans Devanagari\"", "sans-serif"]
+          },
+          fontSize: {
+            "body-lg": ["16px", { lineHeight: "1.6", fontWeight: "400" }],
+            "tagline": ["19px", { lineHeight: "1.3", fontWeight: "700" }],
+            "h1-mobile": ["30px", { lineHeight: "1.1", letterSpacing: "-0.01em", fontWeight: "800" }],
+            "small": ["13px", { lineHeight: "1.5", fontWeight: "400" }],
+            "display": ["60px", { lineHeight: "1.05", letterSpacing: "-0.01em", fontWeight: "800" }],
+            "display-mobile": ["36px", { lineHeight: "1.05", letterSpacing: "-0.01em", fontWeight: "800" }],
+            "h3": ["22px", { lineHeight: "1.25", letterSpacing: "-0.01em", fontWeight: "700" }],
+            "label": ["11px", { lineHeight: "1.4", letterSpacing: "0.08em", fontWeight: "500" }],
+            "h1": ["44px", { lineHeight: "1.1", letterSpacing: "-0.01em", fontWeight: "800" }],
+            "h2-mobile": ["24px", { lineHeight: "1.15", letterSpacing: "-0.01em", fontWeight: "700" }],
+            "body": ["15px", { lineHeight: "1.55", fontWeight: "400" }],
+            "h3-mobile": ["19px", { lineHeight: "1.25", letterSpacing: "-0.01em", fontWeight: "700" }],
+            "h2": ["32px", { lineHeight: "1.15", letterSpacing: "-0.01em", fontWeight: "700" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    /* Material Symbols setup */
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+
+    /* Ambient Warm Atmosphere Glow */
+    .ember-bg-glow {
+      background-color: #0B0806;
+      background-image: radial-gradient(45% 60% at 72% 45%, rgba(245, 165, 36, 0.14), transparent 70%);
+    }
+
+    /* Primary Pill Button Gradient */
+    .btn-ember-primary {
+      background: linear-gradient(180deg, #F7B44A 0%, #E8901A 100%);
+      color: #1A1005;
+      box-shadow: 0 10px 30px rgba(245, 165, 36, 0.35);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .btn-ember-primary:hover {
+      box-shadow: 0 14px 38px rgba(245, 165, 36, 0.5);
+      transform: translateY(-2px);
+    }
+    .btn-ember-primary:active {
+      transform: scale(0.98);
+    }
+
+    /* Glossy 3D Amber Tiles Floating Effect */
+    .amber-tile {
+      background: linear-gradient(150deg, #4A2C10 0%, #1E1208 60%, #120A04 100%);
+      border: 1px solid rgba(245, 165, 36, 0.3);
+      box-shadow: inset 0 1px 1px 0 rgba(255, 226, 168, 0.35), 0 15px 35px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+    }
+
+    @keyframes subtleFloat {
+      0%, 100% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+      50% { transform: translateY(-7px) rotate(var(--rot, 0deg)); }
+    }
+    .floating-tile {
+      animation: subtleFloat 5s ease-in-out infinite;
+    }
+
+    /* Smooth accordion arrow */
+    details summary::-webkit-details-marker {
+      display: none;
+    }
+    details[open] .summary-icon {
+      transform: rotate(180deg);
+    }
+  </style>
+</head>
+<body class="bg text font-body antialiased ember-bg-glow selection:bg-primary-container selection:text-on-amber min-h-screen relative overflow-x-hidden">
+<!-- TOP NAVIGATION BAR (Anchored from Shared Components JSON) -->
+<header class="fixed top-0 left-0 w-full z-50 bg-bg/80 backdrop-blur-md border-b border-line shadow-[0_20px_50px_#00000066]">
+<div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+<!-- Logo cluster -->
+<a class="flex items-center gap-3 group" href="#">
+<div class="w-10 h-10 rounded-full bg-[#1A1A2E] flex items-center justify-center border border-primary-container/30 shadow-[0_0_15px_rgba(245,165,36,0.25)] group-hover:border-primary-container/60 transition-all duration-300">
+<span class="material-symbols-outlined text-primary-container text-xl" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<div class="flex flex-col">
+<span class="font-display text-h3 text-text font-extrabold tracking-tight leading-none">
+            Byte<span class="bg-clip-text text-transparent bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">Reel</span>
+</span>
+<span class="font-label text-[9px] text-text-muted tracking-wider uppercase mt-1">by Tech Byte Chronicles</span>
+</div>
+</a>
+<!-- Desktop Navigation Links -->
+<nav class="hidden md:flex items-center gap-8">
+<a class="font-label text-label text-text-muted hover:text-text transition-colors" href="#how-it-works">How It Works</a>
+<a class="font-label text-label text-text-muted hover:text-text transition-colors" href="#examples">Examples</a>
+<a class="font-label text-label text-text-muted hover:text-text transition-colors inline-flex items-center" href="#languages">
+          Hindi Voices AI
+          <span class="bg-primary-container text-on-amber font-label font-bold text-[10px] px-1.5 py-0.5 rounded-full ml-1.5 shadow-[0_0_10px_rgba(245,165,36,0.3)]">NEW</span>
+</a>
+<a class="font-label text-label text-text-muted hover:text-text transition-colors" href="#why-creators">Features</a>
+<a class="font-label text-label text-text-muted hover:text-text transition-colors" href="#faq">Pricing</a>
+</nav>
+<!-- Trailing Action -->
+<div class="flex items-center gap-3">
+<a class="btn-ember-primary font-body-lg font-bold text-[14px] px-5 py-2 rounded-full inline-flex items-center gap-2" href="#signin">
+<span>Sign In</span>
+<span class="w-6 h-6 rounded-full bg-black/15 flex items-center justify-center text-xs font-bold">↗</span>
+</a>
+</div>
+</div>
+</header>
+<main class="pt-28 md:pt-36">
+<!-- 1. HERO SECTION -->
+<section class="max-w-7xl mx-auto px-6 py-12 md:py-20 relative">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
+<!-- Left Column: Copy & Value Proposition -->
+<div class="lg:col-span-7 flex flex-col items-start space-y-6">
+<!-- Eyebrow Pill Chip -->
+<div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-surface-2 border border-primary-container/20 text-[#F5B65A] font-label text-label shadow-sm">
+<span class="text-sm">🎬</span>
+<span>Idea in. Reel out.</span>
+</div>
+<!-- Tagline -->
+<p class="font-tagline text-tagline text-text-muted tracking-tight">
+            Explain<span class="text-primary-container font-extrabold">.</span> Animate<span class="text-primary-container font-extrabold">.</span> Post<span class="text-primary-container font-extrabold">.</span>
+</p>
+<!-- Main Display Headline -->
+<h1 class="font-display text-display-mobile md:text-display text-text font-extrabold tracking-tight leading-[1.05] text-balance">
+            Turn any topic into a <span class="bg-clip-text text-transparent bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">ready-to-post Reel</span>
+</h1>
+<!-- Sub-copy -->
+<p class="font-body-lg text-body-lg text-text-muted max-w-xl">
+            Type an idea or paste your notes. ByteReel writes the script, animates every concept and adds a natural voice in English, Hindi or Hinglish.
+          </p>
+<!-- 3 Feature Points (JetBrains Mono Badges) -->
+<div class="w-full max-w-lg space-y-3.5 pt-2">
+<div class="flex items-center gap-4 group">
+<span class="w-7 h-7 shrink-0 rounded bg-surface-2 border border-line flex items-center justify-center font-label text-[12px] font-bold text-primary-container shadow-inner">01</span>
+<span class="font-body text-body text-text font-medium">Storyboard in about 30 seconds</span>
+</div>
+<div class="flex items-center gap-4 group">
+<span class="w-7 h-7 shrink-0 rounded bg-surface-2 border border-line flex items-center justify-center font-label text-[12px] font-bold text-primary-container shadow-inner">02</span>
+<span class="font-body text-body text-text font-medium">Motion graphics timed to the voice</span>
+</div>
+<div class="flex items-center gap-4 group">
+<span class="w-7 h-7 shrink-0 rounded bg-surface-2 border border-line flex items-center justify-center font-label text-[12px] font-bold text-primary-container shadow-inner">03</span>
+<span class="font-body text-body text-text font-medium">Download or post to Instagram</span>
+</div>
+</div>
+<!-- Primary Pill CTA -->
+<div class="pt-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full">
+<a class="btn-ember-primary font-body-lg font-bold text-[16px] pl-7 pr-2.5 py-2.5 rounded-full inline-flex items-center gap-3.5" href="#create">
+<span>Create your first reel</span>
+<span class="w-10 h-10 rounded-full bg-black/15 flex items-center justify-center text-lg font-bold">↗</span>
+</a>
+<span class="font-label text-label text-text-muted/70 tracking-normal">No credit card · Free in beta</span>
+</div>
+</div>
+<!-- Right Column: Phone Mockup & 6 Dynamic Floating Amber 3D Tiles -->
+<div class="lg:col-span-5 relative flex justify-center items-center py-10">
+<!-- Background Amber Glow Halo -->
+<div class="absolute w-[440px] h-[440px] rounded-full pointer-events-none" style="background: radial-gradient(circle, rgba(245, 165, 36, 0.35) 0%, transparent 68%); filter: blur(28px);"></div>
+<!-- Phone Mockup (9:18 portrait frame) -->
+<div class="relative w-[280px] h-[560px] bg-surface-2 rounded-[28px] p-2.5 shadow-[0_25px_60px_rgba(0,0,0,0.85)] border border-line z-10 flex flex-col justify-between">
+<!-- Phone Bezel Details / Speaker Notch -->
+<div class="absolute top-4 left-1/2 -translate-x-1/2 w-20 h-4 bg-surface rounded-full flex items-center justify-center gap-1.5 z-20">
+<div class="w-2.5 h-2.5 rounded-full bg-[#0B0806] border border-primary-container/20"></div>
+<div class="w-7 h-1 bg-[#0B0806] rounded-full"></div>
+</div>
+<!-- Screen Area (#120C07) -->
+<div class="w-full h-full bg-[#120C07] rounded-[20px] pt-9 pb-4 px-4 flex flex-col justify-between overflow-hidden relative border border-white/5">
+<!-- Phone Reel Header -->
+<div class="flex items-center justify-between pb-3 border-b border-line">
+<div>
+<span class="font-label text-[10px] text-primary-container block tracking-widest uppercase">SCIENCE 101</span>
+<h4 class="font-h3-mobile text-h3-mobile text-text font-bold">The Water Cycle</h4>
+</div>
+<span class="px-2 py-0.5 rounded-full bg-surface-2 border border-line font-label text-[10px] text-text-muted">0:42 / 1:04</span>
+</div>
+<!-- Animated Diagram Breakdown Canvas -->
+<div class="my-auto py-2 space-y-3">
+<div class="p-2.5 rounded-xl bg-surface border border-line/60 flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-primary-container/15 flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined text-base">wb_sunny</span>
+</div>
+<div>
+<div class="font-label text-[10px] text-text-muted">STAGE 1</div>
+<div class="font-body text-[12px] text-text font-medium">1. Sunlight heats surface water</div>
+</div>
+</div>
+<div class="p-2.5 rounded-xl bg-surface-2 border border-primary-container/40 shadow-[0_0_15px_rgba(245,165,36,0.15)] flex items-center gap-3 relative">
+<div class="w-8 h-8 rounded-lg bg-primary-container flex items-center justify-center text-on-amber font-bold text-xs">
+<span class="material-symbols-outlined text-base">air</span>
+</div>
+<div>
+<div class="font-label text-[10px] text-primary-container font-bold">STAGE 2 • ACTIVE</div>
+<div class="font-body text-[12px] text-text font-semibold">2. Vapour rises into the air</div>
+</div>
+<span class="absolute right-2.5 top-3 w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
+</div>
+<div class="p-2.5 rounded-xl bg-surface border border-line/60 flex items-center gap-3 opacity-60">
+<div class="w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center text-text-muted">
+<span class="material-symbols-outlined text-base">cloud</span>
+</div>
+<div>
+<div class="font-label text-[10px] text-text-muted">STAGE 3</div>
+<div class="font-body text-[12px] text-text font-medium">3. Clouds form &amp; condense</div>
+</div>
+</div>
+</div>
+<!-- Visual Audio Waveform & Synced Caption Bar -->
+<div class="space-y-2 pt-2 border-t border-line/50">
+<!-- Waveform Bars -->
+<div class="flex items-center justify-center gap-1 h-5">
+<div class="w-1 h-2 bg-primary-container/40 rounded-full"></div>
+<div class="w-1 h-3.5 bg-primary-container/70 rounded-full"></div>
+<div class="w-1 h-5 bg-primary-container rounded-full"></div>
+<div class="w-1 h-4 bg-primary-container rounded-full"></div>
+<div class="w-1 h-2.5 bg-primary-container/70 rounded-full"></div>
+<div class="w-1 h-4.5 bg-primary-container rounded-full"></div>
+<div class="w-1 h-3 bg-primary-container/60 rounded-full"></div>
+<div class="w-1 h-1.5 bg-primary-container/40 rounded-full"></div>
+</div>
+<!-- Word-by-word Synced Caption -->
+<p class="font-body text-[11px] text-center text-gold-cream bg-surface-2/90 py-1.5 px-2 rounded-lg border border-line leading-tight">
+                  “...and that <span class="bg-primary-container text-on-amber px-1 rounded font-bold">water vapour</span> slowly cools down to form droplets.”
+                </p>
+</div>
+</div>
+</div>
+<!-- 6 Floating Glossy 3D Amber Tiles (Arranged dynamically with individual rotations) -->
+<!-- Tile 1: Explainer (-8deg) Top Left -->
+<div class="absolute -top-4 -left-4 sm:-left-8 amber-tile floating-tile px-4 py-2 rounded-2xl z-20" style="--rot: -8deg;">
+<span class="font-tagline text-[15px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#FFF0CC] to-[#F5A524]">Explainer</span>
+</div>
+<!-- Tile 2: AI (+6deg) Top Right -->
+<div class="absolute top-10 -right-4 sm:-right-8 amber-tile floating-tile px-4 py-2 rounded-2xl z-20" style="--rot: 6deg; animation-delay: -1.2s;">
+<span class="font-tagline text-[15px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#FFF0CC] to-[#F5A524]">AI ✨</span>
+</div>
+<!-- Tile 3: हिंदी (-5deg) Mid Left -->
+<div class="absolute top-1/3 -left-6 sm:-left-12 amber-tile floating-tile px-4 py-2 rounded-2xl z-20" style="--rot: -5deg; animation-delay: -2.5s;">
+<span class="font-devanagari text-[16px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#FFF0CC] to-[#F5A524]">हिंदी</span>
+</div>
+<!-- Tile 4: Reels (+9deg) Mid Right -->
+<div class="absolute top-1/2 -right-6 sm:-right-10 amber-tile floating-tile px-4 py-2 rounded-2xl z-20" style="--rot: 9deg; animation-delay: -3.8s;">
+<span class="font-tagline text-[15px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#FFF0CC] to-[#F5A524]">Reels ⚡</span>
+</div>
+<!-- Tile 5: Voice (-12deg) Bottom Left -->
+<div class="absolute bottom-12 -left-4 sm:-left-8 amber-tile floating-tile px-4 py-2 rounded-2xl z-20" style="--rot: -12deg; animation-delay: -4.3s;">
+<span class="font-tagline text-[15px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#FFF0CC] to-[#F5A524]">Voice 🎙️</span>
+</div>
+<!-- Tile 6: 60s (+7deg) Bottom Right -->
+<div class="absolute -bottom-3 -right-2 sm:-right-6 amber-tile floating-tile px-4 py-2 rounded-2xl z-20" style="--rot: 7deg; animation-delay: -0.7s;">
+<span class="font-tagline text-[15px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#FFF0CC] to-[#F5A524]">60s ⏱️</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 2. "HOW IT WORKS" SECTION -->
+<section class="py-24 border-t border-line/60 relative" id="how-it-works">
+<div class="max-w-7xl mx-auto px-6">
+<div class="max-w-2xl mb-16">
+<span class="font-label text-label text-primary-container tracking-widest uppercase block mb-2">PROCESS</span>
+<h2 class="font-h1-mobile md:font-h1 text-h1-mobile md:text-h1 text-text font-extrabold tracking-tight">
+            From raw notes to vertical reel in four steps
+          </h2>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+<!-- Card 01 -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all duration-300 flex flex-col justify-between group">
+<div>
+<div class="flex items-center justify-between mb-8">
+<span class="font-label text-h3 text-primary-container font-bold">01</span>
+<span class="w-10 h-10 rounded-full bg-surface-2 border border-line flex items-center justify-center text-primary-container group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-lg">lightbulb</span>
+</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Idea</h3>
+<p class="font-body text-body text-text-muted">
+                Type a topic or paste notes. Instant AI outline generation tailored for vertical viewing retention.
+              </p>
+</div>
+<div class="mt-8 pt-4 border-t border-line/40">
+<span class="font-label text-[11px] text-gold-cream/70 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-primary-container">timer</span> Instant preview
+              </span>
+</div>
+</div>
+<!-- Card 02 -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all duration-300 flex flex-col justify-between group">
+<div>
+<div class="flex items-center justify-between mb-8">
+<span class="font-label text-h3 text-primary-container font-bold">02</span>
+<span class="w-10 h-10 rounded-full bg-surface-2 border border-line flex items-center justify-center text-primary-container group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-lg">view_timeline</span>
+</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Storyboard</h3>
+<p class="font-body text-body text-text-muted">
+                Review scene-by-scene narration and visuals. Ask for changes in plain conversational words.
+              </p>
+</div>
+<div class="mt-8 pt-4 border-t border-line/40">
+<span class="font-label text-[11px] text-gold-cream/70 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-primary-container">chat</span> Chat to edit
+              </span>
+</div>
+</div>
+<!-- Card 03 -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all duration-300 flex flex-col justify-between group">
+<div>
+<div class="flex items-center justify-between mb-8">
+<span class="font-label text-h3 text-primary-container font-bold">03</span>
+<span class="w-10 h-10 rounded-full bg-surface-2 border border-line flex items-center justify-center text-primary-container group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-lg">movie</span>
+</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Video</h3>
+<p class="font-body text-body text-text-muted">
+                AI voice + kinetic motion graphics + synced captions. Real-time timeline preview and caption editor.
+              </p>
+</div>
+<div class="mt-8 pt-4 border-t border-line/40">
+<span class="font-label text-[11px] text-gold-cream/70 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-primary-container">subtitles</span> Word-sync captions
+              </span>
+</div>
+</div>
+<!-- Card 04 -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all duration-300 flex flex-col justify-between group">
+<div>
+<div class="flex items-center justify-between mb-8">
+<span class="font-label text-h3 text-primary-container font-bold">04</span>
+<span class="w-10 h-10 rounded-full bg-surface-2 border border-line flex items-center justify-center text-primary-container group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-lg">send</span>
+</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Publish</h3>
+<p class="font-body text-body text-text-muted">
+                Download MP4 in crisp 1080x1920 or post/schedule directly to Instagram. Nothing posts without your approval.
+              </p>
+</div>
+<div class="mt-8 pt-4 border-t border-line/40">
+<span class="font-label text-[11px] text-gold-cream/70 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-primary-container">verified</span> 1080p Crisp HD
+              </span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 3. "MADE WITH BYTEREEL" EXAMPLES SECTION -->
+<section class="py-24 bg-surface/50 border-t border-line/60 relative" id="examples">
+<div class="max-w-7xl mx-auto px-6">
+<div class="flex flex-col md:flex-row md:items-end justify-between mb-16 gap-6">
+<div>
+<span class="font-label text-label text-primary-container tracking-widest uppercase block mb-2">SHOWCASE</span>
+<h2 class="font-h1-mobile md:font-h1 text-h1-mobile md:text-h1 text-text font-extrabold tracking-tight">
+              Real reels created by educators &amp; coaches
+            </h2>
+</div>
+<span class="font-label text-label text-text-muted">High retention · 1080x1920 vertical</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+<!-- Example Reel 1: Science (English) -->
+<div class="group rounded-2xl bg-surface border border-line overflow-hidden hover:border-primary-container/50 transition-all duration-300 flex flex-col">
+<!-- 9:16 Media Canvas -->
+<div class="aspect-[9/16] bg-[#0E0A07] relative flex flex-col justify-between p-5 overflow-hidden">
+<img class="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500" data-alt="A dark cinematic educational reel thumbnail illustrating the scientific water cycle with luminous amber heat rays striking dark blue water, steam ascending into stylized minimalist clouds, modern infographic vector style in 9:16 vertical composition with soft amber studio rim lighting and deep charcoal background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD--90md_tbSqhO6wTjwEf1tmvdQbwD5nJlw-vXZcvLf80M3sFwigV0Ngayr-z8bNdioz6N47Kq5SrHVQZnwcoPBfbIO_zP80me0e8ROz_0AZE0SMkFPXH9kTjNEjRiZiL3P0MxlPVIgldi7lxK6Pz07S5dFKp57y7oXp3L3vKnD5isowyc4GQFHLZyJLTcTAfbDyj6MnlgFsDLWMbz9fj5oXpJeBAB5gTm3FPbMzXVziv1FfK5ImwY2Ptgnnd8PcWHoyDab7uSBlVc"/>
+<div class="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80"></div>
+<div class="relative z-10 flex justify-between items-center">
+<span class="px-2.5 py-1 rounded-full bg-surface-2/80 backdrop-blur-md border border-line font-label text-[10px] text-gold-cream">English</span>
+<span class="px-2 py-0.5 rounded bg-black/60 font-label text-[10px] text-text-muted">64s</span>
+</div>
+<!-- Play overlay trigger -->
+<div class="relative z-10 mx-auto w-12 h-12 rounded-full bg-primary-container/90 text-on-amber flex items-center justify-center shadow-[0_0_20px_rgba(245,165,36,0.6)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<div class="relative z-10">
+<div class="font-label text-[10px] text-primary-container uppercase tracking-wider mb-1">Earth Science</div>
+<h4 class="font-h3-mobile text-h3-mobile text-text font-bold">The Water Cycle</h4>
+</div>
+</div>
+<div class="p-4 bg-surface-2 border-t border-line flex items-center justify-between text-xs text-text-muted font-body">
+<span>By Prof. S. Sen</span>
+<span class="text-primary-container font-label">34.2k views</span>
+</div>
+</div>
+<!-- Example Reel 2: Finance (Hindi) -->
+<div class="group rounded-2xl bg-surface border border-line overflow-hidden hover:border-primary-container/50 transition-all duration-300 flex flex-col">
+<div class="aspect-[9/16] bg-[#0E0A07] relative flex flex-col justify-between p-5 overflow-hidden">
+<img class="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500" data-alt="A financial educational infographic reel visual comparing savings account interest to fixed deposit returns with glowing amber charts, Indian rupee currency symbols, and minimalist modern bar graphs on a sleek dark canvas with warm amber lighting accents in vertical 9:16 layout." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDvlRmZIVPFRLVDL1HBM-qhHC7ho9N60RfrFK85XJY466M0pT-fEmyDQeyO9UQWJrkNIslHRPlh7C0TFzCA_gyktzVK2Wx5KmoWijNNZ0jU5s-vJEQwtgKfSzxjldl7ODeZkPP1l7-gOW_FCB-QR_elz4yYnFSWQMpzbDw4IUiuAABqn_LKy7xXEJ1ohI2-83Gw_h8erDGsp6w7UlTstajW0J9RsUjX_qkz4n7HrHhWIVKoslVFCfTAXIoWLzZnPlJuBwhNcYFfj_5B"/>
+<div class="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80"></div>
+<div class="relative z-10 flex justify-between items-center">
+<span class="px-2.5 py-1 rounded-full bg-surface-2/80 backdrop-blur-md border border-line font-devanagari text-[11px] text-gold-cream">हिंदी Hindi</span>
+<span class="px-2 py-0.5 rounded bg-black/60 font-label text-[10px] text-text-muted">72s</span>
+</div>
+<div class="relative z-10 mx-auto w-12 h-12 rounded-full bg-primary-container/90 text-on-amber flex items-center justify-center shadow-[0_0_20px_rgba(245,165,36,0.6)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<div class="relative z-10">
+<div class="font-label text-[10px] text-primary-container uppercase tracking-wider mb-1">Personal Finance</div>
+<h4 class="font-devanagari text-[18px] text-text font-bold leading-tight">बचत खाता बनाम FD</h4>
+</div>
+</div>
+<div class="p-4 bg-surface-2 border-t border-line flex items-center justify-between text-xs text-text-muted font-body">
+<span>By FinCoach Rahul</span>
+<span class="text-primary-container font-label">88.5k views</span>
+</div>
+</div>
+<!-- Example Reel 3: Economics (Hinglish) -->
+<div class="group rounded-2xl bg-surface border border-line overflow-hidden hover:border-primary-container/50 transition-all duration-300 flex flex-col">
+<div class="aspect-[9/16] bg-[#0E0A07] relative flex flex-col justify-between p-5 overflow-hidden">
+<img class="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500" data-alt="A modern stylized business concept diagram illustrating opportunity cost with glowing amber decision path tree, interconnected nodes, and futuristic analytics widgets on deep black surface in 9:16 vertical video format with subtle volumetric gold light." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAcs_la7iigQRI3Vo9_KA97cDmVE-my5gdoPea6kCwv1wU4bE7rqmTGQUnJswsXP6lbKBqbrvsgECxUqE4EEwrzhOqe7r4t7dNdkPM8yD3ww8WSTdLpDkSsTLbdPFm4LW6XR11bspQqty-LX7nZEzh4vNqZJ9mACaWSTm3XSQBVHoxGoPL-jcVGF9UuBRDBTjnS5aC5vfIrVS6uyZtK1irfaJv7OE5gSmin0gr8ferEZdscELF64uVU5Vs3joT9Qnf7QaMglWHmf2s1"/>
+<div class="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80"></div>
+<div class="relative z-10 flex justify-between items-center">
+<span class="px-2.5 py-1 rounded-full bg-surface-2/80 backdrop-blur-md border border-line font-label text-[10px] text-gold-cream">Hinglish</span>
+<span class="px-2 py-0.5 rounded bg-black/60 font-label text-[10px] text-text-muted">68s</span>
+</div>
+<div class="relative z-10 mx-auto w-12 h-12 rounded-full bg-primary-container/90 text-on-amber flex items-center justify-center shadow-[0_0_20px_rgba(245,165,36,0.6)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<div class="relative z-10">
+<div class="font-label text-[10px] text-primary-container uppercase tracking-wider mb-1">Economics</div>
+<h4 class="font-h3-mobile text-h3-mobile text-text font-bold">Opportunity cost kya hai?</h4>
+</div>
+</div>
+<div class="p-4 bg-surface-2 border-t border-line flex items-center justify-between text-xs text-text-muted font-body">
+<span>By Tanvi M.</span>
+<span class="text-primary-container font-label">52.1k views</span>
+</div>
+</div>
+<!-- Example Reel 4: Tech Architecture (English) -->
+<div class="group rounded-2xl bg-surface border border-line overflow-hidden hover:border-primary-container/50 transition-all duration-300 flex flex-col">
+<div class="aspect-[9/16] bg-[#0E0A07] relative flex flex-col justify-between p-5 overflow-hidden">
+<img class="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500" data-alt="A clean fintech architecture schematic explaining Unified Payments Interface UPI with data packets flowing between virtual bank nodes and mobile wallet icons, highlighted by warm amber neon lines over dark charcoal background in 9:16 vertical ratio." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCz5dr4lP_xvETTmN1KrtD_1Ko-fytqE8hFspPGwOxo5zID2b8agVyn4-L7bBGMPD8kYEr7bCO81mfUlkGf9QXCUCPmho_qvMmB9RrPINwEOYw9k7HgCzcqiziPpEQ0kowgEcWF7ejmoDtk1IsSccynzerXi9Gzu-8L95m9FFKcO0NZMwLYbwHaac6h8v5x0t2LpekajNH5pokOpDdgRfhv3LCnxox5GLsfItfYcG9hP86SHi2Oz2_71QFmwlZEWKBsoKEBJU_shDpO"/>
+<div class="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80"></div>
+<div class="relative z-10 flex justify-between items-center">
+<span class="px-2.5 py-1 rounded-full bg-surface-2/80 backdrop-blur-md border border-line font-label text-[10px] text-gold-cream">English</span>
+<span class="px-2 py-0.5 rounded bg-black/60 font-label text-[10px] text-text-muted">81s</span>
+</div>
+<div class="relative z-10 mx-auto w-12 h-12 rounded-full bg-primary-container/90 text-on-amber flex items-center justify-center shadow-[0_0_20px_rgba(245,165,36,0.6)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<div class="relative z-10">
+<div class="font-label text-[10px] text-primary-container uppercase tracking-wider mb-1">Tech Explainer</div>
+<h4 class="font-h3-mobile text-h3-mobile text-text font-bold">How UPI works</h4>
+</div>
+</div>
+<div class="p-4 bg-surface-2 border-t border-line flex items-center justify-between text-xs text-text-muted font-body">
+<span>By Tech Byte</span>
+<span class="text-primary-container font-label">120k views</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 4. LANGUAGES SECTION -->
+<section class="py-24 border-t border-line/60 relative" id="languages">
+<div class="max-w-7xl mx-auto px-6">
+<div class="max-w-2xl mb-16">
+<span class="font-label text-label text-primary-container tracking-widest uppercase block mb-2">VOICE &amp; LOCALIZATION</span>
+<h2 class="font-h1-mobile md:font-h1 text-h1-mobile md:text-h1 text-text font-extrabold tracking-tight">
+            Speak to your learners in their natural tongue
+          </h2>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+<!-- English Voice Card -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all flex flex-col justify-between">
+<div>
+<div class="flex items-center justify-between mb-4">
+<span class="px-3 py-1 rounded-full bg-surface-2 border border-line font-label text-xs text-gold-cream">English</span>
+<span class="font-label text-[11px] text-text-muted">24kHz Studio Clarity</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-4">Indian English Accent</h3>
+<div class="p-4 rounded-xl bg-surface-2 border border-line mb-6">
+<span class="font-label text-[10px] text-text-muted uppercase block mb-1">Sample Narration Script</span>
+<p class="font-body text-body text-text italic">
+                  “Compound interest explained in 60 seconds with practical Indian examples.”
+                </p>
+</div>
+</div>
+<!-- Voice Sample Player Chip -->
+<div class="pt-4 border-t border-line/60">
+<div class="flex items-center justify-between bg-surface-dim p-2 rounded-xl border border-line">
+<div class="flex items-center gap-2">
+<button aria-label="Play Arjun voice sample" class="w-8 h-8 rounded-full bg-primary-container text-on-amber flex items-center justify-center hover:scale-105 transition-transform" type="button">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<div class="flex flex-col">
+<span class="font-body text-xs font-bold text-text">Arjun (Male)</span>
+<span class="font-label text-[10px] text-text-muted">Clear &amp; engaging</span>
+</div>
+</div>
+<button class="font-label text-[10px] px-2.5 py-1 rounded-md bg-surface-2 text-text-muted hover:text-text border border-line" type="button">
+                  Switch to Pooja
+                </button>
+</div>
+</div>
+</div>
+<!-- Hindi Voice Card -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all flex flex-col justify-between">
+<div>
+<div class="flex items-center justify-between mb-4">
+<span class="px-3 py-1 rounded-full bg-surface-2 border border-line font-devanagari text-xs text-gold-cream">हिंदी (Hindi)</span>
+<span class="font-label text-[11px] text-primary-container font-semibold">Native Devanagari</span>
+</div>
+<h3 class="font-devanagari text-h3 text-text mb-4">शुद्ध एवं सरल हिंदी वाचन</h3>
+<div class="p-4 rounded-xl bg-surface-2 border border-line mb-6">
+<span class="font-label text-[10px] text-text-muted uppercase block mb-1">नमूना स्क्रिप्ट (Sample)</span>
+<p class="font-devanagari text-body text-text italic leading-relaxed">
+                  “पौधों में प्रकाश संश्लेषण (Photosynthesis) कैसे होता है? आसान भाषा में समझें।”
+                </p>
+</div>
+</div>
+<!-- Voice Sample Player Chip -->
+<div class="pt-4 border-t border-line/60">
+<div class="flex items-center justify-between bg-surface-dim p-2 rounded-xl border border-line">
+<div class="flex items-center gap-2">
+<button aria-label="Play Dev Hindi voice sample" class="w-8 h-8 rounded-full bg-primary-container text-on-amber flex items-center justify-center hover:scale-105 transition-transform" type="button">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<div class="flex flex-col">
+<span class="font-devanagari text-xs font-bold text-text">देव (Dev)</span>
+<span class="font-label text-[10px] text-text-muted">गंभीर व स्पष्ट</span>
+</div>
+</div>
+<button class="font-devanagari text-[11px] px-2.5 py-1 rounded-md bg-surface-2 text-text-muted hover:text-text border border-line" type="button">
+                  अनन्या (Ananya)
+                </button>
+</div>
+</div>
+</div>
+<!-- Hinglish Voice Card -->
+<div class="bg-surface rounded-2xl p-6 border border-line hover:border-primary-container/40 transition-all flex flex-col justify-between">
+<div>
+<div class="flex items-center justify-between mb-4">
+<span class="px-3 py-1 rounded-full bg-surface-2 border border-line font-label text-xs text-gold-cream">Hinglish</span>
+<span class="font-label text-[11px] text-text-muted">Bilingual Rhythm</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-4">Natural Conversational Flow</h3>
+<div class="p-4 rounded-xl bg-surface-2 border border-line mb-6">
+<span class="font-label text-[10px] text-text-muted uppercase block mb-1">Sample Narration Script</span>
+<p class="font-body text-body text-text italic">
+                  “Yeh strategy follow karke aap apni stock research 10x fast kar sakte ho.”
+                </p>
+</div>
+</div>
+<!-- Voice Sample Player Chip -->
+<div class="pt-4 border-t border-line/60">
+<div class="flex items-center justify-between bg-surface-dim p-2 rounded-xl border border-line">
+<div class="flex items-center gap-2">
+<button aria-label="Play Kabir Hinglish voice sample" class="w-8 h-8 rounded-full bg-primary-container text-on-amber flex items-center justify-center hover:scale-105 transition-transform" type="button">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<div class="flex flex-col">
+<span class="font-body text-xs font-bold text-text">Kabir (Hinglish)</span>
+<span class="font-label text-[10px] text-text-muted">Youthful creator tone</span>
+</div>
+</div>
+<span class="font-label text-[10px] text-primary-container bg-primary-container/10 px-2 py-1 rounded border border-primary-container/20">
+                  Most Popular
+                </span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 5. "WHY CREATORS USE IT" SECTION -->
+<section class="py-24 bg-surface/40 border-t border-line/60 relative" id="why-creators">
+<div class="max-w-7xl mx-auto px-6">
+<div class="max-w-2xl mb-16">
+<span class="font-label text-label text-primary-container tracking-widest uppercase block mb-2">CREATOR ADVANTAGE</span>
+<h2 class="font-h1-mobile md:font-h1 text-h1-mobile md:text-h1 text-text font-extrabold tracking-tight">
+            Designed for depth, speed, and total creator control
+          </h2>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<!-- Feature 1 -->
+<div class="bg-surface rounded-2xl p-8 border border-line hover:border-primary-container/40 transition-all group">
+<div class="w-12 h-12 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-primary-container mb-6 group-hover:scale-105 transition-transform shadow-[0_0_15px_rgba(245,165,36,0.15)]">
+<span class="material-symbols-outlined text-2xl">auto_graph</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Explanations, not just decoration</h3>
+<p class="font-body text-body text-text-muted leading-relaxed">
+              Choose from 8 pedagogical animation styles: dynamic conceptual diagrams, flowcharts, sequential timelines, side-by-side comparisons, and real-time stat charts designed to retain viewer attention.
+            </p>
+</div>
+<!-- Feature 2 -->
+<div class="bg-surface rounded-2xl p-8 border border-line hover:border-primary-container/40 transition-all group">
+<div class="w-12 h-12 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-primary-container mb-6 group-hover:scale-105 transition-transform shadow-[0_0_15px_rgba(245,165,36,0.15)]">
+<span class="material-symbols-outlined text-2xl">forum</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Change it by chatting</h3>
+<p class="font-body text-body text-text-muted leading-relaxed">
+              Don't like a slide? Just say <span class="text-gold-cream font-medium">“make scene 3 simpler”</span> or <span class="text-gold-cream font-medium">“add a cricket analogy”</span> and ByteReel rewrites and re-animates instantly without timeline mess.
+            </p>
+</div>
+<!-- Feature 3 -->
+<div class="bg-surface rounded-2xl p-8 border border-line hover:border-primary-container/40 transition-all group">
+<div class="w-12 h-12 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-primary-container mb-6 group-hover:scale-105 transition-transform shadow-[0_0_15px_rgba(245,165,36,0.15)]">
+<span class="material-symbols-outlined text-2xl">closed_caption</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">Captions you can correct</h3>
+<p class="font-body text-body text-text-muted leading-relaxed">
+              Word-by-word highlighted captions with 1-click spelling and Hinglish phrase editing. Never get embarrassed by an AI mishearing Indian brand names, cities, or technical jargon.
+            </p>
+</div>
+<!-- Feature 4 -->
+<div class="bg-surface rounded-2xl p-8 border border-line hover:border-primary-container/40 transition-all group">
+<div class="w-12 h-12 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-primary-container mb-6 group-hover:scale-105 transition-transform shadow-[0_0_15px_rgba(245,165,36,0.15)]">
+<span class="material-symbols-outlined text-2xl">tune</span>
+</div>
+<h3 class="font-h3 text-h3 text-text mb-3">You stay in control</h3>
+<p class="font-body text-body text-text-muted leading-relaxed">
+              Zero automated surprises. Preview every frame, approve the voice pacing, check caption transitions, and post or download only when you are 100% satisfied with the output.
+            </p>
+</div>
+</div>
+</div>
+</section>
+<!-- 6. FAQ SECTION -->
+<section class="py-24 border-t border-line/60 relative" id="faq">
+<div class="max-w-4xl mx-auto px-6">
+<div class="text-center mb-16">
+<span class="font-label text-label text-primary-container tracking-widest uppercase block mb-2">COMMON QUESTIONS</span>
+<h2 class="font-h1-mobile md:font-h1 text-h1-mobile md:text-h1 text-text font-extrabold tracking-tight">
+            Everything you need to know
+          </h2>
+</div>
+<div class="space-y-4">
+<!-- Accordion Item 1 -->
+<details class="group bg-surface rounded-2xl border border-line p-6 open:border-primary-container/40 transition-colors">
+<summary class="flex justify-between items-center cursor-pointer list-none font-h3-mobile text-h3-mobile font-bold text-text">
+<span>Do I need video editing or animation skills?</span>
+<span class="summary-icon w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-primary-container transition-transform duration-300">
+<span class="material-symbols-outlined text-lg">expand_more</span>
+</span>
+</summary>
+<p class="mt-4 font-body text-body text-text-muted leading-relaxed pt-2 border-t border-line/40">
+              None at all. ByteReel handles timeline editing, kinetic typography, motion graphics, and audio mixing automatically. You simply provide the core thought or lesson outline.
+            </p>
+</details>
+<!-- Accordion Item 2 -->
+<details class="group bg-surface rounded-2xl border border-line p-6 open:border-primary-container/40 transition-colors">
+<summary class="flex justify-between items-center cursor-pointer list-none font-h3-mobile text-h3-mobile font-bold text-text">
+<span>Which languages are supported?</span>
+<span class="summary-icon w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-primary-container transition-transform duration-300">
+<span class="material-symbols-outlined text-lg">expand_more</span>
+</span>
+</summary>
+<p class="mt-4 font-body text-body text-text-muted leading-relaxed pt-2 border-t border-line/40">
+              Currently English, Hindi (हिंदी), and natural Hinglish with regional accents tuned explicitly for Indian audiences. Regional languages like Tamil, Telugu, and Marathi are currently in private alpha.
+            </p>
+</details>
+<!-- Accordion Item 3 -->
+<details class="group bg-surface rounded-2xl border border-line p-6 open:border-primary-container/40 transition-colors">
+<summary class="flex justify-between items-center cursor-pointer list-none font-h3-mobile text-h3-mobile font-bold text-text">
+<span>How long are the generated videos?</span>
+<span class="summary-icon w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-primary-container transition-transform duration-300">
+<span class="material-symbols-outlined text-lg">expand_more</span>
+</span>
+</summary>
+<p class="mt-4 font-body text-body text-text-muted leading-relaxed pt-2 border-t border-line/40">
+              ByteReel specializes in high-retention 60 to 90-second vertical reels optimized for Instagram Reels, YouTube Shorts, and LinkedIn video feeds.
+            </p>
+</details>
+<!-- Accordion Item 4 -->
+<details class="group bg-surface rounded-2xl border border-line p-6 open:border-primary-container/40 transition-colors">
+<summary class="flex justify-between items-center cursor-pointer list-none font-h3-mobile text-h3-mobile font-bold text-text">
+<span>Can I post directly to Instagram?</span>
+<span class="summary-icon w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-primary-container transition-transform duration-300">
+<span class="material-symbols-outlined text-lg">expand_more</span>
+</span>
+</summary>
+<p class="mt-4 font-body text-body text-text-muted leading-relaxed pt-2 border-t border-line/40">
+              Yes. Connect your Instagram Professional account to post or schedule directly with pre-generated caption copy and smart discoverability hashtags.
+            </p>
+</details>
+<!-- Accordion Item 5 -->
+<details class="group bg-surface rounded-2xl border border-line p-6 open:border-primary-container/40 transition-colors">
+<summary class="flex justify-between items-center cursor-pointer list-none font-h3-mobile text-h3-mobile font-bold text-text">
+<span>Is ByteReel free during the beta?</span>
+<span class="summary-icon w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-primary-container transition-transform duration-300">
+<span class="material-symbols-outlined text-lg">expand_more</span>
+</span>
+</summary>
+<p class="mt-4 font-body text-body text-text-muted leading-relaxed pt-2 border-t border-line/40">
+              Yes! Beta creators receive free weekly reel generation credits with full watermark-free HD exports. Early creators lock in foundational grandfathered pricing.
+            </p>
+</details>
+</div>
+</div>
+</section>
+<!-- 7. FINAL CTA BAND -->
+<section class="py-24 relative overflow-hidden border-t border-line/60">
+<!-- Glow ambient background -->
+<div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(circle at center, rgba(245, 165, 36, 0.16) 0%, transparent 70%);"></div>
+<div class="max-w-4xl mx-auto px-6 text-center relative z-10 space-y-6">
+<span class="font-label text-label text-primary-container tracking-widest uppercase block">READY TO CREATE?</span>
+<h2 class="font-display-mobile md:font-display text-display-mobile md:text-display text-text font-extrabold tracking-tight">
+          Your next explainer is <span class="bg-clip-text text-transparent bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">one idea away</span>
+</h2>
+<p class="font-body-lg text-body-lg text-text-muted max-w-xl mx-auto">
+          Join 1,200+ Indian educators and coaches turning complex knowledge into viral reels.
+        </p>
+<div class="pt-4 flex justify-center">
+<a class="btn-ember-primary font-body-lg font-bold text-[16px] pl-8 pr-3 py-3 rounded-full inline-flex items-center gap-4" href="#create">
+<span>Create your first reel</span>
+<span class="w-10 h-10 rounded-full bg-black/15 flex items-center justify-center text-lg font-bold">↗</span>
+</a>
+</div>
+</div>
+</section>
+</main>
+<!-- FOOTER (Anchored from Shared Components JSON) -->
+<footer class="bg-surface-2 border-t border-line">
+<div class="max-w-7xl mx-auto px-6 py-12 flex flex-col md:flex-row justify-between items-center gap-6">
+<!-- Brand anchor & Endorsement -->
+<div class="flex flex-col items-center md:items-start">
+<div class="flex items-center gap-3">
+<div class="w-7 h-7 rounded-full bg-[#1A1A2E] flex items-center justify-center border border-primary-container/30">
+<span class="material-symbols-outlined text-primary-container text-sm" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<span class="font-display text-h3 text-text font-extrabold tracking-tight">Byte<span class="bg-clip-text text-transparent bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">Reel</span></span>
+</div>
+<p class="font-small text-small text-text-muted mt-2 text-center md:text-left">
+          © 2025 ByteReel Inc. Endorsed by Tech Byte Chronicles. All rights reserved.
+        </p>
+</div>
+<!-- Links cluster -->
+<nav class="flex flex-wrap justify-center items-center gap-6 text-sm">
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#how-it-works">How It Works</a>
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#examples">Examples</a>
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#languages">AI Ethics &amp; Voices</a>
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#why-creators">Creator Community</a>
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#privacy">Privacy Policy</a>
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#terms">Terms of Service</a>
+<a class="font-small text-small text-text-muted hover:text-gold-cream transition-colors" href="#contact">Contact Support</a>
+</nav>
+</div>
+</footer>
+</body></html>

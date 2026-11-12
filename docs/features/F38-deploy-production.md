@@ -21,6 +21,7 @@ The live ByteReel website.
 - Paid-tier switches if needed
 - Submit Meta App Review
 - Invite beta users
+- Replace the dummy contact email (`CONTACT_EMAIL` in `apps/web/lib/site.ts`, now `contact@example.com`) with the real one
 
 ## Not in this feature
 - —

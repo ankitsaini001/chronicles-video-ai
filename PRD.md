@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Product** | **ByteReel** *(by Tech Byte Chronicles)* |
+| **Product** | **ByteReel** *(by TechByte Chronicles)* |
 | **Version** | V1 (MVP), **v1.0 FINAL** |
 | **Owner** | Solo founder-developer |
 | **Status** | ✅ **Final.** Approved for build; aligned with the Namaste AI Season 2 (Akshay Saini) PRD and stack |
@@ -481,7 +481,7 @@ Notes:
 | Languages | English only | **English (default) + Hindi + Hinglish** |
 | Voice | One default narrator; voice selection internal only | **Male / Female choice** per project (curated voices internally) |
 | Users | Internal version; each team member is an independent creator with a private dashboard, projects, videos and own Instagram | Same model (private per user), for allow-listed beta creators; public SaaS later |
-| Name | Shortlist: VideoExplain AI, VideoCraft AI (top two), VideoLesson AI, VideoSpark AI, ExplainVideo AI, VideoGenerator AI; product/domain check before finalizing **ByteReel** (by Tech Byte Chronicles), connected to the founder's channel |
+| Name | Shortlist: VideoExplain AI, VideoCraft AI (top two), VideoLesson AI, VideoSpark AI, ExplainVideo AI, VideoGenerator AI; product/domain check before finalizing **ByteReel** (by TechByte Chronicles), connected to the founder's channel |
 
 Everything else follows the course plan, so our code stays in sync.
 
@@ -503,7 +503,7 @@ Everything else follows the course plan, so our code stays in sync.
 | 10 | Rev 3: no image/video/PDF uploads in V1 | 2026-11-12 |
 | 11 | Free tools for development; paid plans only for commercial launch | 2026-11-12 |
 | 12 | Each user has a private dashboard, projects, videos and own Instagram connection (matches course) | 2026-11-12 |
-| 13 | Product name: **ByteReel** (by Tech Byte Chronicles) *(replaces working name ReelPilot)*; domain check pending | 2026-11-12 |
+| 13 | Product name: **ByteReel** (by TechByte Chronicles) *(replaces working name ReelPilot)*; domain check pending | 2026-11-12 |
 | 14 | **PRD v1.0 finalized**; approved for build | 2026-11-12 |
 | 15 | Voice: creator chooses **Male or Female** (default Female); one curated voice of each per language | 2026-11-12 |
 | 16 | Build order (matches course): technical pipeline design → idea-to-MP4 prototype → evaluate 3 explainers (process, comparison, abstract) → system architecture → app. See `docs/PIPELINE_DESIGN.md` | 2026-11-12 |

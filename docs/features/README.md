@@ -5,8 +5,8 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 ## Rules (agreed with the founder, 2026-11-12)
 1. **One feature at a time.** Only one feature is 🔄 In progress. We never start the next feature early.
 2. **Every feature follows the same flow:**
-   1. Agree on the small steps (in the feature file)
-   2. Build step by step, explaining each step in plain words
+   1. The small steps are listed in the feature file
+   2. Build all steps in one go (each step its own commit), explaining them in plain words in the report. Stop mid-feature only if the founder must act (accounts, keys), a decision is needed, or something unexpected happens (founder's choice, 2026-11-12)
    3. Test: automated tests + the checks in "How we test it"
    4. Code review (code-reviewer agent)
    5. **Founder tests it and says OK**
@@ -35,8 +35,8 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | # | Feature | Depends on | Status |
 |---|---|---|---|
 | F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | ✅ Done |
-| F02 | [Web app skeleton (Next.js + Ember Gold styles)](F02-web-app-skeleton.md) | F01 | ⬜ Not started |
-| F03 | [Home page (landing)](F03-home-page.md) | F02 | ⬜ Not started |
+| F02 | [Web app skeleton (Next.js + Ember Gold styles)](F02-web-app-skeleton.md) | F01 | ✅ Done |
+| F03 | [Home page (landing)](F03-home-page.md) | F02 | ✅ Done |
 
 ### A2 · Accounts and database
 
@@ -98,4 +98,4 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F02 (after the founder says go). F04 (database doc) can be written any time before F05.
+**Next up:** F04 (database explained in plain words). Phase A1 (F01–F03) is done and merged to `main`.
