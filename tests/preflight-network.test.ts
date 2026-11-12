@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPreflight } from "../src/cli/preflight";
+import { runPreflight } from "../tools/cli/preflight";
 import { escapeHtml, highlightNarration } from "../packages/pipeline/src/planning";
 import { ElevenLabsReadClient } from "../packages/pipeline/src/providers";
 import { withTempDir } from "./helpers";

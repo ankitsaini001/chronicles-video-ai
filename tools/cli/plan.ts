@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { loadLocalEnvFile, readConfig } from "../../packages/pipeline/src/config/config";
-import { VOICE_PRESETS, type VoicePreset } from "../../packages/pipeline/src/contracts";
-import { formatIssue, parseTopicFile, TopicFileError, validatePlanSemantics } from "../../packages/pipeline/src/planning";
-import { approveCommandFor, formatUsage, runPlanStage } from "../../packages/pipeline/src/pipeline";
-import { GeminiPlanner, type PlannerProvider } from "../../packages/pipeline/src/providers";
-import { ArtifactKeys, LocalArtifactStore, RunLockedError } from "../../packages/pipeline/src/storage";
+import { loadLocalEnvFile, readConfig } from "@bytereel/pipeline/config/config";
+import { VOICE_PRESETS, type VoicePreset } from "@bytereel/pipeline/contracts";
+import { formatIssue, parseTopicFile, TopicFileError, validatePlanSemantics } from "@bytereel/pipeline/planning";
+import { approveCommandFor, formatUsage, runPlanStage } from "@bytereel/pipeline/pipeline";
+import { GeminiPlanner, type PlannerProvider } from "@bytereel/pipeline/providers";
+import { ArtifactKeys, LocalArtifactStore, RunLockedError } from "@bytereel/pipeline/storage";
 
 /**
  * `plan --topic-file <file.md> --voice <preset>`: create a new run, ask the live planner (Gemini)

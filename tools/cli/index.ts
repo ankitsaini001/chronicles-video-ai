@@ -1,6 +1,6 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { redactSecrets } from "../../packages/pipeline/src/config/config";
+import { redactSecrets } from "@bytereel/pipeline/config/config";
 import { runApproveCommand } from "./approve";
 import { runGenerateCommand } from "./generate";
 import { runFixtureCommand } from "./fixture";

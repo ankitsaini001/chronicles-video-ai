@@ -1,6 +1,6 @@
 import path from "node:path";
-import { approveRun, parseRunId } from "../../packages/pipeline/src/pipeline";
-import { ArtifactKeys, LocalArtifactStore, RunLockedError } from "../../packages/pipeline/src/storage";
+import { approveRun, parseRunId } from "@bytereel/pipeline/pipeline";
+import { ArtifactKeys, LocalArtifactStore, RunLockedError } from "@bytereel/pipeline/storage";
 
 /** `approve --run <run-id> --plan-hash <hash>`: approve exactly the reviewed plan hash. */
 export async function runApproveCommand(opts: { run: string; planHash: string; runsDir: string; projectRoot: string }): Promise<{ ok: boolean; lines: string[] }> {

@@ -1,8 +1,8 @@
 import path from "node:path";
-import { loadLocalEnvFile, readConfig, voiceIdFor, VOICE_ID_ENV_BY_PRESET } from "../../packages/pipeline/src/config/config";
-import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache, RunLockedError } from "../../packages/pipeline/src/storage";
-import { generateRun, parseRunId, speechConfigFor, type GenerateMode, type GenerateResult } from "../../packages/pipeline/src/pipeline";
-import { ElevenLabsReadClient, ElevenLabsSpeech } from "../../packages/pipeline/src/providers";
+import { loadLocalEnvFile, readConfig, voiceIdFor, VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/config";
+import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache, RunLockedError } from "@bytereel/pipeline/storage";
+import { generateRun, parseRunId, speechConfigFor, type GenerateMode, type GenerateResult } from "@bytereel/pipeline/pipeline";
+import { ElevenLabsReadClient, ElevenLabsSpeech } from "@bytereel/pipeline/providers";
 
 /**
  * `generate --run <id> [--scene <id> ...] [--max-characters N]` and `resume --run <id> [--max-characters N]`.

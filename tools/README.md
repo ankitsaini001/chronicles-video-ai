@@ -1,3 +1,5 @@
 # tools
 
-Developer tools. The prototype command-line tool (`npm run pipeline -- …`) moves here in feature **F01**, step 5.
+Developer tools.
+
+- `cli/`: the prototype command-line tool, run with `npm run pipeline -- <command>` (see the root README for the commands). It uses the AI engine through `@bytereel/pipeline/...` imports.

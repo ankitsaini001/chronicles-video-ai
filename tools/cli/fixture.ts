@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { formatIssue } from "../../packages/pipeline/src/planning";
-import { runFixture } from "../../packages/pipeline/src/pipeline";
-import { LocalArtifactStore, RunLockedError } from "../../packages/pipeline/src/storage";
+import { formatIssue } from "@bytereel/pipeline/planning";
+import { runFixture } from "@bytereel/pipeline/pipeline";
+import { LocalArtifactStore, RunLockedError } from "@bytereel/pipeline/storage";
 
 /**
  * `fixture --file <plan.json>`: validate a fixture plan and create its run folder.

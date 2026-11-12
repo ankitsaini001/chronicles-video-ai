@@ -27,8 +27,8 @@
     "jsx": "react-jsx"
   },
   "include": [
-    "src",
     "packages",
+    "tools",
     "tests",
     "vitest.config.ts"
   ]

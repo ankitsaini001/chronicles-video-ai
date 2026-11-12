@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { runApproveCommand } from "../src/cli/approve";
+import { runApproveCommand } from "../tools/cli/approve";
 import { hashPlan } from "../packages/pipeline/src/planning";
 import { approveRun, checkGenerationGate, generateRun, loadManifest, parseRunId, runPlanStage, speechConfigFor } from "../packages/pipeline/src/pipeline";
 import { renderFixtureRun } from "../packages/pipeline/src/pipeline/render-fixture";
