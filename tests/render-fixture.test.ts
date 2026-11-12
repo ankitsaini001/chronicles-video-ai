@@ -1,12 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { ManifestSchema } from "../src/contracts";
-import { loadManifest } from "../src/pipeline";
-import { previewFramesFor, renderFixtureRun } from "../src/pipeline/render-fixture";
-import type { RenderJob, RenderReport } from "../src/pipeline/render";
-import { ArtifactKeys, isValidArtifactKey, LocalArtifactStore } from "../src/storage";
-import { DEFAULT_SYNTHETIC_TIMING } from "../src/timing";
-import { evaluateProbe, parseFfprobe, type Mp4Probe } from "../src/validation";
+import { ManifestSchema } from "../packages/pipeline/src/contracts";
+import { loadManifest } from "../packages/pipeline/src/pipeline";
+import { previewFramesFor, renderFixtureRun } from "../packages/pipeline/src/pipeline/render-fixture";
+import type { RenderJob, RenderReport } from "../packages/pipeline/src/pipeline/render";
+import { ArtifactKeys, isValidArtifactKey, LocalArtifactStore } from "../packages/pipeline/src/storage";
+import { DEFAULT_SYNTHETIC_TIMING } from "../packages/pipeline/src/timing";
+import { evaluateProbe, parseFfprobe, type Mp4Probe } from "../packages/pipeline/src/validation";
 import { loadFixture, withTempDir } from "./helpers";
 
 /** A fake renderer: writes placeholder bytes instead of running Remotion (fast, deterministic). */
@@ -136,9 +136,9 @@ describe("MP4 validation", () => {
 
 describe("preview frames", () => {
   it("picks one frame per scene, inside the scene", async () => {
-    const { compileTimeline, synthesizeSceneAlignment } = await import("../src/timing");
+    const { compileTimeline, synthesizeSceneAlignment } = await import("../packages/pipeline/src/timing");
     const { validPlan } = await import("./helpers");
-    const { hashPlan } = await import("../src/planning");
+    const { hashPlan } = await import("../packages/pipeline/src/planning");
     const plan = validPlan();
     const compiled = compileTimeline({ plan, planHash: hashPlan(plan), alignments: Object.fromEntries(plan.scenes.map((s) => [s.id, synthesizeSceneAlignment(s, "en")])) });
     const frames = previewFramesFor(compiled);

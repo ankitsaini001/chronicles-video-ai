@@ -4,7 +4,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { sha256 } from "../src/shared/hash";
+import { sha256 } from "../packages/pipeline/src/shared/hash";
 import {
   ArtifactKeys,
   atomicWriteFile,
@@ -12,7 +12,7 @@ import {
   LocalArtifactStore,
   RunLockedError,
   type RunRef,
-} from "../src/storage";
+} from "../packages/pipeline/src/storage";
 import { withTempDir } from "./helpers";
 
 const RUN: RunRef = { ownerId: "owner-1", projectId: "project-1", versionId: "v1" };

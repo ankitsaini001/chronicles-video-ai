@@ -1,9 +1,9 @@
 import { existsSync, statfsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadLocalEnvFile, readConfig, VOICE_ID_ENV_BY_PRESET, type ConfigReport } from "../config/config";
-import { checkGeminiModel, ElevenLabsReadClient, ProviderError } from "../providers";
-import { atomicWriteFile } from "../storage";
+import { loadLocalEnvFile, readConfig, VOICE_ID_ENV_BY_PRESET, type ConfigReport } from "../../packages/pipeline/src/config/config";
+import { checkGeminiModel, ElevenLabsReadClient, ProviderError } from "../../packages/pipeline/src/providers";
+import { atomicWriteFile } from "../../packages/pipeline/src/storage";
 
 /**
  * Preflight (PIPELINE_DESIGN.md §10): checks the local runtime, configuration presence,

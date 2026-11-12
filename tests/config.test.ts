@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ENV_VARS, readConfig, redactSecrets, voiceIdFor } from "../src/config/config";
-import { VOICE_PRESETS } from "../src/contracts";
+import { ENV_VARS, readConfig, redactSecrets, voiceIdFor } from "../packages/pipeline/src/config/config";
+import { VOICE_PRESETS } from "../packages/pipeline/src/contracts";
 
 describe("config", () => {
   it("reports missing settings without failing", () => {

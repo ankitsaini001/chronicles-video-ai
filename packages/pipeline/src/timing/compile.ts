@@ -13,7 +13,7 @@ import {
   type TimelineScene,
   type TimingSource,
 } from "../contracts";
-import { CAPTION_STYLE, MOTION } from "../video/theme";
+import { CAPTION_STYLE, MOTION } from "../theme";
 import { localeFor, timeSceneBlocks, type TimedToken } from "./alignment";
 import { breakLines, groupPhrases, type CaptionLayout, type CaptionWord } from "./captions";
 import { AlignmentMappingError, CompileInputError, DurationOutOfRangeError } from "./errors";

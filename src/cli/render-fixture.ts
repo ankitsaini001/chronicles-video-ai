@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { renderFixtureRun } from "../pipeline/render-fixture";
-import { ArtifactKeys, LocalArtifactStore, RunLockedError } from "../storage";
+import { renderFixtureRun } from "../../packages/pipeline/src/pipeline/render-fixture";
+import { ArtifactKeys, LocalArtifactStore, RunLockedError } from "../../packages/pipeline/src/storage";
 
 /**
  * `render-fixture --file <plan.json> [--force]`: compile, render and validate a fixture plan with

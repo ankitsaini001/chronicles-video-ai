@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { SceneAlignmentSchema, SceneSchema, type CharacterAlignment, type Scene } from "../src/contracts";
+import { SceneAlignmentSchema, SceneSchema, type CharacterAlignment, type Scene } from "../packages/pipeline/src/contracts";
 import {
   approveRun,
   buildSceneAlignment,
@@ -14,12 +14,12 @@ import {
   speechConfigFor,
   speechRequestFor,
   type GenerateOptions,
-} from "../src/pipeline";
-import type { RenderJob, RenderReport } from "../src/pipeline/render";
-import { classifySpeechError, ElevenLabsSpeech, ProviderError, type SpeechProvider, type SpeechRequest, type SpeechResponse } from "../src/providers";
-import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache } from "../src/storage";
-import { AlignmentMappingError, AlignmentValidationError, resolveProviderAlignment, speechInputForScene, timeSceneBlocks } from "../src/timing";
-import { evaluateProbe, parseAudioProbe, type AudioProbe, type Mp4Probe } from "../src/validation";
+} from "../packages/pipeline/src/pipeline";
+import type { RenderJob, RenderReport } from "../packages/pipeline/src/pipeline/render";
+import { classifySpeechError, ElevenLabsSpeech, ProviderError, type SpeechProvider, type SpeechRequest, type SpeechResponse } from "../packages/pipeline/src/providers";
+import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache } from "../packages/pipeline/src/storage";
+import { AlignmentMappingError, AlignmentValidationError, resolveProviderAlignment, speechInputForScene, timeSceneBlocks } from "../packages/pipeline/src/timing";
+import { evaluateProbe, parseAudioProbe, type AudioProbe, type Mp4Probe } from "../packages/pipeline/src/validation";
 import { validPlan, withTempDir } from "./helpers";
 import { MockPlanner, modelOutputFromFixture, TOPIC } from "./planner-helpers";
 

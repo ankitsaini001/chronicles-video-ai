@@ -1,5 +1,5 @@
-import { CODE_OWNED_PLAN_FIELDS, parseTopicFile } from "../src/planning";
-import type { PlannerProvider, PlannerRequest, PlannerResponse } from "../src/providers";
+import { CODE_OWNED_PLAN_FIELDS, parseTopicFile } from "../packages/pipeline/src/planning";
+import type { PlannerProvider, PlannerRequest, PlannerResponse } from "../packages/pipeline/src/providers";
 import { loadFixture } from "./helpers";
 
 // ---------- helpers (no network: the provider is a mock) ----------

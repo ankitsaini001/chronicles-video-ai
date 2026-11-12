@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPreflight } from "../src/cli/preflight";
-import { escapeHtml, highlightNarration } from "../src/planning";
-import { ElevenLabsReadClient } from "../src/providers";
+import { escapeHtml, highlightNarration } from "../packages/pipeline/src/planning";
+import { ElevenLabsReadClient } from "../packages/pipeline/src/providers";
 import { withTempDir } from "./helpers";
 
 /** Mock fetch: routes by URL; records requests. No real network is used. */

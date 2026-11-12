@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashPlan } from "../src/planning";
+import { hashPlan } from "../packages/pipeline/src/planning";
 import {
   compileTimeline,
   DurationOutOfRangeError,
@@ -11,7 +11,7 @@ import {
   synthesizeSceneAlignment,
   DEFAULT_SYNTHETIC_TIMING,
   type SyntheticTimingOptions,
-} from "../src/timing";
+} from "../packages/pipeline/src/timing";
 import { validPlan } from "./helpers";
 
 function compileWith(timing: SyntheticTimingOptions = DEFAULT_SYNTHETIC_TIMING, holds?: { sceneHoldMs: number; takeawayHoldMs: number }) {

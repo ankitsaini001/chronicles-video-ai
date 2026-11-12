@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PlanSchema, type Plan } from "../src/contracts";
-import { canonicalJson, checkApproval, createApproval, hashPlan } from "../src/planning";
+import { PlanSchema, type Plan } from "../packages/pipeline/src/contracts";
+import { canonicalJson, checkApproval, createApproval, hashPlan } from "../packages/pipeline/src/planning";
 import { loadFixture, validPlan } from "./helpers";
 
 /** Rebuild an object with its keys in reverse order (recursively). */

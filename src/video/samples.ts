@@ -1,6 +1,6 @@
-import { PlanSchema, type CaptionTrack, type SceneType, type Timeline, type TimelineScene } from "../contracts";
-import { CAPTION_STYLE } from "./theme";
-import { breakLines, compileTimeline, synthesizeSceneAlignment, WIDTH_METHOD } from "../timing";
+import { PlanSchema, type CaptionTrack, type SceneType, type Timeline, type TimelineScene } from "../../packages/pipeline/src/contracts";
+import { CAPTION_STYLE } from "../../packages/pipeline/src/theme";
+import { breakLines, compileTimeline, synthesizeSceneAlignment, WIDTH_METHOD } from "../../packages/pipeline/src/timing";
 import waterCyclePlan from "../../fixtures/water-cycle.plan.json";
 
 /**

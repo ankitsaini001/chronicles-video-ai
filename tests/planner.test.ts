@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "@google/genai";
 import { describe, expect, it } from "vitest";
-import { SCENE_TYPES } from "../src/contracts";
+import { SCENE_TYPES } from "../packages/pipeline/src/contracts";
 import {
   assemblePlan,
   buildSystemInstruction,
@@ -14,14 +14,14 @@ import {
   planWithRepair,
   topicSources,
   validatePlan,
-} from "../src/planning";
+} from "../packages/pipeline/src/planning";
 import {
   classifyGeminiError,
   interpretResponse,
   mergeChunks,
   ProviderError,
   withRetries,
-} from "../src/providers";
+} from "../packages/pipeline/src/providers";
 import { MockPlanner, modelOutputFromFixture, TOPIC } from "./planner-helpers";
 
 const IDS = { ownerId: "local-dev", projectId: "water-cycle-abc123", versionId: "v1", parentVersionId: null };

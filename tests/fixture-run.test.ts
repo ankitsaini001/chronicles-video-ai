@@ -1,8 +1,8 @@
 import { readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { hashPlan } from "../src/planning";
-import { runFixture } from "../src/pipeline";
-import { LocalArtifactStore, RunLockedError } from "../src/storage";
+import { hashPlan } from "../packages/pipeline/src/planning";
+import { runFixture } from "../packages/pipeline/src/pipeline";
+import { LocalArtifactStore, RunLockedError } from "../packages/pipeline/src/storage";
 import { loadFixture, validPlan, withTempDir } from "./helpers";
 
 const fixedClock = () => new Date("2026-11-12T10:00:00.000Z");

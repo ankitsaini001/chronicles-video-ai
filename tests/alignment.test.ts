@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Language, Scene, SceneAlignment } from "../src/contracts";
-import { SceneSchema } from "../src/contracts";
+import type { Language, Scene, SceneAlignment } from "../packages/pipeline/src/contracts";
+import { SceneSchema } from "../packages/pipeline/src/contracts";
 import {
   AlignmentMappingError,
   AlignmentValidationError,
@@ -13,7 +13,7 @@ import {
   timeSceneBlocks,
   tokenize,
   validateCharacterAlignment,
-} from "../src/timing";
+} from "../packages/pipeline/src/timing";
 
 function scene(narration: { text: string; speech?: string; display?: string }[]): Scene {
   return SceneSchema.parse({

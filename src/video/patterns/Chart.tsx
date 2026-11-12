@@ -1,8 +1,8 @@
 import type React from "react";
-import type { TimelineObject } from "../../contracts";
+import type { TimelineObject } from "../../../packages/pipeline/src/contracts";
 import { entranceStyle, type SceneClock } from "../anim";
 import { Bar, Card, Counter, formatNumber, numberFormatFor, Text, type NumberFormat } from "../primitives";
-import { COLORS, FONT_SIZE, STAGE } from "../theme";
+import { COLORS, FONT_SIZE, STAGE } from "../../../packages/pipeline/src/theme";
 import type { PatternProps } from "./types";
 
 /**

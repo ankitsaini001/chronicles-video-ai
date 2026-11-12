@@ -1,7 +1,7 @@
 import type React from "react";
 import { entranceStyle } from "../anim";
 import { Circle, Icon, iconFor, Text, type IconName } from "../primitives";
-import { COLORS, FONT_SIZE, STAGE } from "../theme";
+import { COLORS, FONT_SIZE, STAGE } from "../../../packages/pipeline/src/theme";
 import type { PatternProps } from "./types";
 
 /** Title / hook: an opening question (subtitle), a hero icon and a bold headline. */

@@ -2,12 +2,12 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runApproveCommand } from "../src/cli/approve";
-import { hashPlan } from "../src/planning";
-import { approveRun, checkGenerationGate, generateRun, loadManifest, parseRunId, runPlanStage, speechConfigFor } from "../src/pipeline";
-import { renderFixtureRun } from "../src/pipeline/render-fixture";
-import { ProviderError } from "../src/providers";
-import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache } from "../src/storage";
-import { PlanSchema } from "../src/contracts";
+import { hashPlan } from "../packages/pipeline/src/planning";
+import { approveRun, checkGenerationGate, generateRun, loadManifest, parseRunId, runPlanStage, speechConfigFor } from "../packages/pipeline/src/pipeline";
+import { renderFixtureRun } from "../packages/pipeline/src/pipeline/render-fixture";
+import { ProviderError } from "../packages/pipeline/src/providers";
+import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache } from "../packages/pipeline/src/storage";
+import { PlanSchema } from "../packages/pipeline/src/contracts";
 import { withTempDir } from "./helpers";
 import { MockPlanner, modelOutputFromFixture, TOPIC } from "./planner-helpers";
 

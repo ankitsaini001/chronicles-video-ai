@@ -28,6 +28,7 @@
   },
   "include": [
     "src",
+    "packages",
     "tests",
     "vitest.config.ts"
   ]

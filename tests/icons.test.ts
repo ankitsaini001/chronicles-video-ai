@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PlanSchema } from "../src/contracts";
+import { PlanSchema } from "../packages/pipeline/src/contracts";
 import {
   assemblePlan,
   buildSystemInstruction,
@@ -9,8 +9,8 @@ import {
   plannerOutputJsonSchema,
   renderPlanReview,
   validatePlan,
-} from "../src/planning";
-import { compileTimeline, synthesizeSceneAlignment } from "../src/timing";
+} from "../packages/pipeline/src/planning";
+import { compileTimeline, synthesizeSceneAlignment } from "../packages/pipeline/src/timing";
 import { loadFixture, validPlan } from "./helpers";
 import { modelOutputFromFixture } from "./planner-helpers";
 

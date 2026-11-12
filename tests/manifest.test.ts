@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { RUN_STATES, type RunState } from "../src/contracts";
+import { RUN_STATES, type RunState } from "../packages/pipeline/src/contracts";
 import {
   createManifest,
   InvalidTransitionError,
@@ -9,8 +9,8 @@ import {
   transitionRun,
   updateSceneSpeech,
   updateStage,
-} from "../src/pipeline";
-import { LocalArtifactStore, type RunRef } from "../src/storage";
+} from "../packages/pipeline/src/pipeline";
+import { LocalArtifactStore, type RunRef } from "../packages/pipeline/src/storage";
 import { withTempDir } from "./helpers";
 
 const RUN: RunRef = { ownerId: "owner-1", projectId: "project-1", versionId: "v1" };

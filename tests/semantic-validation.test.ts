@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkDisplayScript, countPhrase, formatIssue, validatePlan } from "../src/planning";
+import { checkDisplayScript, countPhrase, formatIssue, validatePlan } from "../packages/pipeline/src/planning";
 import { loadFixture } from "./helpers";
 
 function issuesFor(raw: unknown) {

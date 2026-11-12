@@ -1,7 +1,7 @@
 import type React from "react";
 import { Easing, interpolate } from "remotion";
-import type { TimelineEvent, TimelineObject, TimelineScene } from "../contracts";
-import { MOTION } from "./theme";
+import type { TimelineEvent, TimelineObject, TimelineScene } from "../../packages/pipeline/src/contracts";
+import { MOTION } from "../../packages/pipeline/src/theme";
 
 /**
  * Frame-driven animation helpers. Everything is a pure function of the absolute frame and the

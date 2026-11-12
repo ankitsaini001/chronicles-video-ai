@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CaptionTrackSchema, TimelineSchema } from "../src/contracts";
-import { hashPlan } from "../src/planning";
-import { sha256 } from "../src/shared/hash";
+import { CaptionTrackSchema, TimelineSchema } from "../packages/pipeline/src/contracts";
+import { hashPlan } from "../packages/pipeline/src/planning";
+import { sha256 } from "../packages/pipeline/src/shared/hash";
 import {
   breakLines,
   compileTimeline,
@@ -12,7 +12,7 @@ import {
   synthesizeSceneAlignment,
   timeSceneBlocks,
   type CaptionWord,
-} from "../src/timing";
+} from "../packages/pipeline/src/timing";
 import { validPlan } from "./helpers";
 
 const words = (text: string): CaptionWord[] => text.split(" ").map((w, i) => ({ text: w, startSec: i * 0.4, endSec: i * 0.4 + 0.35 }));

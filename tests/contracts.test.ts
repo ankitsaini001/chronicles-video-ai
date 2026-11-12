@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApprovalSchema, PlanSchema } from "../src/contracts";
-import { validatePlan } from "../src/planning";
+import { ApprovalSchema, PlanSchema } from "../packages/pipeline/src/contracts";
+import { validatePlan } from "../packages/pipeline/src/planning";
 import { loadFixture } from "./helpers";
 
 describe("Plan schema", () => {

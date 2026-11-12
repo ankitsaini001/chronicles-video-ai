@@ -1,11 +1,11 @@
 import type React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
-import type { CaptionTrack, Timeline, TimelineScene } from "../contracts";
+import type { CaptionTrack, Timeline, TimelineScene } from "../../packages/pipeline/src/contracts";
 import { makeSceneClock } from "./anim";
 import { Captions } from "./Captions";
 import { loadPackagedFonts } from "./fonts";
 import { PATTERN_COMPONENTS } from "./patterns";
-import { CANVAS, CAPTION_ZONE, COLORS, FONT_FAMILY, SAFE_ZONE, STAGE } from "./theme";
+import { CANVAS, CAPTION_ZONE, COLORS, FONT_FAMILY, SAFE_ZONE, STAGE } from "../../packages/pipeline/src/theme";
 
 loadPackagedFonts();
 

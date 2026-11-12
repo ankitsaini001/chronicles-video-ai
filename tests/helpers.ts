@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PlanSchema, type Plan } from "../src/contracts";
+import { PlanSchema, type Plan } from "../packages/pipeline/src/contracts";
 
 const FIXTURES = path.join(import.meta.dirname, "..", "fixtures");
 

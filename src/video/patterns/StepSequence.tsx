@@ -1,7 +1,7 @@
 import type React from "react";
 import { entranceStyle } from "../anim";
 import { Card, Circle, Icon, iconFor, Text } from "../primitives";
-import { COLORS, FONT_SIZE, STAGE } from "../theme";
+import { COLORS, FONT_SIZE, STAGE } from "../../../packages/pipeline/src/theme";
 import type { PatternProps } from "./types";
 
 /**

@@ -1,6 +1,6 @@
 import type React from "react";
-import { ICON_NAMES, iconFor, iconForLabel, type IconName } from "../../planning/icon-catalog";
-import { COLORS } from "../theme";
+import { ICON_NAMES, iconFor, iconForLabel, type IconName } from "../../../packages/pipeline/src/planning/icon-catalog";
+import { COLORS } from "../../../packages/pipeline/src/theme";
 
 /**
  * Small allow-listed local icon set (inline SVG, 100×100 view box, two accents only).
