@@ -20,6 +20,12 @@ The full home page: hero, How it works, Examples, Languages, Why ByteReel, FAQ, 
 - 'Sign in' and 'Create your first reel' go to /login and /signup (pages come later)
 - Mobile layout works
 
+## Notes from the F02 code review
+- Make a small `Logo` component: amber play triangle in a `logo-circle` dot + "Byte" + gold-gradient "Reel", **Exo 2 700** (BRAND §6; the F02 placeholder uses 800).
+- Glossy 3D tiles: add `@utility bg-tile` (uses `--gradient-tile`) and a `--shadow-tile` token (BRAND §4) when building the hero.
+- Wrap Hindi text in `<span lang="hi">` so screen readers read it correctly.
+- Use "Log in" (not "Sign in") for the nav button, to match the auth screens (design audit note).
+
 ## Not in this feature
 - Real sample videos (placeholder images until we have real reels)
 
