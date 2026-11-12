@@ -16,7 +16,7 @@
     "pipeline": "tsx tools/cli/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace @bytereel/web",
     "studio": "remotion studio packages/video/src/index.ts"
   },
   "dependencies": {
