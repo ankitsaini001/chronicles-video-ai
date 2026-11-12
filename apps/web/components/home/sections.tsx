@@ -1,46 +1,87 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
-import { Button, Card, cn } from "@/components/ui";
+import { Button, cn, Icon, type IconName, PlayIcon } from "@/components/ui";
 
-// Home page sections below the hero, word for word from the approved Stitch "ByteReel — Home v2".
+// Home page sections below the hero. Layout and look from the Stitch "ByteReel — Home Landing
+// Page" (docs/design/stitch/home-landing-v1.html). Copy follows the design, except claims V1 can't
+// back up (made-up creators, view counts, user numbers, voice names, extra platforms/languages),
+// which use the honest wording from the approved Home v2. See docs/features/F03-home-page.md.
 
 function Eyebrow({ children }: { children: ReactNode }) {
-  return <p className="font-mono text-xs font-medium uppercase tracking-[0.12em] text-amber">{children}</p>;
+  return <p className="mb-2 font-mono text-xs font-medium uppercase tracking-widest text-amber">{children}</p>;
 }
 
-function Section({ id, children, className }: { id?: string; children: ReactNode; className?: string }) {
+function Heading({ children, className }: { children: ReactNode; className?: string }) {
+  return <h2 className={cn("text-3xl font-extrabold tracking-tight sm:text-[44px] sm:leading-[1.1]", className)}>{children}</h2>;
+}
+
+function Section({ id, band, children }: { id?: string; band?: boolean; children: ReactNode }) {
   return (
-    <section id={id} className={cn("scroll-mt-24 border-b border-line", className)}>
-      <div className="mx-auto max-w-[1240px] px-4 py-16 sm:px-6 md:py-24">{children}</div>
+    <section id={id} className={cn("scroll-mt-20 border-t border-amber/25 py-20 md:py-24", band && "bg-surface/50")}>
+      <div className="mx-auto max-w-7xl px-4 sm:px-6">{children}</div>
     </section>
   );
 }
 
+const cardBase = "rounded-2xl border border-line bg-surface transition duration-300 hover:border-amber/40";
+
 /* ---------- How it works ---------- */
 
-const STEPS = [
-  { title: "Idea", text: "Type a topic or paste your notes." },
-  { title: "Storyboard", text: "Review the script and visuals scene by scene. Ask for changes in plain words." },
-  { title: "Video", text: "AI voice, motion graphics and captions come together. Preview it and fix any caption." },
+const STEPS: { title: string; text: string; icon: IconName; noteIcon: IconName; note: string }[] = [
+  {
+    title: "Idea",
+    text: "Type a topic or paste your notes. ByteReel drafts a storyboard made for vertical viewing.",
+    icon: "bulb",
+    noteIcon: "clock",
+    note: "About 30 seconds",
+  },
+  {
+    title: "Storyboard",
+    text: "Review the narration and visuals scene by scene. Ask for changes in plain words.",
+    icon: "storyboard",
+    noteIcon: "chat",
+    note: "Chat to edit",
+  },
+  {
+    title: "Video",
+    text: "AI voice, motion graphics and captions come together. Preview it and fix any caption.",
+    icon: "video",
+    noteIcon: "captions",
+    note: "Word-sync captions",
+  },
   {
     title: "Publish",
-    text: "Download the MP4 or post it to Instagram, now or on a schedule. Nothing posts without your approval.",
+    text: "Download the MP4 in 1080 × 1920 or post it to Instagram, now or on a schedule. Nothing posts without your approval.",
+    icon: "send",
+    noteIcon: "check",
+    note: "1080p HD",
   },
 ];
 
 export function HowItWorks() {
   return (
     <Section id="how-it-works">
-      <Eyebrow>How it works</Eyebrow>
-      <h2 className="mt-3 text-3xl font-bold sm:text-[40px]">From idea to Reel in four steps</h2>
-      <ol className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-16 max-w-2xl">
+        <Eyebrow>Process</Eyebrow>
+        <Heading>From raw notes to vertical reel in four steps</Heading>
+      </div>
+      <ol className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {STEPS.map((step, i) => (
-          <li key={step.title}>
-            <Card className="h-full">
-              <p className="font-mono text-sm text-amber">{String(i + 1).padStart(2, "0")}</p>
-              <h3 className="mt-3 text-xl font-bold">{step.title}</h3>
-              <p className="mt-3 text-sm leading-relaxed text-muted">{step.text}</p>
-            </Card>
+          <li key={step.title} className={cn(cardBase, "group flex flex-col justify-between p-6")}>
+            <div>
+              <div className="mb-8 flex items-center justify-between">
+                <span className="font-mono text-[22px] font-bold text-amber">{String(i + 1).padStart(2, "0")}</span>
+                <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface-2 text-amber transition-transform motion-safe:group-hover:scale-110">
+                  <Icon name={step.icon} className="size-[18px]" />
+                </span>
+              </div>
+              <h3 className="mb-3 text-[22px] font-bold">{step.title}</h3>
+              <p className="text-muted">{step.text}</p>
+            </div>
+            <p className="mt-8 flex items-center gap-1.5 border-t border-amber/25 pt-4 font-mono text-[11px] text-gold-cream/70">
+              <Icon name={step.noteIcon} className="size-3.5 text-amber" />
+              {step.note}
+            </p>
           </li>
         ))}
       </ol>
@@ -48,43 +89,98 @@ export function HowItWorks() {
   );
 }
 
-/* ---------- Examples ---------- */
+/* ---------- Examples (showcase) ---------- */
 
 const EXAMPLES = [
-  { title: "The Water Cycle", language: "English", seconds: 64, image: "/examples/water-cycle.svg" },
-  { title: "बचत खाता बनाम FD", lang: "hi", language: "हिंदी", seconds: 72, image: "/examples/savings-vs-fd.svg" },
-  { title: "Opportunity cost kya hai?", language: "Hinglish", seconds: 68, image: "/examples/opportunity-cost.svg" },
-  { title: "How UPI works", language: "English", seconds: 81, image: "/examples/how-upi-works.svg" },
+  {
+    title: "The Water Cycle",
+    topic: "Earth Science",
+    language: "English",
+    seconds: 64,
+    voice: "Female voice",
+    image: "/examples/water-cycle.jpg",
+  },
+  {
+    title: "बचत खाता बनाम FD",
+    lang: "hi",
+    topic: "Personal Finance",
+    language: "हिंदी Hindi",
+    seconds: 72,
+    voice: "Male voice",
+    image: "/examples/savings-vs-fd.jpg",
+  },
+  {
+    title: "Opportunity cost kya hai?",
+    topic: "Economics",
+    language: "Hinglish",
+    seconds: 68,
+    voice: "Female voice",
+    image: "/examples/opportunity-cost.jpg",
+  },
+  {
+    title: "How UPI works",
+    topic: "Tech Explainer",
+    language: "English",
+    seconds: 81,
+    voice: "Male voice",
+    image: "/examples/how-upi-works.jpg",
+  },
 ] as const;
 
 export function Examples() {
   return (
-    <Section id="examples">
-      <Eyebrow>Examples</Eyebrow>
-      <h2 className="mt-3 text-3xl font-bold sm:text-[40px]">Sample reels made with ByteReel</h2>
-      <ul className="mt-12 grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4">
-        {EXAMPLES.map((ex) => (
-          <li key={ex.title}>
-            <Card className="h-full p-3">
-              <div className="relative aspect-[320/420] overflow-hidden rounded-xl border border-line bg-screen">
-                <Image src={ex.image} alt="" fill unoptimized className="object-cover" />
+    <Section id="examples" band>
+      <div className="mb-16 flex flex-col justify-between gap-6 md:flex-row md:items-end">
+        <div>
+          <Eyebrow>Showcase</Eyebrow>
+          <Heading>What your reels can look like</Heading>
+        </div>
+        <p className="font-mono text-xs text-muted">Sample reels · 1080 × 1920 vertical</p>
+      </div>
+      <ul className="grid gap-6 min-[480px]:grid-cols-2 lg:grid-cols-4">
+        {EXAMPLES.map((ex) => {
+          const lang = "lang" in ex ? ex.lang : undefined;
+          return (
+            <li key={ex.title} className={cn(cardBase, "group flex flex-col overflow-hidden hover:border-amber/50")}>
+              <div className="relative flex aspect-[9/16] flex-col justify-between overflow-hidden bg-[#0e0a07] p-5">
+                <Image
+                  src={ex.image}
+                  alt=""
+                  fill
+                  sizes="(min-width: 1024px) 300px, (min-width: 480px) 50vw, 100vw"
+                  className="object-cover opacity-60 transition-transform duration-500 motion-safe:group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-bg/80" />
+                <div className="relative flex items-center justify-between">
+                  <span
+                    lang={lang}
+                    className="rounded-full border border-line bg-surface-2/80 px-2.5 py-1 font-mono text-[10px] text-gold-cream backdrop-blur-md"
+                  >
+                    {ex.language}
+                  </span>
+                  <span className="rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-muted">{ex.seconds}s</span>
+                </div>
+                {/* Decorative: sample videos aren't playable yet. */}
                 <span
-                  lang={"lang" in ex ? ex.lang : undefined}
-                  className="absolute top-2.5 left-2.5 rounded-full bg-bg/80 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-text"
+                  aria-hidden="true"
+                  className="relative mx-auto flex size-12 items-center justify-center rounded-full bg-amber/90 text-on-amber shadow-[0_0_20px_#f5a52499] transition-transform motion-safe:group-hover:scale-110"
                 >
-                  {ex.language}
+                  <PlayIcon className="ml-0.5 size-5" />
                 </span>
-                <span className="absolute top-2.5 right-2.5 rounded-full bg-bg/80 px-2 py-0.5 font-mono text-[10px] text-muted">
-                  {ex.seconds}s
-                </span>
+                <div className="relative">
+                  <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-amber">{ex.topic}</p>
+                  <h3 lang={lang} className="text-lg leading-tight font-bold">
+                    {ex.title}
+                  </h3>
+                </div>
               </div>
-              <h3 lang={"lang" in ex ? ex.lang : undefined} className="mt-4 px-1 font-display text-base font-bold">
-                {ex.title}
-              </h3>
-              <p className="mt-1 px-1 pb-1 text-xs text-muted">Sample reel</p>
-            </Card>
-          </li>
-        ))}
+              <div className="flex items-center justify-between border-t border-line bg-surface-2 p-4 text-xs text-muted">
+                <span>Sample reel</span>
+                <span className="font-mono text-amber">{ex.voice}</span>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </Section>
   );
@@ -93,41 +189,76 @@ export function Examples() {
 /* ---------- Languages ---------- */
 
 const LANGUAGES = [
-  { name: "English", sample: "“Compound interest explained in 60 seconds.”" },
-  { name: "हिंदी", lang: "hi", sample: "“पौधों में प्रकाश संश्लेषण कैसे होता है? आसान भाषा में समझें।”" },
-  { name: "Hinglish", sample: "“Compound interest ko simple example se samjho.”" },
+  {
+    chip: "English",
+    note: "Clear narration",
+    title: "Clear, simple English",
+    sampleLabel: "Sample narration script",
+    sample: "“Compound interest explained in 60 seconds with practical Indian examples.”",
+  },
+  {
+    chip: "हिंदी (Hindi)",
+    note: "Native Devanagari",
+    highlight: true,
+    lang: "hi",
+    title: "शुद्ध एवं सरल हिंदी वाचन",
+    sampleLabel: "नमूना स्क्रिप्ट (Sample)",
+    sample: "“पौधों में प्रकाश संश्लेषण (Photosynthesis) कैसे होता है? आसान भाषा में समझें।”",
+  },
+  {
+    chip: "Hinglish",
+    note: "Bilingual rhythm",
+    title: "Natural conversational flow",
+    sampleLabel: "Sample narration script",
+    sample: "“Opportunity cost ko ek simple example se samjho.”",
+  },
 ] as const;
 
 export function Languages() {
   return (
     <Section id="languages">
-      <Eyebrow>Languages</Eyebrow>
-      <h2 className="mt-3 text-3xl font-bold sm:text-[40px]">Explain in the language your audience speaks</h2>
-      <ul className="mt-12 grid gap-5 md:grid-cols-3">
+      <div className="mb-16 max-w-2xl">
+        <Eyebrow>Voice &amp; languages</Eyebrow>
+        <Heading>Speak to your learners in their own language</Heading>
+      </div>
+      <ul className="grid gap-8 md:grid-cols-3">
         {LANGUAGES.map((l) => {
           const lang = "lang" in l ? l.lang : undefined;
           return (
-            <li key={l.name}>
-              <Card className="flex h-full flex-col">
-                <h3 lang={lang} className="text-xl font-bold">
-                  {l.name}
-                </h3>
-                <p lang={lang} className="mt-3 text-sm leading-relaxed text-muted">
-                  {l.sample}
-                </p>
-                {/* Voice samples arrive in F13; until then these are labels, not buttons. */}
-                <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-5">
-                  {/* Same muted style for both, with no amber ▶, so they don't look clickable (amber = clickable). */}
-                  {["Female voice", "Male voice"].map((voice) => (
-                    <span
-                      key={voice}
-                      className="inline-flex items-center rounded-full border border-line px-3.5 py-1.5 text-xs font-medium text-muted"
-                    >
-                      {voice}
-                    </span>
-                  ))}
+            <li key={l.chip} className={cn(cardBase, "flex flex-col justify-between p-6")}>
+              <div>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <span lang={lang} className="rounded-full border border-line bg-surface-2 px-3 py-1 font-mono text-xs text-gold-cream">
+                    {l.chip}
+                  </span>
+                  <span className={cn("font-mono text-[11px]", "highlight" in l ? "font-semibold text-amber" : "text-muted")}>
+                    {l.note}
+                  </span>
                 </div>
-              </Card>
+                <h3 lang={lang} className="mb-4 text-[22px] font-bold">
+                  {l.title}
+                </h3>
+                <div className="mb-6 rounded-xl border border-line bg-surface-2 p-4">
+                  <p lang={lang} className="mb-1 font-mono text-[10px] uppercase text-muted">
+                    {l.sampleLabel}
+                  </p>
+                  <p lang={lang} className="italic">
+                    {l.sample}
+                  </p>
+                </div>
+              </div>
+              {/* Voice samples arrive in F13; until then this is information, not a player. */}
+              <div className="border-t border-amber/25 pt-4">
+                <div className="flex items-center gap-3 rounded-xl border border-line bg-bg/60 p-2">
+                  <span className="flex size-8 items-center justify-center rounded-full border border-line bg-surface-2 text-amber">
+                    <Icon name="mic" className="size-4" />
+                  </span>
+                  <span className="flex flex-col">
+                    <span className="text-xs font-bold">Female or male voice</span>
+                    <span className="font-mono text-[10px] text-muted">You choose for every video</span>
+                  </span>
+                </div>
+              </div>
             </li>
           );
         })}
@@ -138,44 +269,49 @@ export function Languages() {
 
 /* ---------- Why ByteReel ---------- */
 
-const ICONS = {
-  visuals:
-    "M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.25 2.25L18 6.75",
-  chat: "M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a.75.75 0 01-.974-.94 3.754 3.754 0 00.56-1.748A8.17 8.17 0 013 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z",
-  edit: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10",
-  shield:
-    "M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z",
-} as const;
-
-// Typed with the ICONS keys, so a mistyped icon name is a type error.
-const REASONS: { icon: keyof typeof ICONS; title: string; text: string }[] = [
-  { icon: "visuals", title: "Visuals that explain", text: "Diagrams, flows, timelines, comparisons and charts that move with the narration." },
-  { icon: "chat", title: "Change it by chatting", text: "Say “make scene 3 simpler” and ByteReel updates the storyboard." },
-  { icon: "edit", title: "Captions you can correct", text: "Fix any caption word before you download or publish." },
+const REASONS: { icon: IconName; title: string; text: ReactNode }[] = [
   {
-    icon: "shield",
+    icon: "sparkles",
+    title: "Explanations, not just decoration",
+    text: "Diagrams, flowcharts, timelines, side-by-side comparisons and charts that move with the narration.",
+  },
+  {
+    icon: "chat",
+    title: "Change it by chatting",
+    text: (
+      <>
+        Don&apos;t like a scene? Just say <strong className="text-gold-cream">“make scene 3 simpler”</strong> or{" "}
+        <strong className="text-gold-cream">“add a cricket analogy”</strong> and ByteReel updates the storyboard.
+      </>
+    ),
+  },
+  {
+    icon: "captions",
+    title: "Captions you can correct",
+    text: "Fix any caption word before you download or publish, including Indian names, places and technical terms.",
+  },
+  {
+    icon: "tune",
     title: "You stay in control",
-    text: "You approve the storyboard before the video is made, and the video before it is published.",
+    text: "No surprises. You approve the storyboard before the video is made, and the video before anything is posted.",
   },
 ];
 
 export function WhyByteReel() {
   return (
-    <Section>
-      <Eyebrow>Why ByteReel</Eyebrow>
-      <h2 className="mt-3 text-3xl font-bold sm:text-[40px]">Made for clear explanations</h2>
-      <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+    <Section band>
+      <div className="mb-16 max-w-2xl">
+        <Eyebrow>Why ByteReel</Eyebrow>
+        <Heading>Designed for depth, speed, and total creator control</Heading>
+      </div>
+      <ul className="grid gap-8 md:grid-cols-2">
         {REASONS.map((r) => (
-          <li key={r.title}>
-            <Card className="h-full">
-              <span className="flex size-10 items-center justify-center rounded-lg border border-line bg-surface-2">
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" strokeWidth={1.75} className="size-5 stroke-amber">
-                  <path strokeLinecap="round" strokeLinejoin="round" d={ICONS[r.icon]} />
-                </svg>
-              </span>
-              <h3 className="mt-6 text-lg font-bold">{r.title}</h3>
-              <p className="mt-3 text-sm leading-relaxed text-muted">{r.text}</p>
-            </Card>
+          <li key={r.title} className={cn(cardBase, "p-8")}>
+            <span className="flex size-12 items-center justify-center rounded-full border border-line bg-surface-2 text-amber shadow-[0_0_15px_#f5a52426]">
+              <Icon name={r.icon} className="size-5" />
+            </span>
+            <h3 className="mt-6 mb-3 text-[22px] font-bold">{r.title}</h3>
+            <p className="leading-relaxed text-muted">{r.text}</p>
           </li>
         ))}
       </ul>
@@ -185,10 +321,10 @@ export function WhyByteReel() {
 
 /* ---------- FAQ ---------- */
 
-const FAQ = [
+const FAQ: { q: string; a: ReactNode }[] = [
   {
-    q: "Do I need video editing skills?",
-    a: "No. You type an idea or paste notes, review the storyboard, and ByteReel makes the video.",
+    q: "Do I need video editing or animation skills?",
+    a: "None at all. ByteReel handles the script, motion graphics, voice and captions. You bring the idea or your notes.",
   },
   {
     q: "Which languages are supported?",
@@ -198,42 +334,31 @@ const FAQ = [
       </>
     ),
   },
-  { q: "How long are the videos?", a: "Between 60 and 90 seconds, in vertical 1080 × 1920 format." },
+  { q: "How long are the generated videos?", a: "Between 60 and 90 seconds, in vertical 1080 × 1920 format, made for Instagram Reels." },
   {
     q: "Can I post directly to Instagram?",
     a: "Yes. Connect your Instagram professional account to post now or schedule. You can also download the MP4.",
   },
-  { q: "Is ByteReel free?", a: "Yes, ByteReel is free during the private beta." },
+  { q: "Is ByteReel free during the beta?", a: "Yes, ByteReel is free during the private beta." },
 ];
 
 export function Faq() {
   return (
-    <Section>
-      <div className="text-center">
-        <Eyebrow>FAQ</Eyebrow>
-        <h2 className="mt-3 text-3xl font-bold sm:text-[40px]">Questions, answered</h2>
+    <Section id="faq">
+      <div className="mb-12 text-center">
+        <Eyebrow>Common questions</Eyebrow>
+        <Heading>Everything you need to know</Heading>
       </div>
-      <div className="mx-auto mt-12 flex max-w-3xl flex-col gap-3">
-        {FAQ.map((item, i) => (
-          <details
-            key={item.q}
-            open={i === 0}
-            className="group rounded-2xl border border-line bg-surface open:shadow-card [&_summary::-webkit-details-marker]:hidden"
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-6 py-5 font-display font-bold">
+      <div className="mx-auto flex max-w-[848px] flex-col gap-4">
+        {FAQ.map((item) => (
+          <details key={item.q} className={cn(cardBase, "group [&_summary::-webkit-details-marker]:hidden")}>
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-6 py-6 font-display text-lg font-bold">
               {item.q}
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                className="size-5 shrink-0 text-amber transition group-open:rotate-180"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-amber transition group-open:rotate-180">
+                <Icon name="chevron" className="size-4" />
+              </span>
             </summary>
-            <p className="border-t border-line px-6 py-5 text-sm leading-relaxed text-muted">{item.a}</p>
+            <p className="border-t border-line px-6 py-5 leading-relaxed text-muted">{item.a}</p>
           </details>
         ))}
       </div>
@@ -245,10 +370,10 @@ export function Faq() {
 
 export function FinalCta() {
   return (
-    <section className="border-b border-line bg-[radial-gradient(60%_80%_at_50%_50%,#f5a5241f,transparent_70%)]">
-      <div className="mx-auto max-w-4xl px-4 py-20 text-center sm:px-6 md:py-28">
-        <Eyebrow>Ready?</Eyebrow>
-        <h2 className="mt-4 text-4xl font-extrabold sm:text-5xl">
+    <section className="relative overflow-hidden border-t border-amber/25 bg-[radial-gradient(50%_70%_at_50%_45%,#f5a52429,transparent_70%)]">
+      <div className="mx-auto max-w-4xl px-4 py-24 text-center sm:px-6 md:py-28">
+        <Eyebrow>Ready to create?</Eyebrow>
+        <h2 className="mt-4 text-4xl font-extrabold tracking-tight sm:text-[60px] sm:leading-[1.05]">
           Your next explainer is <span className="text-gradient-gold">one idea away</span>
         </h2>
         <p className="mx-auto mt-6 max-w-xl text-base text-muted sm:text-lg">
