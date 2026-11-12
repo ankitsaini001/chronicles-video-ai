@@ -5,12 +5,14 @@
   "description": "ByteReel explainer-reel pipeline prototype (P0 foundation, P1 visual skeleton, P2a live Gemini planning + approval gate, P2b ElevenLabs speech + generate/resume).",
   "type": "module",
   "workspaces": [
+    "apps/*",
     "packages/*"
   ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
+    "dev": "npm run dev -w @bytereel/web",
     "pipeline": "tsx tools/cli/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
