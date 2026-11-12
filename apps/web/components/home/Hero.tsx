@@ -65,7 +65,7 @@ export function Hero() {
           </p>
           <h1 className="mt-3 text-4xl leading-[1.05] font-extrabold sm:text-5xl lg:text-[56px] xl:text-[60px]">
             Turn any topic into a{" "}
-            <span className="text-gradient-gold whitespace-nowrap">ready-to-post Reel</span>
+            <span className="text-gradient-gold min-[360px]:whitespace-nowrap">ready-to-post Reel</span>
           </h1>
           <p className="mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
             Type an idea or paste your notes. ByteReel writes the script, animates every concept and adds a natural voice in
