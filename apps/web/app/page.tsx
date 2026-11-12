@@ -25,7 +25,19 @@ export default function HomePage() {
         <h1 className="text-4xl font-bold">
           Byte<span className="text-gradient-gold">Reel</span>
         </h1>
-        <p className="mt-2 text-muted">The website is being built. (F02 step 2: Ember Gold colours)</p>
+        <p className="mt-2 text-muted">The website is being built. (F02 step 3: brand fonts)</p>
+
+        <div className="mt-10 rounded-2xl border border-line bg-surface p-6 shadow-card">
+          <p className="font-mono text-xs uppercase tracking-[0.08em] text-amber-light">01 · Labels in JetBrains Mono</p>
+          <h2 className="mt-3 text-3xl font-bold">
+            Turn any topic into a <span className="text-gradient-gold">ready-to-post Reel</span>
+          </h2>
+          <p className="mt-3 max-w-prose text-muted">
+            Body text uses Ubuntu. Headings use Exo 2. Hindi uses Noto Sans Devanagari:
+          </p>
+          <p className="mt-2 text-lg font-medium">पानी का चक्र कैसे काम करता है · महिला आवाज़ · पुरुष आवाज़</p>
+          <h3 className="mt-2 text-xl font-bold">बचत खाता बनाम FD</h3>
+        </div>
 
         <div className="mt-10 rounded-2xl border border-line bg-surface p-6 shadow-card">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

@@ -36,6 +36,17 @@
   --shadow-glow: 0 10px 30px #f5a52466;
 }
 
+/*
+ * Fonts (§3). The --font-* variables are set by next/font (app/fonts.ts). Devanagari is in every
+ * stack as a fallback, so Hindi characters always render in Noto Sans Devanagari.
+ * Classes: font-sans (Ubuntu, default), font-display (Exo 2), font-mono (JetBrains Mono).
+ */
+@theme inline {
+  --font-sans: var(--font-ubuntu), var(--font-devanagari), system-ui, sans-serif;
+  --font-display: var(--font-exo2), var(--font-devanagari), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), var(--font-devanagari), ui-monospace, monospace;
+}
+
 /* Gradients (§2): used through the small utilities below. */
 :root {
   --gradient-headline: linear-gradient(180deg, #ffe2a8 0%, #f5b04a 100%);
@@ -71,9 +82,21 @@
 
   body {
     min-height: 100dvh;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
     background-color: var(--color-bg);
     color: var(--color-text);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* Headings use Exo 2 with a slight negative letter-spacing and balanced wrapping (§3). */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
   }
 
   /* Accessibility (§9): visible focus ring on every interactive element. */
