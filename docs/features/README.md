@@ -34,7 +34,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | 🔄 In progress |
+| F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | 🧪 Testing |
 | F02 | [Web app skeleton (Next.js + Ember Gold styles)](F02-web-app-skeleton.md) | F01 | ⬜ Not started |
 | F03 | [Home page (landing)](F03-home-page.md) | F02 | ⬜ Not started |
 

@@ -22,6 +22,12 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 - Basic components: primary button, secondary button, card, input, chip
 - Environment variable check on start-up (clear error if a key is missing)
 
+## Setup notes from the F01 code review (handle while creating apps/web)
+- Add `"apps/*"` to the root `package.json` workspaces and decide how `npm run typecheck` covers `apps/web` (root include or its own `tsc`).
+- `@bytereel/pipeline` exports raw `.ts` files with extensionless imports: Next.js needs `transpilePackages: ["@bytereel/pipeline"]` and a web tsconfig with `moduleResolution: "bundler"`. Plain `node` can't run the package; keep workers on tsx or add a build step later.
+- Don't let the web app import render code: `pipeline/generate-run.ts` lazily imports `./render` (Remotion bundler/renderer). Keep render exports out of what the web imports, or list Remotion in `serverExternalPackages`.
+- Pin ONE React version across all workspaces (Remotion breaks with two Reacts). Declare each package's own dependencies (React as a peerDependency of `@bytereel/video`).
+
 ## Not in this feature
 - Database
 - Login
