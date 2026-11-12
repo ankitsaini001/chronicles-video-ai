@@ -38,7 +38,7 @@ export function Logo({ endorsement = false, size = "md", href, className }: Logo
           Byte<span className="text-gradient-gold">Reel</span>
         </span>
         {endorsement && (
-          <span className="mt-1 font-mono text-[9px] uppercase tracking-wider text-muted">by Tech Byte Chronicles</span>
+          <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted">by Tech Byte Chronicles</span>
         )}
       </span>
     </span>
