@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A1 · Foundation (project setup) |
 | **Depends on** | F01 |
 | **Design** | docs/BRAND.md |
@@ -19,8 +19,8 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 - Next.js + TypeScript in `apps/web`
 - Tailwind with Ember Gold colour tokens from docs/BRAND.md
 - Fonts: Exo 2, Ubuntu, Noto Sans Devanagari, JetBrains Mono
-- Basic components: primary button, secondary button, card, input, chip
-- Environment variable check on start-up (clear error if a key is missing)
+- Basic components: primary button, secondary button, card, input, chip (own Tailwind components, no shadcn)
+- A style sheet page showing all components and fonts side by side
 
 ## Setup notes from the F01 code review (handle while creating apps/web)
 - Add `"apps/*"` to the root `package.json` workspaces and decide how `npm run typecheck` covers `apps/web` (root include or its own `tsc`).
@@ -29,27 +29,28 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 - Pin ONE React version across all workspaces (Remotion breaks with two Reacts). Declare each package's own dependencies (React as a peerDependency of `@bytereel/video`).
 
 ## Not in this feature
+- Environment variable check (moved to F06, the first feature that needs a secret)
+- shadcn/ui component kit (not needed for our simple components; can be added later)
 - Database
 - Login
 - Any real page content
 
 ## Steps
-- [ ] Create the Next.js app in apps/web
-- [ ] Add Tailwind + brand tokens
-- [ ] Add fonts
-- [ ] Build the 5 basic components
-- [ ] Add env check
-- [ ] Founder opens localhost:3000
+- [ ] 1. Create the Next.js app in apps/web, register the workspace, one React version
+- [ ] 2. Add Tailwind + Ember Gold colour tokens
+- [ ] 3. Add the 4 fonts (self-hosted)
+- [ ] 4. Build the 5 basic components + style sheet page
+- [ ] 5. Typecheck/tests cover the web app; prototype tests still pass
+- [ ] 6. Founder opens localhost:3000
 
 ## How we test it (done when all are ticked)
 - [ ] `npm run dev` opens the page
 - [ ] Colours and fonts match the Stitch designs
 - [ ] Buttons/inputs look like the designs
-- [ ] Missing env key shows a clear message
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
-| | |
+| 2026-11-12 | Started. Founder agreed: env check moves to F06; Tailwind only (no shadcn). |
