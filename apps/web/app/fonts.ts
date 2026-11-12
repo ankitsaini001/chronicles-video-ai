@@ -21,7 +21,7 @@ export const ubuntu = Ubuntu({
 /** Hindi (Devanagari): used automatically for Devanagari characters (fallback in every font stack). */
 export const notoDevanagari = Noto_Sans_Devanagari({
   subsets: ["devanagari"],
-  weight: ["500", "600"],
+  weight: ["500", "600", "700"], // 700: bold Hindi headings and tiles (no fake bold)
   variable: "--font-devanagari",
   display: "swap",
 });
