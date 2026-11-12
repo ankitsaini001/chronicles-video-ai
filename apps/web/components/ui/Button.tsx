@@ -7,6 +7,8 @@ import { cn } from "./cn";
 // - primary + size "sm": compact pill (e.g. "Sign in" in the nav), no arrow
 // - secondary: transparent pill with a thin amber-15% border
 // One primary button per screen (BRAND §2 "one glowing element per screen").
+// Disabled actions must use the <button> variant (no href): a link can't be truly disabled for
+// keyboard users, so `disabled` is a type error on the link variant.
 
 type Variant = "primary" | "secondary";
 type Size = "md" | "sm";
@@ -27,9 +29,8 @@ type LinkProps = CommonProps & Omit<ComponentPropsWithoutRef<typeof Link>, keyof
 export type ButtonOrLinkProps = ButtonProps | LinkProps;
 
 const base =
-  "inline-flex min-h-11 items-center justify-center gap-3 rounded-full font-bold transition " +
-  "motion-safe:hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50 " +
-  "aria-disabled:pointer-events-none aria-disabled:opacity-50";
+  "inline-flex min-h-11 cursor-pointer items-center justify-center gap-3 rounded-full font-bold transition " +
+  "motion-safe:hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50";
 
 function classesFor(variant: Variant, size: Size, hasArrow: boolean, fullWidth: boolean): string {
   const v =

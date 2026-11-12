@@ -80,7 +80,7 @@ export default function StyleGuidePage() {
           </p>
           <p className="mt-3 max-w-prose text-base">Body text in Ubuntu. Short sentences, active verbs.</p>
           <p className="mt-2 text-[13px] text-muted">Small muted text in Ubuntu.</p>
-          <p className="mt-3 text-lg font-medium">हिंदी · पानी का चक्र कैसे काम करता है · महिला आवाज़ · पुरुष आवाज़</p>
+          <p lang="hi" className="mt-3 text-lg font-medium">हिंदी · पानी का चक्र कैसे काम करता है · महिला आवाज़ · पुरुष आवाज़</p>
           <p className="mt-3 font-mono text-xs uppercase tracking-[0.08em] text-amber-light">Label · JetBrains Mono · 1:12</p>
         </Card>
 
@@ -120,7 +120,9 @@ export default function StyleGuidePage() {
           <p className="mb-3 font-mono text-xs uppercase tracking-[0.08em] text-muted">Language</p>
           <div className="flex flex-wrap gap-3">
             <Chip selected>English</Chip>
-            <Chip>हिंदी Hindi</Chip>
+            <Chip>
+              <span lang="hi">हिंदी</span> Hindi
+            </Chip>
             <Chip>Hinglish</Chip>
           </div>
           <p className="mt-6 mb-3 font-mono text-xs uppercase tracking-[0.08em] text-muted">Voice</p>
