@@ -52,7 +52,7 @@ export function HowItWorks() {
 
 const EXAMPLES = [
   { title: "The Water Cycle", language: "English", seconds: 64, image: "/examples/water-cycle.svg" },
-  { title: "बचत खाता बनाम FD", titleLang: "hi", language: "हिंदी", seconds: 72, image: "/examples/savings-vs-fd.svg" },
+  { title: "बचत खाता बनाम FD", lang: "hi", language: "हिंदी", seconds: 72, image: "/examples/savings-vs-fd.svg" },
   { title: "Opportunity cost kya hai?", language: "Hinglish", seconds: 68, image: "/examples/opportunity-cost.svg" },
   { title: "How UPI works", language: "English", seconds: 81, image: "/examples/how-upi-works.svg" },
 ] as const;
@@ -69,7 +69,7 @@ export function Examples() {
               <div className="relative aspect-[320/420] overflow-hidden rounded-xl border border-line bg-screen">
                 <Image src={ex.image} alt="" fill unoptimized className="object-cover" />
                 <span
-                  lang={ex.language === "हिंदी" ? "hi" : undefined}
+                  lang={"lang" in ex ? ex.lang : undefined}
                   className="absolute top-2.5 left-2.5 rounded-full bg-bg/80 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-text"
                 >
                   {ex.language}
@@ -78,7 +78,7 @@ export function Examples() {
                   {ex.seconds}s
                 </span>
               </div>
-              <h3 lang={"titleLang" in ex ? ex.titleLang : undefined} className="mt-4 px-1 font-display text-base font-bold">
+              <h3 lang={"lang" in ex ? ex.lang : undefined} className="mt-4 px-1 font-display text-base font-bold">
                 {ex.title}
               </h3>
               <p className="mt-1 px-1 pb-1 text-xs text-muted">Sample reel</p>
@@ -117,15 +117,15 @@ export function Languages() {
                 </p>
                 {/* Voice samples arrive in F13; until then these are labels, not buttons. */}
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-5">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface-2 px-3.5 py-1.5 text-xs font-medium text-text">
-                    <span aria-hidden="true" className="text-amber">
-                      ▶
+                  {/* Same muted style for both, with no amber ▶, so they don't look clickable (amber = clickable). */}
+                  {["Female voice", "Male voice"].map((voice) => (
+                    <span
+                      key={voice}
+                      className="inline-flex items-center rounded-full border border-line px-3.5 py-1.5 text-xs font-medium text-muted"
+                    >
+                      {voice}
                     </span>
-                    Female voice
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-line px-3.5 py-1.5 text-xs font-medium text-muted">
-                    Male voice
-                  </span>
+                  ))}
                 </div>
               </Card>
             </li>
@@ -138,16 +138,17 @@ export function Languages() {
 
 /* ---------- Why ByteReel ---------- */
 
-const ICONS: Record<string, string> = {
+const ICONS = {
   visuals:
     "M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.25 2.25L18 6.75",
   chat: "M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a.75.75 0 01-.974-.94 3.754 3.754 0 00.56-1.748A8.17 8.17 0 013 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z",
   edit: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10",
   shield:
     "M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z",
-};
+} as const;
 
-const REASONS = [
+// Typed with the ICONS keys, so a mistyped icon name is a type error.
+const REASONS: { icon: keyof typeof ICONS; title: string; text: string }[] = [
   { icon: "visuals", title: "Visuals that explain", text: "Diagrams, flows, timelines, comparisons and charts that move with the narration." },
   { icon: "chat", title: "Change it by chatting", text: "Say “make scene 3 simpler” and ByteReel updates the storyboard." },
   { icon: "edit", title: "Captions you can correct", text: "Fix any caption word before you download or publish." },
