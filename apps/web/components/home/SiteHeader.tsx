@@ -6,8 +6,8 @@ import { Button } from "@/components/ui";
 // "Log in" to match the login screen (design audit note in docs/features/F03-home-page.md).
 
 const NAV = [
-  { href: "#how-it-works", label: "How it works" },
-  { href: "#examples", label: "Examples" },
+  { href: "/#how-it-works", label: "How it works" },
+  { href: "/#examples", label: "Examples" },
 ] as const;
 
 export function SiteHeader() {
@@ -21,7 +21,7 @@ export function SiteHeader() {
               {item.label}
             </Link>
           ))}
-          <Link href="#languages" className="inline-flex items-center gap-2 rounded transition hover:text-text">
+          <Link href="/#languages" className="inline-flex items-center gap-2 rounded transition hover:text-text">
             Hindi voices
             <span className="rounded-full bg-amber px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-on-amber">
               NEW
