@@ -34,6 +34,20 @@
   /* Depth (§4) */
   --shadow-card: 0 20px 50px #00000066;
   --shadow-glow: 0 10px 30px #f5a52466;
+  --shadow-tile: inset 0 2px 0 #ffffff2a, inset 0 -6px 12px #00000066, 0 12px 26px #00000088, 0 0 22px #f5a52433;
+
+  /* Motion (§7): glossy tiles float gently. Disabled by prefers-reduced-motion (base layer). */
+  --animate-float: float 6s ease-in-out infinite;
+
+  @keyframes float {
+    0%,
+    100% {
+      translate: 0 0;
+    }
+    50% {
+      translate: 0 -8px;
+    }
+  }
 }
 
 /*
@@ -69,6 +83,19 @@
   background-image: var(--gradient-button);
 }
 
+/* Glossy 3D tile fill (hero tiles). Pair with shadow-tile. */
+@utility bg-tile {
+  background-image: var(--gradient-tile);
+}
+
+/* Gold text for the glossy tiles (§5). */
+@utility text-gradient-tile {
+  background-image: linear-gradient(180deg, #fff0cc, #f5a524);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* Subtle warm light on dark sections. */
 @utility bg-atmosphere {
   background-image: var(--gradient-atmosphere);
@@ -76,6 +103,7 @@
 
 @layer base {
   html {
+    scroll-behavior: smooth;
     background-color: var(--color-bg);
     color: var(--color-text);
   }
