@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+/*
+ * ByteReel "Ember Gold" design tokens. Source of truth: docs/BRAND.md (§2 colour, §4 shape/depth).
+ * Use them as Tailwind classes, e.g. bg-bg, bg-surface, text-text, text-muted, border-line,
+ * text-amber, shadow-card, shadow-glow.
+ */
+@theme {
+  /* Core palette (§2) */
+  --color-bg: #0b0806;
+  --color-surface: #15100b;
+  --color-surface-2: #1a120a;
+  --color-screen: #120c07; /* phone/video screen inside mockups (§5) */
+  --color-amber: #f5a524;
+  --color-amber-deep: #e8901a;
+  --color-amber-light: #f5b65a; /* chip / eyebrow text (§5) */
+  --color-gold-cream: #ffe2a8;
+  --color-text: #f7efe6;
+  --color-muted: #b5a795;
+  --color-line: #f5a52426; /* amber at 15% */
+  --color-on-amber: #1a1005;
+  --color-logo-circle: #1a1a2e;
+
+  /* Status colours (§2) */
+  --color-success: #4ade80;
+  --color-success-bg: #0f2e1e;
+  --color-progress: #f5a524;
+  --color-progress-bg: #2a1d08;
+  --color-warning: #ffd27a;
+  --color-warning-bg: #2e2410;
+  --color-danger: #fb7185;
+  --color-danger-bg: #33141b;
+
+  /* Depth (§4) */
+  --shadow-card: 0 20px 50px #00000066;
+  --shadow-glow: 0 10px 30px #f5a52466;
+}
+
+/* Gradients (§2): used through the small utilities below. */
+:root {
+  --gradient-headline: linear-gradient(180deg, #ffe2a8 0%, #f5b04a 100%);
+  --gradient-button: linear-gradient(180deg, #f7b44a, #e8901a);
+  --gradient-tile: linear-gradient(150deg, #4a2c10 0%, #1e1208 60%, #120a04 100%);
+  --gradient-atmosphere: radial-gradient(45% 60% at 72% 45%, #f5a52422, transparent 70%);
+  color-scheme: dark;
+}
+
+/* Gold gradient text: only for 2–5 key words per headline and the "Reel" in the logo. */
+@utility text-gradient-gold {
+  background-image: var(--gradient-headline);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Primary button fill. */
+@utility bg-button {
+  background-image: var(--gradient-button);
+}
+
+/* Subtle warm light on dark sections. */
+@utility bg-atmosphere {
+  background-image: var(--gradient-atmosphere);
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Accessibility (§9): visible focus ring on every interactive element. */
+  :focus-visible {
+    outline: 2px solid var(--color-gold-cream);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
