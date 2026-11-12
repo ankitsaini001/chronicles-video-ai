@@ -23,7 +23,7 @@ export function SiteFooter() {
         </div>
         <nav aria-label="Footer" className="flex gap-6">
           {LINKS.map((l) => (
-            <Link key={l.href} href={l.href} className="rounded transition hover:text-text">
+            <Link key={l.href} href={l.href} className="inline-flex min-h-11 items-center rounded transition hover:text-text">
               {l.label}
             </Link>
           ))}
