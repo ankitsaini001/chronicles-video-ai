@@ -5,8 +5,8 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 ## Rules (agreed with the founder, 2026-11-12)
 1. **One feature at a time.** Only one feature is 🔄 In progress. We never start the next feature early.
 2. **Every feature follows the same flow:**
-   1. Agree on the small steps (in the feature file)
-   2. Build step by step, explaining each step in plain words
+   1. The small steps are listed in the feature file
+   2. Build all steps in one go (each step its own commit), explaining them in plain words in the report. Stop mid-feature only if the founder must act (accounts, keys), a decision is needed, or something unexpected happens (founder's choice, 2026-11-12)
    3. Test: automated tests + the checks in "How we test it"
    4. Code review (code-reviewer agent)
    5. **Founder tests it and says OK**

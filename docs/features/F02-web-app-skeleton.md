@@ -40,11 +40,11 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 - [x] 2. Add Tailwind + Ember Gold colour tokens
 - [x] 3. Add the 4 fonts (self-hosted)
 - [x] 4. Build the 5 basic components + style sheet page
-- [ ] 5. Typecheck/tests cover the web app; prototype tests still pass
+- [x] 5. Typecheck/tests cover the web app; prototype tests still pass
 - [ ] 6. Founder opens localhost:3000
 
 ## How we test it (done when all are ticked)
-- [ ] `npm run dev` opens the page
+- [x] `npm run dev` opens the page
 - [ ] Colours and fonts match the Stitch designs
 - [ ] Buttons/inputs look like the designs
 - [ ] Code review passed (code-reviewer agent)
@@ -58,3 +58,4 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 | 2026-11-12 | Step 2: Tailwind **4.3.3** + `@tailwindcss/postcss` 4.3.3 (4.3.4/4.3.5 were <2 weeks old), set up as in the bundled Next.js docs (`postcss.config.mjs`, `app/globals.css` with `@import "tailwindcss"`, imported in layout). Ember Gold tokens from BRAND.md §2/§4 in `@theme` (bg, surface, surface-2, screen, amber, amber-deep, amber-light, gold-cream, text, muted, line, on-amber, logo-circle, 4 status pairs, shadow-card, shadow-glow) + utilities `text-gradient-gold`, `bg-button`, `bg-atmosphere`; base styles: dark background, gold-cream focus ring (§9), reduced-motion. Placeholder page shows swatches, status badges and button fill; screenshot checked. Prototype tests 186/186. |
 | 2026-11-12 | Step 3: fonts via `next/font/google` (self-hosted, as in the bundled Next.js docs) in `app/fonts.ts`: Exo 2 700/800, Ubuntu 400/500/700, Noto Sans Devanagari 500/600 (devanagari subset), JetBrains Mono 500; CSS variables on `<html>`. Tailwind `font-sans` (Ubuntu, default body 15px/1.55), `font-display` (Exo 2, used by h1–h3 with −0.01em + balanced wrap), `font-mono` (JetBrains Mono); Devanagari is the fallback in every stack so Hindi always uses Noto. Check: screenshot shows all 4 fonts, Hindi conjuncts/nukta correct (चक्र, आवाज़); stylesheet loads 40 woff2 files from `/_next/static/media`, 0 references to Google. |
 | 2026-11-12 | Step 4: `apps/web/components/ui/` — `Button` (primary with ↗ circle + glow, small primary, secondary; renders a `<button>` or a Next `<Link>` when `href` is given; full-width centres the label like the Stitch auth screens), `Card`, `Input` (label, helper, error with aria-describedby/aria-invalid; `id` required), `Chip` (selectable, aria-pressed, optional ▶ icon), `cn` helper. All hook-free, so they work in server and client components (password show/hide comes with F08). Developer-only style sheet at `/styleguide` (404 in production builds); home page back to a simple placeholder. Checked by screenshot; web `tsc` clean; prototype tests 186/186. |
+| 2026-11-12 | Founder chose **one review per feature** (all steps in one go, report once). Step 5: root `npm run typecheck` = root `tsc` + `npm run typecheck -w @bytereel/web` (web has its own `tsc --noEmit`). Proved it catches web errors with a temporary broken file (exit 1), then removed it. Production build `next build` passes (incl. Next's TypeScript step with TS 7); `next start`: `/` 200, `/styleguide` 404 (developer-only works). Vitest still only runs `tests/` (web has no tests yet). Tests 186/186. |
