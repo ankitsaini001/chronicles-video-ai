@@ -6,15 +6,16 @@ import { Button, cn, Icon, type IconName } from "@/components/ui";
 
 const POINTS = ["Storyboard in about 30 seconds", "Motion graphics timed to the voice", "Download or post to Instagram"];
 
-// Positions are relative to the 280px phone; tiles overlap only its frame and empty top/bottom.
-// Below `sm` there is no room beside the phone, so the tiles that would cover its text are hidden.
+// Positions are relative to the 280px phone. Tiles sit beside, above or below it and touch only
+// its frame, never its text. Below `sm` there is no room beside the phone, so three are hidden.
+// Emoji sit outside the gold gradient text so they keep their own colours.
 const TILES = [
   { label: "Explainer", className: "-top-4 -left-4 sm:-left-10 -rotate-8", delay: "0s" },
-  { label: "AI ✨", className: "hidden sm:block top-10 -right-4 sm:-right-10 rotate-6", delay: "-1.2s" },
-  { label: "हिंदी", lang: "hi", className: "top-1/3 -left-6 sm:-left-14 -rotate-5", delay: "-2.5s" },
-  { label: "Reels ⚡", className: "hidden sm:block top-1/2 -right-6 sm:-right-12 rotate-9", delay: "-3.8s" },
-  { label: "Voice 🎙️", className: "hidden sm:block bottom-12 -left-4 sm:-left-10 -rotate-12", delay: "-4.3s" },
-  { label: "60s ⏱️", className: "-bottom-3 -right-2 sm:-right-8 rotate-7", delay: "-0.7s" },
+  { label: "AI", emoji: "✨", className: "hidden sm:block top-10 sm:-right-14 rotate-6", delay: "-1.2s" },
+  { label: "हिंदी", lang: "hi", className: "top-[22%] -left-6 sm:top-1/3 sm:-left-14 -rotate-5", delay: "-2.5s" },
+  { label: "Reels", emoji: "⚡", className: "hidden sm:block top-1/2 sm:-right-20 rotate-9", delay: "-3.8s" },
+  { label: "Voice", emoji: "🎙️", className: "hidden sm:block -bottom-6 sm:-left-12 -rotate-12", delay: "-4.3s" },
+  { label: "60s", emoji: "⏱️", className: "-bottom-6 -right-2 sm:-right-10 rotate-7", delay: "-0.7s" },
 ] as const;
 
 const STAGES: { icon: IconName; label: string; text: string; active?: boolean; dim?: boolean }[] = [
@@ -106,7 +107,7 @@ export function Hero() {
             Explain<span className="font-extrabold text-amber">.</span> Animate<span className="font-extrabold text-amber">.</span>{" "}
             Post<span className="font-extrabold text-amber">.</span>
           </p>
-          <h1 className="text-[40px] leading-[1.05] font-extrabold tracking-tight sm:text-5xl lg:text-[56px] xl:text-[60px]">
+          <h1 className="text-4xl leading-[1.05] font-extrabold tracking-tight sm:text-5xl lg:text-[56px] xl:text-[60px]">
             Turn any topic into a <span className="text-gradient-gold min-[360px]:whitespace-nowrap">ready-to-post Reel</span>
           </h1>
           <p className="max-w-xl text-base leading-relaxed text-muted sm:text-lg">
@@ -125,7 +126,7 @@ export function Hero() {
           </ul>
           <div className="flex w-full flex-col items-start gap-4 pt-4 sm:flex-row sm:items-center">
             <Button href="/signup">Create your first reel</Button>
-            <p className="font-mono text-xs text-muted/70">No credit card · Free in beta</p>
+            <p className="font-mono text-xs text-muted">No credit card · Free in private beta</p>
           </div>
         </div>
 
@@ -148,6 +149,7 @@ export function Hero() {
                 )}
               >
                 <span className="text-gradient-tile">{tile.label}</span>
+                {"emoji" in tile && <span className="ml-1.5">{tile.emoji}</span>}
               </span>
             ))}
           </div>
