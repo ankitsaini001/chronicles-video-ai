@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ByteReel — My videos</title>
+<!-- Google Fonts & Material Symbols -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;family=Noto+Sans+Devanagari:wght@600;700&amp;family=Ubuntu:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-tertiary-fixed-variant": "#004c69",
+            "surface-variant": "#3c332a",
+            "error-text": "#FB7185",
+            "on-surface-variant": "#d7c3ae",
+            "primary-container": "#f5a524",
+            "success-text": "#4ADE80",
+            "line": "#F5A52426",
+            "on-secondary-fixed": "#2c1700",
+            "surface-dim": "#19120a",
+            "surface-container-lowest": "#130d06",
+            "gold-cream": "#FFE2A8",
+            "secondary-container": "#d78202",
+            "on-surface": "#efe0d2",
+            "on-primary-container": "#643f00",
+            "on-error-container": "#ffdad6",
+            "on-error": "#690005",
+            "inverse-on-surface": "#372f26",
+            "inverse-primary": "#835400",
+            "surface-bright": "#40382e",
+            "secondary-fixed": "#ffdcbc",
+            "surface-2": "#1A120A",
+            "on-tertiary-container": "#004d69",
+            "on-secondary-container": "#462700",
+            "secondary": "#ffb86c",
+            "surface-container": "#261e16",
+            "surface-container-high": "#302920",
+            "surface": "#15100B",
+            "on-primary-fixed-variant": "#643f00",
+            "background": "#19120a",
+            "on-primary-fixed": "#2a1800",
+            "on-secondary": "#492900",
+            "tertiary": "#9ad9ff",
+            "tertiary-fixed-dim": "#7bd0ff",
+            "text": "#F7EFE6",
+            "success-bg": "#0F2E1E",
+            "on-tertiary-fixed": "#001e2c",
+            "warning-bg": "#2E2410",
+            "tertiary-fixed": "#c4e7ff",
+            "secondary-fixed-dim": "#ffb86c",
+            "on-background": "#efe0d2",
+            "inverse-surface": "#efe0d2",
+            "warning-text": "#FFD27A",
+            "surface-tint": "#ffb957",
+            "error-container": "#93000a",
+            "amber-deep": "#E8901A",
+            "surface-container-low": "#211a12",
+            "primary-fixed": "#ffddb5",
+            "outline": "#9f8e7a",
+            "on-amber": "#1A1005",
+            "surface-container-highest": "#3c332a",
+            "on-tertiary": "#003549",
+            "on-secondary-fixed-variant": "#683c00",
+            "primary-fixed-dim": "#ffb957",
+            "error": "#ffb4ab",
+            "bg": "#0B0806",
+            "error-bg": "#33141B",
+            "primary": "#ffc77f",
+            "text-muted": "#B5A795",
+            "tertiary-container": "#36c2ff",
+            "outline-variant": "#524434",
+            "on-primary": "#462b00"
+          },
+          "borderRadius": {
+            "DEFAULT": "1rem",
+            "lg": "2rem",
+            "xl": "3rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "margin": "1.5rem",
+            "space-sm": "0.5rem",
+            "space-lg": "1rem",
+            "space-2xl": "3rem",
+            "gutter": "1rem",
+            "space-md": "0.75rem",
+            "space-xl": "1.5rem",
+            "space-3xl": "6rem",
+            "space-xs": "0.25rem"
+          },
+          "fontFamily": {
+            "small": ["Ubuntu"],
+            "h1": ["\"Exo 2\""],
+            "h3-mobile": ["\"Exo 2\""],
+            "label": ["\"JetBrains Mono\""],
+            "h3": ["\"Exo 2\""],
+            "h2-mobile": ["\"Exo 2\""],
+            "body-lg": ["Ubuntu"],
+            "body": ["Ubuntu"],
+            "h2": ["\"Exo 2\""],
+            "display-mobile": ["\"Exo 2\""],
+            "tagline": ["\"Exo 2\""],
+            "h1-mobile": ["\"Exo 2\""],
+            "display": ["\"Exo 2\""],
+            "devanagari": ["\"Noto Sans Devanagari\"", "\"Ubuntu\""]
+          },
+          "fontSize": {
+            "small": ["13px", { "lineHeight": "1.5", "fontWeight": "400" }],
+            "h1": ["44px", { "lineHeight": "1.1", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "h3-mobile": ["19px", { "lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "label": ["11px", { "lineHeight": "1.4", "letterSpacing": "0.08em", "fontWeight": "500" }],
+            "h3": ["22px", { "lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "h2-mobile": ["24px", { "lineHeight": "1.15", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+            "body": ["15px", { "lineHeight": "1.55", "fontWeight": "400" }],
+            "h2": ["32px", { "lineHeight": "1.15", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "display-mobile": ["36px", { "lineHeight": "1.05", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "tagline": ["19px", { "lineHeight": "1.3", "fontWeight": "700" }],
+            "h1-mobile": ["30px", { "lineHeight": "1.1", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "display": ["60px", { "lineHeight": "1.05", "letterSpacing": "-0.01em", "fontWeight": "800" }]
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-bg text-text min-h-screen selection:bg-primary-container selection:text-on-amber antialiased font-body">
+<!-- Top App Bar -->
+<header class="sticky top-0 z-50 w-full bg-surface border-b border-line">
+<div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+<!-- Left side: Brand Logo & Primary Navigation -->
+<div class="flex items-center gap-8">
+<a class="flex items-center gap-2.5 group" href="#">
+<div class="w-8 h-8 rounded-full bg-[#1A1A2E] border border-line flex items-center justify-center shadow-[0_0_12px_#F5A52433]">
+<span class="material-symbols-outlined text-primary-container text-[18px] translate-x-0.5" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<span class="font-h3 text-h3 tracking-tight font-extrabold flex items-center">
+<span class="text-text">Byte</span>
+<span class="bg-gradient-to-b from-gold-cream to-secondary-container bg-clip-text text-transparent">Reel</span>
+</span>
+</a>
+<!-- Navigation Tabs -->
+<nav class="flex items-center gap-6 h-16">
+<a class="h-full flex items-center border-b-2 border-primary-container text-primary-container font-ubuntu font-bold text-body" href="#">
+            My videos
+          </a>
+<a class="h-full flex items-center border-b-2 border-transparent text-text-muted hover:text-text font-ubuntu font-normal text-body transition-colors" href="#">
+            Settings
+          </a>
+</nav>
+</div>
+<!-- Right side: Utility cluster -->
+<div class="flex items-center gap-4">
+<!-- Quota Pill Chip -->
+<div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-2 border border-line">
+<span class="font-label text-label text-text-muted uppercase tracking-wider">Videos today: 1 of 3</span>
+</div>
+<!-- Notification Bell with Amber Badge -->
+<button aria-label="Notifications" class="relative w-9 h-9 rounded-full flex items-center justify-center text-text-muted hover:text-text transition-colors">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary-container shadow-[0_0_8px_#F5A524]"></span>
+</button>
+<!-- User Avatar Circle -->
+<div class="w-9 h-9 rounded-full bg-surface-2 border border-line flex items-center justify-center font-h3 text-small font-bold text-text cursor-pointer">
+          T
+        </div>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="max-w-7xl mx-auto px-6 py-8">
+<!-- Header Row -->
+<div class="flex items-center justify-between mb-6">
+<h1 class="font-h1 text-[36px] leading-[40px] font-extrabold text-text tracking-tight">
+        My videos
+      </h1>
+<!-- Primary Action Button -->
+<button class="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-gradient-to-b from-[#F7B44A] to-[#E8901A] text-on-amber font-body font-bold text-body shadow-[0_4px_16px_#F5A52433] hover:shadow-[0_6px_20px_#F5A52466] hover:-translate-y-0.5 active:scale-95 transition-all">
+<span>+ New video</span>
+<span class="w-5 h-5 rounded-full bg-on-amber/15 flex items-center justify-center font-mono text-[12px] leading-none">↗</span>
+</button>
+</div>
+<!-- Tabs Navigation Row -->
+<div class="flex items-center gap-2 border-b border-line mb-8">
+<button class="px-4 py-2.5 font-body font-bold text-body text-primary-container border-b-2 border-primary-container -mb-[1px]">
+        Drafts
+      </button>
+<button class="px-4 py-2.5 font-body font-normal text-body text-text-muted hover:text-text border-b-2 border-transparent -mb-[1px] transition-colors">
+        Ready
+      </button>
+<button class="px-4 py-2.5 font-body font-normal text-body text-text-muted hover:text-text border-b-2 border-transparent -mb-[1px] transition-colors">
+        Scheduled
+      </button>
+<button class="px-4 py-2.5 font-body font-normal text-body text-text-muted hover:text-text border-b-2 border-transparent -mb-[1px] transition-colors">
+        Published
+      </button>
+</div>
+<!-- 4-Column Project Card Grid -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+<!-- Card 1 -->
+<div class="bg-surface border border-line rounded-2xl p-4 relative group flex flex-col justify-between shadow-[0_20px_50px_#00000066] hover:border-primary-container/40 transition-all duration-200">
+<!-- More Options Button -->
+<button aria-label="More options" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-2 transition-colors">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+<div>
+<!-- 9:16 Vertical Thumbnail Preview -->
+<div class="w-full aspect-[9/16] rounded-xl bg-[#120C07] border border-[#F5A52415] flex flex-col items-center justify-center relative overflow-hidden mb-4 p-4 shadow-inner">
+<!-- Amber Vector Line Art: Cloud and Raindrops -->
+<svg class="w-20 h-20 text-primary-container/80 stroke-current" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewbox="0 0 64 64">
+<path d="M46 36a10 10 0 0 0-4-19 14 14 0 0 0-26 5A10 10 0 0 0 18 42h26a8 8 0 0 0 2-6z"></path>
+<line x1="22" x2="20" y1="46" y2="52"></line>
+<line x1="32" x2="30" y1="46" y2="54"></line>
+<line x1="42" x2="40" y1="46" y2="52"></line>
+</svg>
+<div class="absolute inset-0 bg-gradient-to-t from-[#120C07] via-transparent to-transparent opacity-60 pointer-events-none"></div>
+</div>
+<!-- Video Details -->
+<h2 class="font-h3 text-base leading-snug font-bold text-text mb-2.5 truncate" title="How the water cycle works">
+            How the water cycle works
+          </h2>
+<!-- Chips Row -->
+<div class="flex items-center gap-2 mb-3">
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              English
+            </span>
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              Female voice
+            </span>
+</div>
+</div>
+<!-- Footer / State Area -->
+<div class="flex items-center justify-between pt-2">
+<span class="rounded-full px-2.5 py-1 text-xs font-medium text-warning-text bg-warning-bg">
+            Storyboard ready
+          </span>
+<span class="font-label text-label text-text-muted">
+            Updated 10 min ago
+          </span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface border border-line rounded-2xl p-4 relative group flex flex-col justify-between shadow-[0_20px_50px_#00000066] hover:border-primary-container/40 transition-all duration-200">
+<!-- More Options Button -->
+<button aria-label="More options" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-2 transition-colors">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+<div>
+<!-- 9:16 Vertical Thumbnail Preview -->
+<div class="w-full aspect-[9/16] rounded-xl bg-[#120C07] border border-[#F5A52415] flex flex-col items-center justify-center relative overflow-hidden mb-2 p-4 shadow-inner">
+<!-- Amber Vector Line Art: Smartphone and Rupee Coin -->
+<svg class="w-20 h-20 text-primary-container/80 stroke-current" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewbox="0 0 64 64">
+<rect height="44" rx="4" width="28" x="18" y="10"></rect>
+<line x1="28" x2="36" y1="14" y2="14"></line>
+<circle cx="32" cy="48" fill="currentColor" r="1.5"></circle>
+<circle cx="32" cy="29" r="9"></circle>
+<!-- Rupee Symbol glyph -->
+<path d="M29 25h6M29 28h6M29 25c1.5 0 3 0.8 3 2.5s-1.5 2.5-3 2.5h1l3 4" stroke-width="1.5"></path>
+</svg>
+<div class="absolute inset-0 bg-gradient-to-t from-[#120C07] via-transparent to-transparent opacity-60 pointer-events-none"></div>
+</div>
+<!-- Thin Amber Progress Bar (60%) -->
+<div class="w-full bg-[#1A120A] h-1 rounded-full overflow-hidden mb-3 border border-[#F5A52415]">
+<div class="bg-primary-container h-full rounded-full shadow-[0_0_6px_#F5A524]" style="width: 60%;"></div>
+</div>
+<!-- Video Details -->
+<h2 class="font-h3 text-base leading-snug font-bold text-text mb-2.5 truncate" title="UPI kaise kaam karta hai">
+            UPI kaise kaam karta hai
+          </h2>
+<!-- Chips Row -->
+<div class="flex items-center gap-2 mb-3">
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              Hinglish
+            </span>
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              Male voice
+            </span>
+</div>
+</div>
+<!-- Footer / State Area -->
+<div class="flex items-center justify-between pt-2">
+<span class="rounded-full px-2.5 py-1 text-xs font-medium text-primary-container bg-[#2A1D08]">
+            Making video…
+          </span>
+<span class="font-label text-label text-text-muted">
+            Updated 2 min ago
+          </span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface border border-line rounded-2xl p-4 relative group flex flex-col justify-between shadow-[0_20px_50px_#00000066] hover:border-primary-container/40 transition-all duration-200">
+<!-- More Options Button -->
+<button aria-label="More options" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-2 transition-colors">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+<div>
+<!-- 9:16 Vertical Thumbnail Preview -->
+<div class="w-full aspect-[9/16] rounded-xl bg-[#120C07] border border-[#F5A52415] flex flex-col items-center justify-center relative overflow-hidden mb-4 p-4 shadow-inner">
+<!-- Amber Vector Line Art: Bank Building and Coin -->
+<svg class="w-20 h-20 text-primary-container/80 stroke-current" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewbox="0 0 64 64">
+<path d="M12 26l20-10 20 10v3H12v-3z"></path>
+<line x1="18" x2="18" y1="29" y2="44"></line>
+<line x1="27" x2="27" y1="29" y2="44"></line>
+<line x1="37" x2="37" y1="29" y2="44"></line>
+<line x1="46" x2="46" y1="29" y2="44"></line>
+<rect height="4" rx="1" width="44" x="10" y="44"></rect>
+<circle cx="44" cy="22" fill="#120C07" r="5" stroke-width="1.5"></circle>
+<path d="M42 21h3M42 23h3" stroke-width="1.2"></path>
+</svg>
+<div class="absolute inset-0 bg-gradient-to-t from-[#120C07] via-transparent to-transparent opacity-60 pointer-events-none"></div>
+</div>
+<!-- Video Details (Noto Sans Devanagari) -->
+<h2 class="font-devanagari text-base leading-snug font-bold text-text mb-2.5 truncate" title="बचत खाता बनाम FD">
+            बचत खाता बनाम FD
+          </h2>
+<!-- Chips Row -->
+<div class="flex items-center gap-2 mb-3">
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              हिंदी
+            </span>
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              Female voice
+            </span>
+</div>
+</div>
+<!-- Footer / State Area -->
+<div class="flex items-center justify-between pt-2">
+<span class="rounded-full px-2.5 py-1 text-xs font-medium text-primary-container bg-[#2A1D08]">
+            Writing storyboard…
+          </span>
+<span class="font-label text-label text-text-muted">
+            Updated just now
+          </span>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface border border-line rounded-2xl p-4 relative group flex flex-col justify-between shadow-[0_20px_50px_#00000066] hover:border-primary-container/40 transition-all duration-200">
+<!-- More Options Button -->
+<button aria-label="More options" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-2 transition-colors">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+<div>
+<!-- 9:16 Vertical Thumbnail Preview -->
+<div class="w-full aspect-[9/16] rounded-xl bg-[#120C07] border border-[#F5A52415] flex flex-col items-center justify-center relative overflow-hidden mb-4 p-4 shadow-inner">
+<!-- Amber Vector Line Art: Leaf and Sun -->
+<svg class="w-20 h-20 text-primary-container/80 stroke-current" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewbox="0 0 64 64">
+<!-- Radiant Sun -->
+<circle cx="24" cy="22" r="6"></circle>
+<line x1="24" x2="24" y1="11" y2="14"></line>
+<line x1="24" x2="24" y1="30" y2="33"></line>
+<line x1="13" x2="16" y1="22" y2="22"></line>
+<line x1="32" x2="35" y1="22" y2="22"></line>
+<!-- Leaf Shape -->
+<path d="M48 26c0 14-11 25-25 25 0-14 11-25 25-25z"></path>
+<path d="M23 51c6-6 15-15 25-25"></path>
+</svg>
+<div class="absolute inset-0 bg-gradient-to-t from-[#120C07] via-transparent to-transparent opacity-60 pointer-events-none"></div>
+</div>
+<!-- Video Details -->
+<h2 class="font-h3 text-base leading-snug font-bold text-text mb-2.5 truncate" title="Photosynthesis in 60 seconds">
+            Photosynthesis in 60 seconds
+          </h2>
+<!-- Chips Row -->
+<div class="flex items-center gap-2 mb-3">
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              English
+            </span>
+<span class="rounded-full px-2.5 py-0.5 text-xs font-label bg-surface-2 text-text-muted border border-[#F5A52420]">
+              Male voice
+            </span>
+</div>
+</div>
+<!-- Footer / State Area -->
+<div class="flex items-center justify-between pt-2">
+<span class="rounded-full px-2.5 py-1 text-xs font-medium text-error-text bg-error-bg cursor-pointer hover:underline">
+            Failed · Retry
+          </span>
+<span class="font-label text-label text-text-muted">
+            Updated yesterday
+          </span>
+</div>
+</div>
+</div>
+</main>
+</body></html>

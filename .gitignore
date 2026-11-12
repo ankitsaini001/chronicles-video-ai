@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Local environment files (secrets). The committed template is .env.example.
+.env
+.env.*
+!.env.example
+
+# Generated pipeline artifacts (plans, manifests, audio, video). Never contains API keys.
+runs/
+
+# Build output and tooling caches
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.vitest/
+
+# OS / editor noise
+.DS_Store
+*.log

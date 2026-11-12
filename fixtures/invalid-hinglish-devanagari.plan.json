@@ -1,0 +1,510 @@
+{
+  "schemaVersion": 1,
+  "projectId": "fixture-water-cycle-hinglish",
+  "ownerId": "fixture-owner",
+  "versionId": "v-invalid-hinglish-devanagari",
+  "parentVersionId": null,
+  "topic": "How the water cycle works",
+  "audience": "Curious school students and adults in India, no science background needed",
+  "learningObjective": "Explain the four stages of the water cycle (evaporation, condensation, precipitation, collection) and why the same water keeps moving around the planet",
+  "language": "hinglish",
+  "voicePreset": "hinglish-female",
+  "sources": [
+    {
+      "id": "topic-notes",
+      "title": "Topic file: examples/water-cycle.md",
+      "notes": "Explain how the water cycle works: evaporation, condensation, precipitation and collection. Mention roughly how Earth's water is split between oceans, ice and fresh water."
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-hook",
+      "type": "title-hook",
+      "narration": [
+        {
+          "id": "line-hook-question",
+          "text": "Kabhi socha hai, baarish aati kahan se hai, aur girne ke baad jaati kahan hai?",
+          "speech": "कभी सोचा है, बारिश आती कहाँ से है, और गिरने के बाद जाती कहाँ है?",
+          "display": "कभी सोचा है, बारिश आती कहाँ से है, और गिरने के बाद जाती कहाँ है?"
+        },
+        {
+          "id": "line-hook-answer",
+          "text": "Iska jawab hai ek loop jo billions of years se chal raha hai: the water cycle."
+        }
+      ],
+      "objects": [
+        {
+          "id": "hook-question",
+          "kind": "subtitle",
+          "label": "Baarish aati kahan se hai?"
+        },
+        {
+          "id": "hook-raindrop",
+          "kind": "icon",
+          "label": "Raindrop"
+        },
+        {
+          "id": "hook-title",
+          "kind": "headline",
+          "label": "The Water Cycle"
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-question",
+          "anchor": {
+            "narrationId": "line-hook-question",
+            "phrase": "baarish aati kahan se hai"
+          },
+          "action": "appear",
+          "target": "hook-question"
+        },
+        {
+          "id": "ev-raindrop",
+          "anchor": {
+            "narrationId": "line-hook-question",
+            "phrase": "girne ke baad"
+          },
+          "action": "pulse",
+          "target": "hook-raindrop"
+        },
+        {
+          "id": "ev-title",
+          "anchor": {
+            "narrationId": "line-hook-answer",
+            "phrase": "the water cycle"
+          },
+          "action": "appear",
+          "target": "hook-title"
+        }
+      ]
+    },
+    {
+      "id": "scene-evaporation",
+      "type": "process-flow",
+      "narration": [
+        {
+          "id": "line-evap-heat",
+          "text": "It starts with the Sun. When sunlight heats oceans, lakes and rivers, water particles move faster."
+        },
+        {
+          "id": "line-evap-rise",
+          "text": "Some escape into the air as invisible water vapour. This is called evaporation."
+        }
+      ],
+      "objects": [
+        {
+          "id": "sun",
+          "kind": "icon",
+          "label": "Sun"
+        },
+        {
+          "id": "ocean",
+          "kind": "node",
+          "label": "Oceans, lakes, rivers"
+        },
+        {
+          "id": "water-particles",
+          "kind": "particles",
+          "label": "Water particles"
+        },
+        {
+          "id": "vapour",
+          "kind": "node",
+          "label": "Water vapour"
+        },
+        {
+          "id": "arrow-evaporation",
+          "kind": "arrow",
+          "label": "Evaporation"
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-sun",
+          "anchor": {
+            "narrationId": "line-evap-heat",
+            "phrase": "the Sun"
+          },
+          "action": "appear",
+          "target": "sun"
+        },
+        {
+          "id": "ev-heat",
+          "anchor": {
+            "narrationId": "line-evap-heat",
+            "phrase": "sunlight heats oceans"
+          },
+          "action": "highlight",
+          "target": "ocean"
+        },
+        {
+          "id": "ev-speed-up",
+          "anchor": {
+            "narrationId": "line-evap-heat",
+            "phrase": "move faster"
+          },
+          "action": "speed-up",
+          "target": "water-particles"
+        },
+        {
+          "id": "ev-rise",
+          "anchor": {
+            "narrationId": "line-evap-rise",
+            "phrase": "escape into the air"
+          },
+          "action": "rise",
+          "target": "vapour"
+        },
+        {
+          "id": "ev-evaporation",
+          "anchor": {
+            "narrationId": "line-evap-rise",
+            "phrase": "evaporation"
+          },
+          "action": "appear",
+          "target": "arrow-evaporation"
+        }
+      ]
+    },
+    {
+      "id": "scene-condensation",
+      "type": "labeled-diagram",
+      "narration": [
+        {
+          "id": "line-cond-cool",
+          "text": "As the vapour rises, the air around it gets colder."
+        },
+        {
+          "id": "line-cond-cloud",
+          "text": "The vapour cools and turns back into tiny droplets of liquid water. Billions of these droplets together form a cloud. This is condensation."
+        }
+      ],
+      "objects": [
+        {
+          "id": "cloud",
+          "kind": "diagram",
+          "label": "Cloud"
+        },
+        {
+          "id": "cold-air",
+          "kind": "part",
+          "label": "Colder air"
+        },
+        {
+          "id": "droplets",
+          "kind": "part",
+          "label": "Tiny water droplets"
+        },
+        {
+          "id": "arrow-condensation",
+          "kind": "arrow",
+          "label": "Condensation"
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-cold",
+          "anchor": {
+            "narrationId": "line-cond-cool",
+            "phrase": "gets colder"
+          },
+          "action": "appear",
+          "target": "cold-air"
+        },
+        {
+          "id": "ev-droplets",
+          "anchor": {
+            "narrationId": "line-cond-cloud",
+            "phrase": "tiny droplets"
+          },
+          "action": "appear",
+          "target": "droplets"
+        },
+        {
+          "id": "ev-cloud",
+          "anchor": {
+            "narrationId": "line-cond-cloud",
+            "phrase": "form a cloud"
+          },
+          "action": "highlight",
+          "target": "cloud"
+        },
+        {
+          "id": "ev-condensation",
+          "anchor": {
+            "narrationId": "line-cond-cloud",
+            "phrase": "This is condensation"
+          },
+          "action": "point-to",
+          "target": "arrow-condensation"
+        }
+      ]
+    },
+    {
+      "id": "scene-precipitation",
+      "type": "process-flow",
+      "narration": [
+        {
+          "id": "line-prec-fall",
+          "text": "When the droplets join and become too heavy to float, they fall as rain, snow or hail. That is precipitation."
+        },
+        {
+          "id": "line-prec-collect",
+          "text": "On the ground, the water flows into rivers, soaks into the soil as groundwater, and finally returns to the sea. This is collection."
+        }
+      ],
+      "objects": [
+        {
+          "id": "rain",
+          "kind": "particles",
+          "label": "Rain, snow, hail"
+        },
+        {
+          "id": "rivers",
+          "kind": "node",
+          "label": "Rivers"
+        },
+        {
+          "id": "groundwater",
+          "kind": "node",
+          "label": "Groundwater"
+        },
+        {
+          "id": "sea",
+          "kind": "node",
+          "label": "Sea"
+        },
+        {
+          "id": "arrow-collection",
+          "kind": "arrow",
+          "label": "Collection"
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-gather",
+          "anchor": {
+            "narrationId": "line-prec-fall",
+            "phrase": "droplets join"
+          },
+          "action": "gather",
+          "target": "rain"
+        },
+        {
+          "id": "ev-fall",
+          "anchor": {
+            "narrationId": "line-prec-fall",
+            "phrase": "fall as rain"
+          },
+          "action": "fall",
+          "target": "rain"
+        },
+        {
+          "id": "ev-rivers",
+          "anchor": {
+            "narrationId": "line-prec-collect",
+            "phrase": "flows into rivers"
+          },
+          "action": "flow",
+          "target": "rivers"
+        },
+        {
+          "id": "ev-groundwater",
+          "anchor": {
+            "narrationId": "line-prec-collect",
+            "phrase": "soaks into the soil"
+          },
+          "action": "appear",
+          "target": "groundwater"
+        },
+        {
+          "id": "ev-sea",
+          "anchor": {
+            "narrationId": "line-prec-collect",
+            "phrase": "returns to the sea"
+          },
+          "action": "flow",
+          "target": "sea"
+        },
+        {
+          "id": "ev-collection",
+          "anchor": {
+            "narrationId": "line-prec-collect",
+            "phrase": "This is collection"
+          },
+          "action": "appear",
+          "target": "arrow-collection"
+        }
+      ]
+    },
+    {
+      "id": "scene-earth-water",
+      "type": "chart",
+      "narration": [
+        {
+          "id": "line-chart-oceans",
+          "text": "Most of Earth's water never leaves the oceans for long. About 97 percent is salty seawater.",
+          "display": "Most of Earth's water never leaves the oceans for long. About 97% is salty seawater."
+        },
+        {
+          "id": "line-chart-rest",
+          "text": "About 2 percent is frozen in ice, and only around 1 percent is fresh water in the ground, lakes and rivers.",
+          "display": "About 2% is frozen in ice, and only around 1% is fresh water in the ground, lakes and rivers."
+        }
+      ],
+      "objects": [
+        {
+          "id": "axis",
+          "kind": "axis",
+          "label": "Share of Earth's water (%)"
+        },
+        {
+          "id": "bar-oceans",
+          "kind": "bar",
+          "label": "Oceans",
+          "value": 97
+        },
+        {
+          "id": "bar-ice",
+          "kind": "bar",
+          "label": "Ice",
+          "value": 2
+        },
+        {
+          "id": "bar-fresh",
+          "kind": "bar",
+          "label": "Fresh water",
+          "value": 1
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-axis",
+          "anchor": {
+            "narrationId": "line-chart-oceans",
+            "phrase": "Most of Earth's water"
+          },
+          "action": "appear",
+          "target": "axis"
+        },
+        {
+          "id": "ev-oceans",
+          "anchor": {
+            "narrationId": "line-chart-oceans",
+            "phrase": "97 percent"
+          },
+          "action": "grow",
+          "target": "bar-oceans"
+        },
+        {
+          "id": "ev-ice",
+          "anchor": {
+            "narrationId": "line-chart-rest",
+            "phrase": "frozen in ice"
+          },
+          "action": "grow",
+          "target": "bar-ice"
+        },
+        {
+          "id": "ev-fresh",
+          "anchor": {
+            "narrationId": "line-chart-rest",
+            "phrase": "only around 1 percent"
+          },
+          "action": "grow",
+          "target": "bar-fresh"
+        },
+        {
+          "id": "ev-fresh-highlight",
+          "anchor": {
+            "narrationId": "line-chart-rest",
+            "phrase": "lakes and rivers"
+          },
+          "action": "highlight",
+          "target": "bar-fresh"
+        }
+      ]
+    },
+    {
+      "id": "scene-takeaway",
+      "type": "takeaway",
+      "narration": [
+        {
+          "id": "line-take-loop",
+          "text": "So remember the loop: evaporation, condensation, precipitation and collection."
+        },
+        {
+          "id": "line-take-glass",
+          "text": "The same water keeps moving around our planet, again and again. The glass of water you drink today may once have been a cloud."
+        }
+      ],
+      "objects": [
+        {
+          "id": "take-headline",
+          "kind": "headline",
+          "label": "Remember the loop"
+        },
+        {
+          "id": "take-up",
+          "kind": "bullet",
+          "label": "Evaporation and condensation"
+        },
+        {
+          "id": "take-down",
+          "kind": "bullet",
+          "label": "Precipitation and collection"
+        },
+        {
+          "id": "take-glass",
+          "kind": "icon",
+          "label": "Glass of water"
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-headline",
+          "anchor": {
+            "narrationId": "line-take-loop",
+            "phrase": "remember the loop"
+          },
+          "action": "appear",
+          "target": "take-headline"
+        },
+        {
+          "id": "ev-up",
+          "anchor": {
+            "narrationId": "line-take-loop",
+            "phrase": "evaporation, condensation"
+          },
+          "action": "appear",
+          "target": "take-up"
+        },
+        {
+          "id": "ev-down",
+          "anchor": {
+            "narrationId": "line-take-loop",
+            "phrase": "precipitation and collection"
+          },
+          "action": "appear",
+          "target": "take-down"
+        },
+        {
+          "id": "ev-glass",
+          "anchor": {
+            "narrationId": "line-take-glass",
+            "phrase": "glass of water"
+          },
+          "action": "pulse",
+          "target": "take-glass"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "sceneId": "scene-earth-water",
+      "message": "Percentages are rounded (oceans about 96.5%, ice and glaciers about 1.7%). Confirm the rounding is acceptable for this audience."
+    }
+  ]
+}

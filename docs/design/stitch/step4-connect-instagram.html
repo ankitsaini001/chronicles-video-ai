@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByteReel — Step 4 Connect Instagram</title>
+  <!-- Google Fonts: Exo 2, Ubuntu, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0B0806',
+            surface: '#15100B',
+            'surface-2': '#1A120A',
+            amber: '#F5A524',
+            'amber-deep': '#E8901A',
+            'gold-cream': '#FFE2A8',
+            text: '#F7EFE6',
+            'text-muted': '#B5A795',
+            'on-amber': '#1A1005',
+            line: 'rgba(245, 165, 36, 0.15)',
+          },
+          fontFamily: {
+            display: ['"Exo 2"', 'sans-serif'],
+            body: ['Ubuntu', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      background-color: #0B0806;
+      color: #F7EFE6;
+      font-family: 'Ubuntu', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .amber-glow-btn {
+      background: linear-gradient(180deg, #F7B44A 0%, #E8901A 100%);
+      box-shadow: 0 8px 24px rgba(245, 165, 36, 0.35);
+      transition: all 0.2s ease;
+    }
+    .amber-glow-btn:hover {
+      box-shadow: 0 10px 28px rgba(245, 165, 36, 0.5);
+      transform: translateY(-1px);
+    }
+    .card-border {
+      border: 1px solid rgba(245, 165, 36, 0.15);
+    }
+  </style>
+</head>
+<body class="bg-bg text-text antialiased selection:bg-amber selection:text-on-amber flex flex-col min-h-screen">
+
+  <!-- Top App Bar (matching ByteReel — My videos / Step 3 screens) -->
+  <header class="w-full border-b border-line px-8 py-3.5 flex items-center justify-between bg-bg/90 backdrop-blur-md sticky top-0 z-40">
+    <!-- Left: Brand Logo & Navigation -->
+    <div class="flex items-center gap-8">
+      <div class="flex items-center gap-2.5 cursor-pointer">
+        <!-- Logo Icon circle -->
+        <div class="w-8 h-8 rounded-full bg-[#1A1A2E] flex items-center justify-center border border-amber/30 shadow-[0_0_12px_rgba(245,165,36,0.3)]">
+          <svg class="w-3.5 h-3.5 fill-amber ml-0.5" viewBox="0 0 24 24">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+        </div>
+        <span class="font-display font-bold text-xl tracking-tight text-text">
+          Byte<span class="bg-gradient-to-b from-gold-cream to-amber bg-clip-text text-transparent">Reel</span>
+        </span>
+      </div>
+
+      <nav class="flex items-center gap-6 text-sm font-medium">
+        <a href="#" class="text-text-muted hover:text-text transition-colors">My videos</a>
+        <a href="#" class="text-text-muted hover:text-text transition-colors">Settings</a>
+      </nav>
+    </div>
+
+    <!-- Right: Quota Chip, Notifications & Profile Avatar -->
+    <div class="flex items-center gap-4">
+      <div class="px-3 py-1 rounded-full bg-surface-2 border border-line text-xs font-mono font-medium tracking-wide">
+        <span class="text-text-muted uppercase">VIDEOS TODAY:</span> <span class="text-text font-bold">1 OF 3</span>
+      </div>
+
+      <!-- Notification Bell -->
+      <button class="relative p-2 text-text-muted hover:text-text transition-colors rounded-full" aria-label="Notifications">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+        </svg>
+        <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber shadow-[0_0_6px_#F5A524]"></span>
+      </button>
+
+      <!-- Avatar "T" -->
+      <div class="w-8 h-8 rounded-full bg-surface-2 border border-line flex items-center justify-center font-display font-bold text-xs text-text shadow-inner">
+        T
+      </div>
+    </div>
+  </header>
+
+  <!-- Sub-bar: Back link & 4-step Stepper -->
+  <div class="w-full max-w-7xl mx-auto px-8 pt-6 pb-4 flex items-center justify-between">
+    <a href="#" class="text-text-muted hover:text-text text-sm flex items-center gap-1.5 transition-colors">
+      <span>←</span> My videos
+    </a>
+
+    <!-- Stepper centered -->
+    <div class="flex items-center gap-2 text-xs">
+      <!-- Step 1: Idea (Done) -->
+      <div class="px-3 py-1 rounded-full bg-surface-2 border border-line text-text flex items-center gap-1 font-medium">
+        <span class="text-emerald-400">✓</span> Idea
+      </div>
+      <div class="w-6 h-[1px] bg-line"></div>
+
+      <!-- Step 2: Storyboard (Done) -->
+      <div class="px-3 py-1 rounded-full bg-surface-2 border border-line text-text flex items-center gap-1 font-medium">
+        <span class="text-emerald-400">✓</span> Storyboard
+      </div>
+      <div class="w-6 h-[1px] bg-line"></div>
+
+      <!-- Step 3: Video (Done) -->
+      <div class="px-3 py-1 rounded-full bg-surface-2 border border-line text-text flex items-center gap-1 font-medium">
+        <span class="text-emerald-400">✓</span> Video
+      </div>
+      <div class="w-6 h-[1px] bg-line"></div>
+
+      <!-- Step 4: Publish (Active amber pill) -->
+      <div class="px-3.5 py-1 rounded-full bg-amber text-on-amber font-bold font-body shadow-[0_0_12px_rgba(245,165,36,0.4)] flex items-center">
+        4 Publish
+      </div>
+    </div>
+
+    <!-- Spacer to balance left back link -->
+    <div class="w-20"></div>
+  </div>
+
+  <!-- Main Content: Two Columns -->
+  <main class="w-full max-w-7xl mx-auto px-8 py-8 flex-1 flex items-center">
+    <div class="w-full grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+
+      <!-- LEFT COLUMN: ~35% (lg:col-span-4 or 5) -->
+      <div class="lg:col-span-4 flex flex-col items-center">
+        <!-- 9:16 Vertical Video Preview Thumbnail -->
+        <div class="w-full max-w-[280px] aspect-[9/16] bg-[#120C07] rounded-[20px] card-border shadow-[0_20px_50px_rgba(0,0,0,0.6)] relative overflow-hidden flex flex-col items-center justify-between p-6 group">
+          <!-- Subtle top tag -->
+          <div class="w-full flex justify-between items-center text-[10px] font-mono tracking-widest uppercase text-amber/60">
+            <span>BYTE · REEL</span>
+            <span class="w-2 h-2 rounded-full bg-amber/80"></span>
+          </div>
+
+          <!-- Amber line art: Cloud, raindrops, and centered play icon -->
+          <div class="flex flex-col items-center justify-center my-auto relative w-full">
+            <!-- Atmospheric glow behind icon -->
+            <div class="absolute w-32 h-32 rounded-full bg-amber/10 blur-xl pointer-events-none"></div>
+
+            <!-- SVG Illustration of Water Cycle (Cloud & Raindrops) -->
+            <svg class="w-32 h-28 mb-4 stroke-amber" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- Cloud Outline -->
+              <path d="M 28 60 C 18 60 12 52 14 43 C 15 36 21 31 28 31 C 30 22 38 15 48 15 C 57 15 65 21 68 28 C 72 26 77 26 81 29 C 87 33 89 39 88 45 C 96 46 102 52 101 60 C 100 67 94 72 86 72 L 28 72 Z"
+                    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="#1C140D"/>
+              <!-- Raindrops -->
+              <line x1="34" y1="78" x2="30" y2="88" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="52" y1="78" x2="48" y2="88" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="70" y1="78" x2="66" y2="88" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="86" y1="78" x2="82" y2="88" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+
+            <!-- Centered Play Icon -->
+            <div class="w-14 h-14 rounded-full bg-surface-2/90 border border-amber/50 flex items-center justify-center shadow-[0_0_20px_rgba(245,165,36,0.35)] transition-transform duration-200 group-hover:scale-105">
+              <svg class="w-6 h-6 fill-amber ml-1" viewBox="0 0 24 24">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Bottom caption overlay simulation -->
+          <div class="w-full bg-[#18110A]/90 rounded-lg py-2 px-3 border border-line text-center text-xs text-text-muted">
+            High in the sky, the vapour cools
+          </div>
+        </div>
+
+        <!-- Video Metadata: Mono muted "Video version 2 · 1:12" -->
+        <p class="font-mono text-xs text-text-muted mt-4 tracking-wide">
+          Video version 2 · 1:12
+        </p>
+
+        <!-- Secondary Button: "⬇ Download MP4" -->
+        <button class="mt-3 px-6 py-2.5 rounded-full bg-transparent border border-line text-text hover:border-amber/40 hover:bg-surface-2 text-sm font-medium flex items-center gap-2 transition-all">
+          <span>⬇</span> Download MP4
+        </button>
+      </div>
+
+      <!-- RIGHT COLUMN: ~65% (lg:col-span-8 or 7) Centered Card -->
+      <div class="lg:col-span-8 flex justify-center">
+        <div class="w-full max-w-xl bg-surface rounded-[16px] card-border p-10 shadow-[0_20px_50px_rgba(0,0,0,0.4)] flex flex-col items-center text-center">
+
+          <!-- Amber line icon of a camera inside a rounded square with a small link symbol -->
+          <div class="w-16 h-16 rounded-[14px] bg-surface-2 border border-amber/30 flex items-center justify-center mb-6 relative shadow-[0_0_20px_rgba(245,165,36,0.15)]">
+            <svg class="w-8 h-8 stroke-amber fill-none" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+            </svg>
+            <!-- Small link badge attached to corner -->
+            <div class="absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full bg-[#15100B] border border-amber/40 flex items-center justify-center">
+              <svg class="w-3.5 h-3.5 stroke-amber fill-none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Heading -->
+          <h1 class="font-display font-extrabold text-3xl md:text-4xl text-text tracking-tight mb-4">
+            Connect your Instagram
+          </h1>
+
+          <!-- Muted text -->
+          <p class="text-text-muted text-sm md:text-base leading-relaxed max-w-md mb-8">
+            To publish from ByteReel, connect an Instagram Creator or Business account. You'll log in on Instagram. We never see your password.
+          </p>
+
+          <!-- Three short check rows (amber check icons, body text) -->
+          <div class="w-full max-w-md space-y-3.5 text-left mb-9">
+            <!-- Row 1 -->
+            <div class="flex items-center gap-3.5">
+              <div class="w-5 h-5 rounded-full bg-surface-2 border border-amber/40 flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 stroke-amber fill-none" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+              <span class="text-text text-sm font-normal">
+                Publish now or schedule for later
+              </span>
+            </div>
+
+            <!-- Row 2 -->
+            <div class="flex items-center gap-3.5">
+              <div class="w-5 h-5 rounded-full bg-surface-2 border border-amber/40 flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 stroke-amber fill-none" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+              <span class="text-text text-sm font-normal">
+                Nothing is posted without your approval
+              </span>
+            </div>
+
+            <!-- Row 3 -->
+            <div class="flex items-center gap-3.5">
+              <div class="w-5 h-5 rounded-full bg-surface-2 border border-amber/40 flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 stroke-amber fill-none" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+              <span class="text-text text-sm font-normal">
+                Disconnect anytime in Settings
+              </span>
+            </div>
+          </div>
+
+          <!-- Primary Button: "Connect Instagram" with arrow circle -->
+          <button class="amber-glow-btn w-full max-w-md py-3 pl-7 pr-3 rounded-full text-on-amber font-bold text-base flex items-center justify-between mb-5 group">
+            <span class="mx-auto pl-8">Connect Instagram</span>
+            <div class="w-8 h-8 rounded-full bg-black/15 flex items-center justify-center text-sm font-bold shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
+              ↗
+            </div>
+          </button>
+
+          <!-- Muted small text under -->
+          <p class="text-text-muted text-xs leading-normal max-w-sm">
+            Have a personal account? Switch it to a Creator account in the Instagram app first. You can always download your video.
+          </p>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+</body>
+</html>

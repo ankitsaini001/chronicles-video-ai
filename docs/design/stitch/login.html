@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ByteReel — Log in</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&amp;family=JetBrains+Mono:wght@500&amp;family=Ubuntu:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-error": "#690005",
+            "text": "#F7EFE6",
+            "background": "#19120a",
+            "secondary-container": "#d78202",
+            "surface-container-high": "#302920",
+            "on-secondary-container": "#462700",
+            "on-error-container": "#ffdad6",
+            "outline-variant": "#524434",
+            "on-tertiary": "#003549",
+            "error-text": "#FB7185",
+            "on-surface-variant": "#d7c3ae",
+            "error-container": "#93000a",
+            "success-text": "#4ADE80",
+            "gold-cream": "#FFE2A8",
+            "text-muted": "#B5A795",
+            "on-secondary-fixed": "#2c1700",
+            "error": "#ffb4ab",
+            "surface": "#15100B",
+            "on-tertiary-fixed-variant": "#004c69",
+            "on-tertiary-fixed": "#001e2c",
+            "surface-tint": "#ffb957",
+            "warning-text": "#FFD27A",
+            "line": "#F5A52426",
+            "surface-container-low": "#211a12",
+            "success-bg": "#0F2E1E",
+            "error-bg": "#33141B",
+            "surface-2": "#1A120A",
+            "surface-container-highest": "#3c332a",
+            "surface-container": "#261e16",
+            "surface-dim": "#19120a",
+            "tertiary-container": "#36c2ff",
+            "secondary-fixed-dim": "#ffb86c",
+            "warning-bg": "#2E2410",
+            "inverse-on-surface": "#372f26",
+            "on-secondary": "#492900",
+            "on-primary": "#462b00",
+            "surface-container-lowest": "#130d06",
+            "surface-variant": "#3c332a",
+            "primary-fixed-dim": "#ffb957",
+            "primary-container": "#f5a524",
+            "bg": "#0B0806",
+            "amber-deep": "#E8901A",
+            "on-amber": "#1A1005",
+            "outline": "#9f8e7a",
+            "on-primary-container": "#643f00",
+            "surface-bright": "#40382e",
+            "on-primary-fixed": "#2a1800",
+            "on-surface": "#efe0d2",
+            "primary": "#ffc77f",
+            "primary-fixed": "#ffddb5",
+            "secondary-fixed": "#ffdcbc",
+            "tertiary": "#9ad9ff",
+            "on-background": "#efe0d2",
+            "inverse-surface": "#efe0d2",
+            "on-primary-fixed-variant": "#643f00",
+            "inverse-primary": "#835400",
+            "secondary": "#ffb86c",
+            "tertiary-fixed": "#c4e7ff",
+            "on-tertiary-container": "#004d69",
+            "tertiary-fixed-dim": "#7bd0ff",
+            "on-secondary-fixed-variant": "#683c00"
+          },
+          "borderRadius": {
+            "DEFAULT": "1rem",
+            "lg": "2rem",
+            "xl": "3rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-sm": "0.5rem",
+            "gutter": "1rem",
+            "space-lg": "1rem",
+            "space-xs": "0.25rem",
+            "space-md": "0.75rem",
+            "space-3xl": "6rem",
+            "margin": "1.5rem",
+            "space-xl": "1.5rem",
+            "space-2xl": "3rem"
+          },
+          "fontFamily": {
+            "h3": ["\"Exo 2\""],
+            "body-lg": ["Ubuntu"],
+            "body": ["Ubuntu"],
+            "label": ["JetBrains Mono"],
+            "h1-mobile": ["\"Exo 2\""],
+            "tagline": ["\"Exo 2\""],
+            "display-mobile": ["\"Exo 2\""],
+            "h3-mobile": ["\"Exo 2\""],
+            "h2-mobile": ["\"Exo 2\""],
+            "h2": ["\"Exo 2\""],
+            "display": ["\"Exo 2\""],
+            "h1": ["\"Exo 2\""],
+            "small": ["Ubuntu"]
+          },
+          "fontSize": {
+            "h3": ["22px", { "lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+            "body": ["15px", { "lineHeight": "1.55", "fontWeight": "400" }],
+            "label": ["11px", { "lineHeight": "1.4", "letterSpacing": "0.08em", "fontWeight": "500" }],
+            "h1-mobile": ["30px", { "lineHeight": "1.1", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "tagline": ["19px", { "lineHeight": "1.3", "fontWeight": "700" }],
+            "display-mobile": ["36px", { "lineHeight": "1.05", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "h3-mobile": ["19px", { "lineHeight": "1.25", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "h2-mobile": ["24px", { "lineHeight": "1.15", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "h2": ["32px", { "lineHeight": "1.15", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "display": ["60px", { "lineHeight": "1.05", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "h1": ["44px", { "lineHeight": "1.1", "letterSpacing": "-0.01em", "fontWeight": "800" }],
+            "small": ["13px", { "lineHeight": "1.5", "fontWeight": "400" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .reel-gradient-text {
+      background: linear-gradient(180deg, #FFE2A8 0%, #F5B04A 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .amber-btn-gradient {
+      background: linear-gradient(180deg, #F7B44A 0%, #E8901A 100%);
+    }
+    .amber-atmosphere {
+      background-image: radial-gradient(circle at 50% 45%, #F5A52418 0%, transparent 60%);
+    }
+  </style>
+</head>
+<body class="bg-bg text-text min-h-screen flex flex-col items-center justify-between font-body antialiased relative selection:bg-primary-container selection:text-on-amber">
+<!-- Subtle Radial Amber Ambience Glow -->
+<div class="fixed inset-0 amber-atmosphere pointer-events-none z-0"></div>
+<!-- Main Centered Content Canvas -->
+<main class="w-full flex-1 flex flex-col items-center justify-center px-4 py-12 relative z-10">
+<!-- Auth Card -->
+<div class="w-full max-w-[440px] bg-surface rounded-[16px] border border-line px-8 py-10 shadow-[0_20px_50px_#00000066] transition-all duration-300">
+<!-- 1. Logo Cluster -->
+<div class="flex items-center justify-center gap-3">
+<!-- Play Halo Icon Circle -->
+<div class="w-10 h-10 rounded-full bg-[#1A1A2E] flex items-center justify-center shadow-[0_0_15px_#F5A5244D] border border-line">
+<span class="material-symbols-outlined text-primary-container text-xl ml-0.5" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<!-- Wordmark -->
+<span class="font-display text-h3 tracking-tight font-extrabold text-text inline-flex items-center">
+          Byte<span class="reel-gradient-text">Reel</span>
+</span>
+</div>
+<!-- 2. Heading -->
+<h1 class="font-h2 text-h2 font-extrabold text-text text-center tracking-tight mt-6 mb-2">
+        Welcome back
+      </h1>
+<!-- 3. Subtext -->
+<p class="font-small text-small text-text-muted text-center mb-8">
+        Log in to keep creating.
+      </p>
+<!-- 4. Form Fields -->
+<form class="space-y-5" onsubmit="event.preventDefault();">
+<!-- Field 1: Email -->
+<div>
+<label class="font-small text-small font-medium text-text block mb-2 text-left" for="email">
+            Email
+          </label>
+<input class="w-full h-[52px] px-4 bg-surface-2 border border-line rounded-[16px] text-text font-body text-body placeholder-text-muted/50 focus:outline-none focus:border-gold-cream focus:ring-1 focus:ring-gold-cream transition-all duration-200" id="email" name="email" placeholder="you@example.com" required="" type="email"/>
+</div>
+<!-- Field 2: Password -->
+<div>
+<label class="font-small text-small font-medium text-text block mb-2 text-left" for="password">
+            Password
+          </label>
+<div class="w-full h-[52px] px-4 bg-surface-2 border border-line rounded-[16px] flex items-center justify-between focus-within:border-gold-cream focus-within:ring-1 focus-within:ring-gold-cream transition-all duration-200">
+<input class="w-full bg-transparent border-0 p-0 text-text font-body text-body placeholder-text-muted/50 focus:ring-0 focus:outline-none" id="password" name="password" placeholder="••••••••••••" required="" type="password"/>
+<button aria-label="Toggle password visibility" class="text-text-muted hover:text-text transition-colors p-1 flex items-center justify-center focus:outline-none" id="togglePassword" type="button">
+<svg class="w-5 h-5 stroke-current" fill="none" id="eyeIcon" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24">
+<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+<circle cx="12" cy="12" r="3"></circle>
+</svg>
+</button>
+</div>
+</div>
+<!-- 5. Primary Button -->
+<button class="w-full rounded-full h-[52px] mt-8 amber-btn-gradient flex items-center justify-center relative shadow-[0_10px_30px_#F5A52466] hover:shadow-[0_12px_35px_#F5A52480] hover:-translate-y-0.5 active:scale-95 active:translate-y-0 transition-all duration-150 cursor-pointer group" type="submit">
+<span class="font-body text-body-lg font-bold text-on-amber tracking-tight">
+            Log in
+          </span>
+<div class="absolute right-2 w-9 h-9 rounded-full bg-black/15 flex items-center justify-center group-hover:bg-black/20 transition-colors">
+<span class="text-on-amber font-bold text-base leading-none">↗</span>
+</div>
+</button>
+</form>
+<!-- 6. Inside card below button -->
+<p class="font-small text-small text-text-muted text-center mt-5">
+        Forgot your password? <a class="text-text-muted hover:text-gold-cream transition-colors duration-150" href="#">Contact the ByteReel team.</a>
+</p>
+</div>
+<!-- 7. Row below card -->
+<div class="mt-8 text-center">
+<span class="font-small text-small text-text-muted">New here? </span>
+<a class="font-small text-small text-primary-container font-medium hover:underline hover:text-gold-cream transition-colors" href="#">
+        Create an account
+      </a>
+</div>
+</main>
+<!-- 8. Footer Link / Legal Anchor -->
+<footer class="w-full py-6 text-center relative z-10">
+<div class="inline-flex items-center gap-2 font-small text-small text-text-muted transition-colors">
+<a class="hover:text-text transition-colors" href="#">Privacy</a>
+<span>·</span>
+<a class="hover:text-text transition-colors" href="#">Terms</a>
+</div>
+</footer>
+<!-- Micro-interaction: Password Toggle Logic -->
+<script>
+    const toggleBtn = document.getElementById('togglePassword');
+    const passwordInput = document.getElementById('password');
+    const eyeIcon = document.getElementById('eyeIcon');
+
+    if (toggleBtn && passwordInput && eyeIcon) {
+      toggleBtn.addEventListener('click', () => {
+        const isPassword = passwordInput.getAttribute('type') === 'password';
+        passwordInput.setAttribute('type', isPassword ? 'text' : 'password');
+
+        if (isPassword) {
+          // Change to Eye Off SVG
+          eyeIcon.innerHTML = `
+            <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+            <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+            <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+            <line x1="2" y1="2" x2="22" y2="22" />
+          `;
+        } else {
+          // Restore regular Eye SVG
+          eyeIcon.innerHTML = `
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+          `;
+        }
+      });
+    }
+  </script>
+</body></html>

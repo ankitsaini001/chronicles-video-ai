@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByteReel — Step 3 Making video</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@500;600&family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #0B0806;
+      color: #F7EFE6;
+      font-family: 'Ubuntu', sans-serif;
+    }
+    .font-exo {
+      font-family: 'Exo 2', sans-serif;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .animate-spin-slow {
+      animation: spin 1.2s linear infinite;
+    }
+    @keyframes shimmer {
+      0% { opacity: 0.35; }
+      50% { opacity: 0.85; }
+      100% { opacity: 0.35; }
+    }
+    .animate-shimmer {
+      animation: shimmer 2.4s ease-in-out infinite;
+    }
+    @keyframes rain-drop {
+      0% { transform: translateY(0); opacity: 0; }
+      40% { opacity: 0.7; }
+      100% { transform: translateY(12px); opacity: 0; }
+    }
+    .drop-1 { animation: rain-drop 1.6s ease-in infinite; }
+    .drop-2 { animation: rain-drop 1.6s ease-in infinite 0.5s; }
+    .drop-3 { animation: rain-drop 1.6s ease-in infinite 1s; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-[#F5A524]/30 selection:text-[#FFE2A8]">
+
+  <!-- Top Navigation Bar -->
+  <header class="w-full border-b border-[#F5A52426] bg-[#0B0806]/90 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      <!-- Left: Logo & Links -->
+      <div class="flex items-center gap-10">
+        <a href="#" class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-[#1A1A2E] flex items-center justify-center border border-[#F5A524]/20 shadow-[0_0_14px_#F5A52433]">
+            <svg class="w-4 h-4 ml-0.5" viewBox="0 0 24 24" fill="#F5A524">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </div>
+          <span class="font-exo font-bold text-2xl tracking-tight text-[#F7EFE6]">
+            Byte<span class="text-transparent bg-clip-text bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">Reel</span>
+          </span>
+        </a>
+
+        <nav class="flex items-center gap-6">
+          <a href="#" class="text-sm font-medium text-[#B5A795] hover:text-[#F7EFE6] transition-colors">My videos</a>
+          <a href="#" class="text-sm font-medium text-[#B5A795] hover:text-[#F7EFE6] transition-colors">Settings</a>
+        </nav>
+      </div>
+
+      <!-- Right: Daily Counter, Bell, Profile Avatar -->
+      <div class="flex items-center gap-5">
+        <div class="px-3.5 py-1.5 rounded-full bg-[#1A120A] border border-[#F5A52426] text-xs font-mono text-[#B5A795]">
+          VIDEOS TODAY: <span class="text-[#F7EFE6] font-semibold">1 OF 3</span>
+        </div>
+
+        <button aria-label="Notifications" class="relative p-2 text-[#B5A795] hover:text-[#F7EFE6] transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+          <span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#F5A524]"></span>
+        </button>
+
+        <div class="w-9 h-9 rounded-full bg-[#1A120A] border border-[#F5A52426] flex items-center justify-center font-exo font-bold text-sm text-[#F7EFE6]">
+          T
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Ambient Background Glow -->
+  <div class="fixed inset-0 pointer-events-none z-0 flex items-center justify-center">
+    <div class="w-[720px] h-[520px] rounded-full bg-[#F5A524] opacity-[0.05] blur-[140px]"></div>
+  </div>
+
+  <!-- Main Content Area -->
+  <main class="relative z-10 flex-1 max-w-6xl w-full mx-auto px-6 pt-7 pb-16 flex flex-col">
+
+    <!-- Sub-header Row: Back link & Stepper -->
+    <div class="relative w-full flex items-center justify-center mb-12">
+      <!-- Back Link -->
+      <a href="#" class="absolute left-0 inline-flex items-center gap-1.5 text-sm text-[#B5A795] hover:text-[#F7EFE6] transition-colors">
+        ← My videos
+      </a>
+
+      <!-- 4-Step Stepper -->
+      <div class="flex items-center gap-2 font-mono text-xs">
+        <!-- Step 1 (Done) -->
+        <div class="flex items-center gap-1.5 text-[#F7EFE6] px-3 py-1.5 rounded-full bg-[#1A120A] border border-[#F5A52426]">
+          <span class="text-[#4ADE80]">✓</span>
+          <span>Idea</span>
+        </div>
+
+        <div class="w-6 h-[1px] bg-[#F5A52426]"></div>
+
+        <!-- Step 2 (Done) -->
+        <div class="flex items-center gap-1.5 text-[#F7EFE6] px-3 py-1.5 rounded-full bg-[#1A120A] border border-[#F5A52426]">
+          <span class="text-[#4ADE80]">✓</span>
+          <span>Storyboard</span>
+        </div>
+
+        <div class="w-6 h-[1px] bg-[#F5A52426]"></div>
+
+        <!-- Step 3 (Active Amber Pill) -->
+        <div class="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#F5A524] text-[#1A1005] font-semibold shadow-[0_0_18px_#F5A5244D]">
+          <span>3</span>
+          <span>Video</span>
+        </div>
+
+        <div class="w-6 h-[1px] bg-[#F5A52426]"></div>
+
+        <!-- Step 4 (Muted) -->
+        <div class="flex items-center gap-1.5 text-[#B5A795]/60 px-3 py-1.5 rounded-full border border-[#F5A52414]">
+          <span>4</span>
+          <span>Publish</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Centered Two-Column Layout -->
+    <div class="flex-1 flex items-center justify-center">
+      <div class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-10 lg:gap-14 items-center">
+
+        <!-- LEFT: Vertical Phone Mockup (9:16) -->
+        <div class="md:col-span-5 flex justify-center">
+          <div class="relative w-[280px] sm:w-[300px] aspect-[9/16] bg-[#1A120A] rounded-[28px] p-2.5 border border-[#F5A52426] shadow-[0_20px_50px_#00000088,0_0_40px_#F5A52414]">
+
+            <!-- Phone Notch / Speaker Pill -->
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 w-20 h-4 bg-[#140D07] rounded-full z-20 flex items-center justify-center">
+              <div class="w-2.5 h-2.5 rounded-full bg-[#1F1710] mr-2"></div>
+              <div class="w-8 h-1 rounded-full bg-[#1F1710]"></div>
+            </div>
+
+            <!-- Phone Screen with soft shimmering skeleton -->
+            <div class="relative w-full h-full bg-[#120C07] rounded-[20px] overflow-hidden flex flex-col justify-between p-6 border border-[#F5A52414]">
+
+              <!-- Shimmer Background Glow inside screen -->
+              <div class="absolute inset-0 bg-gradient-to-b from-[#F5A5240A] via-transparent to-[#F5A5240F] pointer-events-none"></div>
+
+              <!-- Subtle top header simulation -->
+              <div class="w-full flex justify-between items-center pt-5">
+                <div class="w-8 h-1.5 rounded-full bg-[#2A1E14]"></div>
+                <div class="w-3 h-3 rounded-full bg-[#2A1E14]"></div>
+              </div>
+
+              <!-- Center Graphic: Faint Cloud & Raindrop Line Drawing with Shimmer -->
+              <div class="my-auto flex flex-col items-center justify-center animate-shimmer">
+                <!-- Faint Cloud SVG -->
+                <div class="relative mb-3">
+                  <svg class="w-24 h-24 text-[#F5A524] opacity-40 drop-shadow-[0_0_12px_#F5A52444]" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 42h28a12 12 0 0 0 2-23.8 16 16 0 0 0-31.5-2.2A10 10 0 0 0 18 42z" />
+                  </svg>
+
+                  <!-- Raindrops -->
+                  <div class="absolute left-6 bottom-0 w-1 h-3 rounded-full bg-[#F5A524] drop-1"></div>
+                  <div class="absolute left-11 -bottom-1 w-1 h-3.5 rounded-full bg-[#F5A524] drop-2"></div>
+                  <div class="absolute left-16 bottom-0 w-1 h-3 rounded-full bg-[#F5A524] drop-3"></div>
+                </div>
+
+                <!-- Water ripples placeholder -->
+                <div class="w-24 h-[1px] bg-gradient-to-r from-transparent via-[#F5A52433] to-transparent"></div>
+              </div>
+
+              <!-- Bottom: Two Placeholder Caption Bars with gentle amber glow -->
+              <div class="w-full space-y-2.5 pb-2">
+                <div class="w-full h-3.5 rounded-full bg-[#261A10] relative overflow-hidden shadow-[0_0_12px_#F5A52422]">
+                  <div class="absolute inset-0 bg-gradient-to-r from-[#F5A52411] via-[#F5A52433] to-[#F5A52411] animate-shimmer"></div>
+                </div>
+                <div class="w-3/4 mx-auto h-3 rounded-full bg-[#261A10] relative overflow-hidden shadow-[0_0_10px_#F5A52418]">
+                  <div class="absolute inset-0 bg-gradient-to-r from-[#F5A52411] via-[#F5A52433] to-[#F5A52411] animate-shimmer"></div>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+        <!-- RIGHT: Card with Live Progress Details -->
+        <div class="md:col-span-7">
+          <div class="bg-[#15100B] border border-[#F5A52426] rounded-[16px] p-8 sm:p-10 shadow-[0_20px_50px_#00000066]">
+
+            <!-- Video Topic Title -->
+            <p class="text-xs sm:text-sm text-[#B5A795] mb-2 font-medium">How the water cycle works</p>
+
+            <!-- Main Heading -->
+            <h1 class="font-exo font-bold text-3xl sm:text-4xl text-[#F7EFE6] tracking-tight mb-3">
+              Making your video
+            </h1>
+
+            <!-- Muted Guidance -->
+            <p class="text-sm sm:text-base text-[#B5A795] leading-relaxed mb-8">
+              You can leave this page. We'll keep working and save everything.
+            </p>
+
+            <!-- Vertical Progress List (4 Rows) -->
+            <div class="space-y-4 mb-9">
+
+              <!-- Row 1: Recording narration (Done) -->
+              <div class="flex items-center gap-3.5">
+                <div class="w-6 h-6 rounded-full bg-[#0F2E1E] border border-[#4ADE804D] flex items-center justify-center flex-shrink-0 text-[#4ADE80]">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3.5 8.5 6.5 11.5 12.5 4.5"/>
+                  </svg>
+                </div>
+                <span class="text-sm sm:text-base text-[#F7EFE6] font-medium">Recording narration</span>
+              </div>
+
+              <!-- Row 2: Timing animations (Done) -->
+              <div class="flex items-center gap-3.5">
+                <div class="w-6 h-6 rounded-full bg-[#0F2E1E] border border-[#4ADE804D] flex items-center justify-center flex-shrink-0 text-[#4ADE80]">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3.5 8.5 6.5 11.5 12.5 4.5"/>
+                  </svg>
+                </div>
+                <span class="text-sm sm:text-base text-[#F7EFE6] font-medium">Timing animations</span>
+              </div>
+
+              <!-- Row 3: Adding captions (Active amber spinning ring) -->
+              <div class="flex items-center gap-3.5">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 relative">
+                  <!-- Spinning ring -->
+                  <div class="w-6 h-6 rounded-full border-2 border-[#F5A52426] border-t-[#F5A524] animate-spin-slow"></div>
+                </div>
+                <span class="text-sm sm:text-base text-[#F7EFE6] font-medium">Adding captions</span>
+              </div>
+
+              <!-- Row 4: Rendering (Upcoming, muted) -->
+              <div class="flex items-center gap-3.5">
+                <div class="w-6 h-6 rounded-full border border-[#B5A79533] flex items-center justify-center flex-shrink-0">
+                  <div class="w-1.5 h-1.5 rounded-full bg-[#B5A79533]"></div>
+                </div>
+                <span class="text-sm sm:text-base text-[#B5A795]">Rendering</span>
+              </div>
+
+            </div>
+
+            <!-- Action Buttons Row -->
+            <div class="flex items-center gap-5 pt-1">
+              <!-- Secondary Pill Button -->
+              <a href="#" class="inline-flex items-center justify-center px-6 py-2.5 rounded-full border border-[#F5A52426] text-sm font-medium text-[#F7EFE6] hover:bg-[#F5A52414] hover:border-[#F5A5244D] transition-all">
+                Back to My videos
+              </a>
+
+              <!-- Muted Text Button -->
+              <button class="text-sm font-medium text-[#B5A795] hover:text-[#FB7185] transition-colors py-2 px-1">
+                Cancel
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+</body>
+</html>

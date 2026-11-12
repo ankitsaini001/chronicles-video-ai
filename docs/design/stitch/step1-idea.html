@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByteReel — Step 1 Idea</title>
+  <!-- Google Fonts: Exo 2, Ubuntu, JetBrains Mono, Noto Sans Devanagari -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0B0806',
+            surface: '#15100B',
+            'surface-2': '#1A120A',
+            amber: '#F5A524',
+            'amber-deep': '#E8901A',
+            'gold-cream': '#FFE2A8',
+            text: '#F7EFE6',
+            'text-muted': '#B5A795',
+            'line': 'rgba(245, 165, 36, 0.15)',
+            'on-amber': '#1A1005',
+          },
+          fontFamily: {
+            display: ['"Exo 2"', 'sans-serif'],
+            body: ['Ubuntu', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            devanagari: ['"Noto Sans Devanagari"', 'sans-serif'],
+          },
+          boxShadow: {
+            'amber-glow': '0 10px 30px rgba(245, 165, 36, 0.35)',
+            'card': '0 20px 50px rgba(0, 0, 0, 0.4)',
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      background-color: #0B0806;
+      color: #F7EFE6;
+      font-family: 'Ubuntu', sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    .btn-gradient {
+      background: linear-gradient(180deg, #F7B44A 0%, #E8901A 100%);
+    }
+    .btn-gradient:hover {
+      background: linear-gradient(180deg, #f8bc5b 0%, #ed9723 100%);
+    }
+  </style>
+</head>
+<body class="bg-[#0B0806] text-[#F7EFE6] min-h-screen flex flex-col antialiased selection:bg-[#F5A524]/20 selection:text-[#FFE2A8]">
+
+  <!-- Top App Bar (matching "ByteReel — My videos") -->
+  <header class="w-full border-b border-[rgba(245,165,36,0.15)] bg-[#0B0806]/90 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <!-- Left: Logo & Nav -->
+      <div class="flex items-center gap-8">
+        <!-- Logo -->
+        <a href="#" class="flex items-center gap-2.5 group">
+          <div class="w-8 h-8 rounded-full bg-[#1A1A2E] flex items-center justify-center border border-[rgba(245,165,36,0.25)] shadow-[0_0_12px_rgba(245,165,36,0.2)]">
+            <svg class="w-3.5 h-3.5 text-[#F5A524] fill-current translate-x-0.5" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </div>
+          <span class="font-display font-extrabold text-xl tracking-tight text-[#F7EFE6]">
+            Byte<span class="text-transparent bg-clip-text bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">Reel</span>
+          </span>
+        </a>
+
+        <!-- Nav Links -->
+        <nav class="hidden md:flex items-center gap-6 text-sm font-medium">
+          <a href="#" class="text-[#B5A795] hover:text-[#F7EFE6] transition-colors">My videos</a>
+          <a href="#" class="text-[#B5A795] hover:text-[#F7EFE6] transition-colors">Settings</a>
+        </nav>
+      </div>
+
+      <!-- Right: Videos today chip, Bell, Avatar "T" -->
+      <div class="flex items-center gap-4">
+        <!-- Videos today chip -->
+        <div class="px-3.5 py-1.5 rounded-full bg-[#1A120A] border border-[rgba(245,165,36,0.15)] text-xs font-mono tracking-wider text-[#B5A795] flex items-center gap-1.5">
+          <span>VIDEOS TODAY:</span>
+          <span class="text-[#F7EFE6] font-semibold">1 OF 3</span>
+        </div>
+
+        <!-- Notification Bell -->
+        <button class="w-9 h-9 rounded-full flex items-center justify-center text-[#B5A795] hover:text-[#F7EFE6] hover:bg-[#1A120A] transition-colors relative" aria-label="Notifications">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+          <span class="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-[#F5A524]"></span>
+        </button>
+
+        <!-- User Avatar "T" -->
+        <div class="w-8 h-8 rounded-full bg-[#1A120A] border border-[rgba(245,165,36,0.25)] flex items-center justify-center font-display font-bold text-xs text-[#F7EFE6]">
+          T
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-6 py-8 flex flex-col items-center">
+
+    <!-- Sub-header bar: Back link + Centered Stepper -->
+    <div class="w-full max-w-[760px] flex items-center justify-between mb-8 relative">
+      <!-- Back link: "← My videos" -->
+      <a href="#" class="text-xs text-[#B5A795] hover:text-[#F7EFE6] transition-colors flex items-center gap-1.5 font-medium absolute left-0">
+        ← My videos
+      </a>
+
+      <!-- 4-step stepper centered -->
+      <div class="flex items-center gap-2 mx-auto">
+        <!-- Step 1 (active amber pill) -->
+        <div class="h-8 px-4 rounded-full bg-[#F5A524] text-[#1A1005] font-mono text-xs font-bold flex items-center justify-center shadow-[0_2px_12px_rgba(245,165,36,0.3)]">
+          1 Idea
+        </div>
+
+        <!-- Connector Line -->
+        <div class="w-8 h-[1px] bg-[rgba(245,165,36,0.2)]"></div>
+
+        <!-- Step 2 -->
+        <div class="h-8 px-3.5 rounded-full border border-[rgba(245,165,36,0.15)] text-[#B5A795] font-mono text-xs flex items-center justify-center bg-transparent">
+          2 Storyboard
+        </div>
+
+        <!-- Connector Line -->
+        <div class="w-8 h-[1px] bg-[rgba(245,165,36,0.2)]"></div>
+
+        <!-- Step 3 -->
+        <div class="h-8 px-3.5 rounded-full border border-[rgba(245,165,36,0.15)] text-[#B5A795] font-mono text-xs flex items-center justify-center bg-transparent">
+          3 Video
+        </div>
+
+        <!-- Connector Line -->
+        <div class="w-8 h-[1px] bg-[rgba(245,165,36,0.2)]"></div>
+
+        <!-- Step 4 -->
+        <div class="h-8 px-3.5 rounded-full border border-[rgba(245,165,36,0.15)] text-[#B5A795] font-mono text-xs flex items-center justify-center bg-transparent">
+          4 Publish
+        </div>
+      </div>
+    </div>
+
+    <!-- Centered Main Card (about 760px wide) -->
+    <div class="w-full max-w-[760px] bg-[#15100B] border border-[rgba(245,165,36,0.15)] rounded-2xl p-8 sm:p-10 shadow-[0_20px_50px_rgba(0,0,0,0.4)] mb-12">
+
+      <!-- Heading -->
+      <h1 class="font-display font-bold text-2xl sm:text-[28px] text-[#F7EFE6] tracking-tight mb-6">
+        What do you want to explain?
+      </h1>
+
+      <!-- Textarea Section -->
+      <div class="mb-2">
+        <div class="relative bg-[#1A120A] border border-[rgba(245,165,36,0.15)] rounded-2xl focus-within:border-[#FFE2A8] transition-colors p-4 pb-8">
+          <textarea
+            rows="6"
+            class="w-full bg-transparent text-[#F7EFE6] text-base leading-relaxed focus:outline-none resize-none font-body placeholder-[#B5A795]/50"
+            spellcheck="false"
+          >Personal finance basics for college students</textarea>
+          <!-- Mono character counter bottom-right -->
+          <div class="absolute bottom-3 right-4 font-mono text-xs text-[#B5A795]">
+            44 / 5,000
+          </div>
+        </div>
+      </div>
+
+      <!-- Muted Helper Text -->
+      <p class="text-xs text-[#B5A795] mb-5 font-normal">
+        Type a topic, or paste your notes.
+      </p>
+
+      <!-- Secondary Pill Button: "✨ Brainstorm with AI" -->
+      <div class="mb-5">
+        <button type="button" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-[rgba(245,165,36,0.15)] bg-transparent hover:bg-[#1A120A] text-[#F7EFE6] text-sm font-medium transition-all hover:border-[rgba(245,165,36,0.35)] active:scale-[0.98]">
+          <span class="text-xs">✨</span>
+          <span>Brainstorm with AI</span>
+        </button>
+      </div>
+
+      <!-- Brainstorm Results Panel (raised #1A120A box) -->
+      <div class="bg-[#1A120A] border border-[rgba(245,165,36,0.15)] rounded-2xl p-5 mb-8">
+        <!-- Label: "IDEAS FROM AI" -->
+        <div class="font-mono text-xs uppercase tracking-wider text-[#B5A795] mb-3">
+          IDEAS FROM AI
+        </div>
+
+        <!-- 3 Selectable Idea Rows -->
+        <div class="space-y-2.5">
+          <!-- Row 1: Selected (amber border, ✓ icon) -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl border border-[#F5A524] bg-[#2A1D08] transition-all cursor-pointer">
+            <div class="flex items-start gap-3 min-w-0 pr-4">
+              <!-- Amber Checkmark Icon -->
+              <div class="w-5 h-5 rounded-full bg-[#F5A524] flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-3 h-3 text-[#1A1005]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <div class="min-w-0">
+                <p class="text-sm font-bold text-[#F7EFE6] leading-snug">The 50-30-20 rule</p>
+                <p class="text-xs text-[#B5A795] mt-0.5 truncate leading-snug">Where should your first salary actually go?</p>
+              </div>
+            </div>
+            <button type="button" class="text-xs text-[#F5A524] font-medium hover:underline flex-shrink-0">
+              Use this
+            </button>
+          </div>
+
+          <!-- Row 2 -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl border border-[rgba(245,165,36,0.15)] hover:border-[rgba(245,165,36,0.3)] bg-transparent hover:bg-[#15100B] transition-all cursor-pointer group">
+            <div class="min-w-0 pr-4 pl-8">
+              <p class="text-sm font-bold text-[#F7EFE6] group-hover:text-[#FFE2A8] transition-colors leading-snug">Why your savings lose value</p>
+              <p class="text-xs text-[#B5A795] mt-0.5 truncate leading-snug">Inflation explained with one cup of chai.</p>
+            </div>
+            <button type="button" class="text-xs text-[#B5A795] hover:text-[#F7EFE6] font-medium transition-colors flex-shrink-0">
+              Use this
+            </button>
+          </div>
+
+          <!-- Row 3 -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl border border-[rgba(245,165,36,0.15)] hover:border-[rgba(245,165,36,0.3)] bg-transparent hover:bg-[#15100B] transition-all cursor-pointer group">
+            <div class="min-w-0 pr-4 pl-8">
+              <p class="text-sm font-bold text-[#F7EFE6] group-hover:text-[#FFE2A8] transition-colors leading-snug">Credit score in 60 seconds</p>
+              <p class="text-xs text-[#B5A795] mt-0.5 truncate leading-snug">The number banks check before they say yes.</p>
+            </div>
+            <button type="button" class="text-xs text-[#B5A795] hover:text-[#F7EFE6] font-medium transition-colors flex-shrink-0">
+              Use this
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Language Section -->
+      <div class="mb-6">
+        <!-- Label: "LANGUAGE" -->
+        <label class="block font-mono text-xs uppercase tracking-wider text-[#B5A795] mb-2.5">
+          LANGUAGE
+        </label>
+        <div class="flex flex-wrap gap-2.5">
+          <!-- English (selected: amber border #F5A524, amber-tinted background #2A1D08, light text) -->
+          <button type="button" class="px-4 py-2 rounded-full border border-[#F5A524] bg-[#2A1D08] text-[#F7EFE6] text-xs font-medium shadow-[0_0_12px_rgba(245,165,36,0.15)] flex items-center justify-center">
+            English
+          </button>
+          <!-- हिंदी Hindi -->
+          <button type="button" class="px-4 py-2 rounded-full border border-[rgba(245,165,36,0.15)] bg-[#1A120A] text-[#B5A795] hover:text-[#F7EFE6] hover:border-[rgba(245,165,36,0.3)] text-xs font-medium font-devanagari transition-all flex items-center justify-center">
+            हिंदी Hindi
+          </button>
+          <!-- Hinglish -->
+          <button type="button" class="px-4 py-2 rounded-full border border-[rgba(245,165,36,0.15)] bg-[#1A120A] text-[#B5A795] hover:text-[#F7EFE6] hover:border-[rgba(245,165,36,0.3)] text-xs font-medium transition-all flex items-center justify-center">
+            Hinglish
+          </button>
+        </div>
+      </div>
+
+      <!-- Voice Section -->
+      <div class="mb-10">
+        <!-- Label: "VOICE" -->
+        <label class="block font-mono text-xs uppercase tracking-wider text-[#B5A795] mb-2.5">
+          VOICE
+        </label>
+        <div class="flex flex-wrap gap-2.5">
+          <!-- ▶ Female voice (selected) -->
+          <button type="button" class="px-4 py-2 rounded-full border border-[#F5A524] bg-[#2A1D08] text-[#F7EFE6] text-xs font-medium shadow-[0_0_12px_rgba(245,165,36,0.15)] flex items-center gap-1.5">
+            <span class="text-[10px] text-[#F5A524]">▶</span>
+            <span>Female voice</span>
+          </button>
+          <!-- ▶ Male voice -->
+          <button type="button" class="px-4 py-2 rounded-full border border-[rgba(245,165,36,0.15)] bg-[#1A120A] text-[#B5A795] hover:text-[#F7EFE6] hover:border-[rgba(245,165,36,0.3)] text-xs font-medium transition-all flex items-center gap-1.5">
+            <span class="text-[10px] text-[#B5A795]">▶</span>
+            <span>Male voice</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Full-width Primary Button: "Create storyboard" -->
+      <div>
+        <button type="button" class="w-full btn-gradient text-[#1A1005] font-body font-bold text-base py-3.5 px-6 rounded-full flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(245,165,36,0.35)] hover:shadow-[0_12px_36px_rgba(245,165,36,0.5)] transition-all transform hover:-translate-y-0.5 active:translate-y-0">
+          <span>Create storyboard</span>
+          <span class="w-7 h-7 rounded-full bg-[#1A1005]/15 flex items-center justify-center text-sm font-bold">
+            ↗
+          </span>
+        </button>
+      </div>
+
+    </div>
+
+  </main>
+
+</body>
+</html>

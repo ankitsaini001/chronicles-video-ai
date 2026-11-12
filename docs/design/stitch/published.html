@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByteReel — Published</title>
+  <!-- Google Fonts: Exo 2, Ubuntu, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@500;600&family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0B0806',
+            surface: '#15100B',
+            'surface-2': '#1A120A',
+            amber: '#F5A524',
+            'amber-deep': '#E8901A',
+            'gold-cream': '#FFE2A8',
+            text: '#F7EFE6',
+            'text-muted': '#B5A795',
+            'on-amber': '#1A1005',
+            line: 'rgba(245, 165, 36, 0.15)',
+            'success-text': '#4ADE80',
+            'success-bg': '#0F2E1E',
+          },
+          fontFamily: {
+            display: ['"Exo 2"', 'sans-serif'],
+            body: ['Ubuntu', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #0B0806;
+      color: #F7EFE6;
+      font-family: 'Ubuntu', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow-x: hidden;
+    }
+    .amber-glow-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 650px;
+      height: 650px;
+      background: radial-gradient(circle, rgba(245, 165, 36, 0.13) 0%, rgba(245, 165, 36, 0.04) 45%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .btn-gradient {
+      background: linear-gradient(180deg, #F7B44A 0%, #E8901A 100%);
+      box-shadow: 0 10px 25px -4px rgba(245, 165, 36, 0.4);
+      transition: all 0.2s ease;
+    }
+    .btn-gradient:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px -4px rgba(245, 165, 36, 0.55);
+    }
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid rgba(245, 165, 36, 0.15);
+      color: #F7EFE6;
+      transition: all 0.2s ease;
+    }
+    .btn-secondary:hover {
+      border-color: rgba(245, 165, 36, 0.4);
+      background-color: rgba(245, 165, 36, 0.05);
+    }
+  </style>
+</head>
+<body class="bg-bg text-text antialiased selection:bg-amber/30 selection:text-gold-cream">
+
+  <!-- Ambient radial glow behind center -->
+  <div class="amber-glow-center"></div>
+
+  <!-- App Bar (Matching 'ByteReel — My videos' screens) -->
+  <header class="relative z-10 w-full border-b border-line px-8 py-4 flex items-center justify-between">
+    <!-- Left: Logo & Nav Links -->
+    <div class="flex items-center gap-8">
+      <!-- ByteReel Logo -->
+      <a href="#" class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-[#1A1A2E] flex items-center justify-center shadow-[0_0_12px_rgba(245,165,36,0.3)] border border-amber/30">
+          <svg class="w-3.5 h-3.5 text-amber fill-current ml-0.5" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </div>
+        <span class="font-display font-extrabold text-xl tracking-tight text-text">
+          Byte<span class="text-transparent bg-clip-text bg-gradient-to-b from-[#FFE2A8] to-[#F5B04A]">Reel</span>
+        </span>
+      </a>
+
+      <!-- Navigation Links -->
+      <nav class="flex items-center gap-6 text-[14px] font-medium">
+        <a href="#" class="text-text hover:text-gold-cream transition-colors">My videos</a>
+        <a href="#" class="text-text-muted hover:text-text transition-colors">Settings</a>
+      </nav>
+    </div>
+
+    <!-- Right: Usage Chip, Bell, Avatar -->
+    <div class="flex items-center gap-4">
+      <!-- Videos today chip -->
+      <div class="px-3 py-1 rounded-full bg-[#1A120A] border border-line text-[11px] font-mono tracking-wider text-text-muted">
+        VIDEOS TODAY: <span class="text-text font-bold">1</span> OF <span class="text-text font-bold">3</span>
+      </div>
+
+      <!-- Bell notification icon with amber indicator -->
+      <button class="relative p-2 text-text-muted hover:text-text transition-colors" aria-label="Notifications">
+        <svg class="w-5 h-5 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/>
+        </svg>
+        <span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-amber shadow-[0_0_6px_#F5A524]"></span>
+      </button>
+
+      <!-- Avatar "T" -->
+      <div class="w-8 h-8 rounded-full bg-[#1A120A] border border-line flex items-center justify-center text-xs font-bold text-text cursor-pointer hover:border-amber/40 transition-colors">
+        T
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
+
+    <!-- Stepper centered: all 4 steps completed -->
+    <div class="flex items-center justify-center gap-2 mb-10">
+      <!-- Step 1 -->
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-2 border border-line text-[13px] font-medium text-text">
+        <span class="text-amber">✓</span> Idea
+      </div>
+      <div class="w-5 h-[1px] bg-line"></div>
+
+      <!-- Step 2 -->
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-2 border border-line text-[13px] font-medium text-text">
+        <span class="text-amber">✓</span> Storyboard
+      </div>
+      <div class="w-5 h-[1px] bg-line"></div>
+
+      <!-- Step 3 -->
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-2 border border-line text-[13px] font-medium text-text">
+        <span class="text-amber">✓</span> Video
+      </div>
+      <div class="w-5 h-[1px] bg-line"></div>
+
+      <!-- Step 4 -->
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-2 border border-line text-[13px] font-medium text-text">
+        <span class="text-amber">✓</span> Publish
+      </div>
+    </div>
+
+    <!-- Centered Card (about 560px wide) -->
+    <div class="w-full max-w-[560px] bg-surface border border-line rounded-[16px] p-8 md:p-10 shadow-[0_20px_50px_rgba(0,0,0,0.4)] flex flex-col items-center text-center">
+
+      <!-- Vertical 9:16 Thumbnail (#120C07) with amber line art of cloud and raindrops + green check badge -->
+      <div class="relative w-[110px] h-[196px] bg-[#120C07] border border-line rounded-[12px] p-2 flex flex-col items-center justify-between mb-6 shadow-inner">
+        <!-- Top phone header micro-bar -->
+        <div class="w-full flex items-center justify-between pt-1 px-1">
+          <span class="text-[7px] font-mono tracking-wider text-amber/60">BYTE · REEL</span>
+          <span class="w-1 h-1 rounded-full bg-amber/50"></span>
+        </div>
+
+        <!-- Center illustration: Cloud and raindrops in amber line art -->
+        <div class="flex-1 flex flex-col items-center justify-center">
+          <svg class="w-12 h-12 text-amber" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Cloud path -->
+            <path d="M18 42h28a12 12 0 0 0 2.5-23.7 15 15 0 0 0-29-2.3A11 11 0 0 0 18 42z" stroke-width="2.2" stroke-dasharray="none" />
+            <!-- Raindrops -->
+            <line x1="22" y1="47" x2="20" y2="52" stroke-width="2" />
+            <line x1="28" y1="47" x2="26" y2="52" stroke-width="2" />
+            <line x1="34" y1="47" x2="32" y2="52" stroke-width="2" />
+            <line x1="40" y1="47" x2="38" y2="52" stroke-width="2" />
+          </svg>
+        </div>
+
+        <!-- Mini bottom caption pill -->
+        <div class="w-full bg-[#1A120A] rounded py-1 px-1 text-[7px] text-[#B5A795] truncate border border-line">
+          High in the sky...
+        </div>
+
+        <!-- Green check badge on its corner -->
+        <div class="absolute -top-2.5 -right-2.5 w-7 h-7 rounded-full bg-[#0F2E1E] border border-[#4ADE80] flex items-center justify-center shadow-[0_2px_8px_rgba(74,222,128,0.25)]">
+          <svg class="w-4 h-4 text-[#4ADE80]" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Badge "Published" (success colors #4ADE80 on #0F2E1E) -->
+      <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-success-bg border border-success-text/30 text-success-text text-xs font-medium mb-4">
+        <span class="w-1.5 h-1.5 rounded-full bg-success-text animate-pulse"></span>
+        Published
+      </div>
+
+      <!-- Heading: "Your reel is live!" (Exo 2) -->
+      <h1 class="font-display font-extrabold text-2xl md:text-3xl text-text mb-3 tracking-tight">
+        Your reel is live!
+      </h1>
+
+      <!-- Muted text -->
+      <p class="text-text-muted text-[15px] leading-relaxed max-w-[430px] mb-8">
+        How the water cycle works was posted to @techbytechronicles on 12 Nov 2026, 7:02 PM.
+      </p>
+
+      <!-- Action Buttons -->
+      <div class="w-full flex flex-col items-center gap-3.5">
+        <!-- Primary button: "View on Instagram" with ↗ circle and amber glow -->
+        <a href="#" class="btn-gradient w-full py-3.5 pl-6 pr-3.5 rounded-full text-on-amber font-body font-bold text-[15px] flex items-center justify-center gap-3 group">
+          <span>View on Instagram</span>
+          <span class="w-7 h-7 rounded-full bg-black/15 flex items-center justify-center text-sm font-bold transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
+            ↗
+          </span>
+        </a>
+
+        <!-- Secondary button: "Create another video" -->
+        <a href="#" class="btn-secondary w-full py-3 rounded-full font-body font-medium text-[15px] text-text hover:text-gold-cream text-center">
+          Create another video
+        </a>
+
+        <!-- Muted text link: "Back to My videos" -->
+        <a href="#" class="mt-2 text-[14px] text-text-muted hover:text-text transition-colors">
+          Back to My videos
+        </a>
+      </div>
+
+    </div>
+
+  </main>
+
+</body>
+</html>

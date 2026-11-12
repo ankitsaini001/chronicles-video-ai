@@ -1,0 +1,161 @@
+<title>ByteReel Ember Gold</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=Ubuntu:wght@400;500;700&family=Noto+Sans+Devanagari:wght@600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: single-theme dark brand page — full-bleed hero, then a compact brand sheet (palette, gradients, type, components). */
+:root {
+  --bg: #0B0806; --surface: #15100B; --surface-2: #1A120A; --ink: #F7EFE6; --muted: #B5A795; --line: #F5A52426;
+  --amber: #F5A524; --amber-deep: #E8901A; --gold: #FFE2A8; --navy: #0E2440; --blue: #1D6FD8; --on-amber: #1A1005;
+  --glow: #F5A52466; --glow-soft: #F5A52433;
+  --grad-text: linear-gradient(180deg, #FFE2A8 0%, #F5B04A 100%);
+  --grad-btn: linear-gradient(180deg, #F7B44A, #E8901A);
+  --grad-tile: linear-gradient(150deg, #4A2C10 0%, #1E1208 60%, #120A04 100%);
+  --display: "Exo 2", system-ui, sans-serif; --body: "Ubuntu", system-ui, sans-serif; --deva: "Noto Sans Devanagari", sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.55; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.max { max-width: 1200px; margin: 0 auto; }
+
+/* hero */
+.hero { position: relative; overflow: hidden; isolation: isolate; }
+.hero::before { content: ""; position: absolute; inset: 0; z-index: -1; background: radial-gradient(45% 60% at 72% 45%, #F5A52422, transparent 70%), radial-gradient(30% 40% at 5% 100%, #E8901A14, transparent 70%); }
+.inner { padding-block: 24px 56px; display: grid; gap: 34px; }
+.nav { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; font: 700 21px var(--display); }
+.mk { width: 36px; height: 36px; border-radius: 50%; background: #1A1A2E; border: 1px solid var(--line); display: grid; place-items: center; box-shadow: 0 0 18px var(--glow-soft); }
+.mk::after { content: ""; border-left: 11px solid var(--amber); border-top: 7px solid transparent; border-bottom: 7px solid transparent; margin-left: 3px; }
+.brand b { background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.links { display: flex; gap: 24px; align-items: center; font-size: 14px; font-weight: 500; flex-wrap: wrap; }
+.links .new { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--amber); color: var(--on-amber); margin-left: 5px; }
+.signin { font: 700 14px var(--body); padding: 10px 20px; border-radius: 999px; border: 0; background: var(--grad-btn); color: var(--on-amber); box-shadow: 0 6px 18px var(--glow-soft); cursor: pointer; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 28px; align-items: center; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.chip { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 500; padding: 8px 15px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: #F5B65A; }
+.tri { margin: 20px 0 6px; font: 700 19px var(--display); color: var(--muted); letter-spacing: .02em; }
+.tri i { font-style: normal; color: var(--amber); }
+h1 { margin: 0 0 16px; font: 800 clamp(34px, 5.2vw, 60px)/1.05 var(--display); letter-spacing: -.01em; text-wrap: balance; }
+h1 .g { background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sub { margin: 0 0 24px; color: var(--muted); max-width: 50ch; font-size: 16px; }
+.sub b { color: var(--ink); font-weight: 500; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; max-width: 600px; }
+@media (max-width: 520px) { .three { grid-template-columns: minmax(0, 1fr); } }
+.three div { display: grid; gap: 8px; font-size: 14px; color: var(--muted); min-width: 0; }
+.three span { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--amber); border: 1px solid var(--line); font: 500 12px var(--mono); }
+.cta { display: inline-flex; align-items: center; gap: 16px; padding: 9px 9px 9px 26px; border-radius: 999px; border: 0; background: var(--grad-btn); color: var(--on-amber); font: 700 16px var(--body); box-shadow: 0 10px 30px var(--glow); cursor: pointer; }
+.cta i { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: #00000026; font-style: normal; }
+
+.stage { position: relative; min-height: 420px; display: grid; place-items: center; }
+.halo { position: absolute; width: 72%; max-width: 380px; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, var(--glow) 0%, transparent 65%); filter: blur(10px); }
+.phone { position: relative; width: 190px; max-width: 48%; aspect-ratio: 9 / 18; border-radius: 28px; padding: 8px; background: var(--surface-2); border: 1px solid var(--line); box-shadow: 0 30px 60px #00000080, inset 0 1px 0 #FFFFFF22; }
+.screen { width: 100%; height: 100%; border-radius: 21px; overflow: hidden; background: #120C07; display: grid; grid-template-rows: auto 1fr auto; padding: 12px 9px; gap: 6px; }
+.screen small { font: 700 11px var(--display); color: var(--amber); text-align: center; }
+.flow { display: grid; gap: 6px; align-content: center; }
+.flow span { font-size: 11px; text-align: center; padding: 7px; border-radius: 9px; border: 1px solid var(--line); background: #FFFFFF0A; }
+.flow span:nth-child(3) { background: var(--grad-btn); color: var(--on-amber); border: 0; font-weight: 700; }
+.flow em { justify-self: center; font-style: normal; color: var(--amber); font-size: 11px; line-height: 1; }
+.cap { font-size: 10px; text-align: center; background: #000000B0; border-radius: 6px; padding: 5px; }
+.tile { position: absolute; padding: 12px 17px; border-radius: 16px; font: 800 19px var(--display); background: var(--grad-tile); border: 1px solid #F5A52466;
+  box-shadow: inset 0 2px 0 #FFFFFF2A, inset 0 -6px 12px #00000066, 0 12px 26px #00000088, 0 0 22px var(--glow-soft); }
+.tile b { background: linear-gradient(180deg, #FFF0CC, #F5A524); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tile .deva { font-family: var(--deva); }
+.t1 { top: 8%; left: 6%; transform: rotate(-10deg); } .t2 { top: 2%; right: 8%; transform: rotate(8deg); font-size: 24px; }
+.t3 { top: 44%; left: 0; transform: rotate(-6deg); font-size: 16px; } .t4 { top: 42%; right: 0; transform: rotate(9deg); font-size: 16px; }
+.t5 { bottom: 6%; left: 12%; transform: rotate(-12deg); font-size: 15px; } .t6 { bottom: 6%; right: 10%; transform: rotate(6deg); font-size: 15px; }
+@media (max-width: 520px) { .tile { font-size: 13px !important; padding: 8px 10px; } }
+
+/* brand sheet */
+.sheet { border-top: 1px solid var(--line); background: var(--surface); }
+.sheet .max { padding-block: 44px 64px; display: grid; gap: 36px; }
+.sheet h2 { margin: 0 0 4px; font: 700 28px var(--display); }
+.sheet .lede { margin: 0; color: var(--muted); max-width: 64ch; }
+.label { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+.sw { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.sw div { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--bg); }
+.sw i { display: block; height: 64px; }
+.sw p { margin: 0; padding: 8px 10px; display: grid; gap: 1px; font-size: 13px; }
+.sw p span { color: var(--muted); font-size: 12px; }
+.sw code { font: 500 11px var(--mono); color: var(--gold); }
+.grads { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.grads div { border-radius: 14px; height: 58px; display: flex; align-items: end; padding: 8px 12px; font-size: 12px; font-weight: 500; border: 1px solid var(--line); }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
+@media (max-width: 760px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.type { display: grid; gap: 14px; }
+.type .row { display: grid; gap: 2px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.type .row small { font: 500 11px var(--mono); color: var(--muted); }
+.comp { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.ghost { font: 700 14px var(--body); padding: 10px 20px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+.status { display: flex; flex-wrap: wrap; gap: 8px; }
+.status span { font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; }
+@media (prefers-reduced-motion: no-preference) {
+  .tile { animation: float 6s ease-in-out infinite; } .t2, .t5 { animation-delay: -2s; } .t3, .t6 { animation-delay: -4s; }
+  @keyframes float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+  .cta, .signin { transition: transform .15s ease; } .cta:hover, .signin:hover { transform: translateY(-2px); }
+}
+</style>
+
+<header class="hero pad">
+  <div class="max inner">
+    <nav class="nav" aria-label="Main">
+      <div class="brand"><span class="mk" aria-hidden="true"></span><span>Byte<b>Reel</b></span></div>
+      <div class="links"><span>How it works</span><span>Examples</span><span>Hindi voices<span class="new">NEW</span></span><button class="signin" type="button">Sign in</button></div>
+    </nav>
+    <div class="grid">
+      <div>
+        <span class="chip">🎬 Idea in. Reel out.</span>
+        <p class="tri">Explain<i>.</i> Animate<i>.</i> Post<i>.</i></p>
+        <h1>Turn any topic into a <span class="g">ready-to-post Reel</span></h1>
+        <p class="sub">Type an idea or paste your notes. ByteReel writes the <b>script</b>, animates every <b>concept</b> and adds a natural <b>voice</b> in English, Hindi or Hinglish.</p>
+        <div class="three"><div><span>01</span>Storyboard in about 30 seconds</div><div><span>02</span>Motion graphics timed to the voice</div><div><span>03</span>Download or post to Instagram</div></div>
+        <button class="cta" type="button">Create your first reel <i>↗</i></button>
+      </div>
+      <div class="stage" aria-hidden="true">
+        <div class="halo"></div>
+        <div class="phone"><div class="screen"><small>The Water Cycle</small><div class="flow"><span>Sunlight heats water</span><em>↓</em><span>Vapour rises</span><em>↓</em><span>Clouds form</span></div><span class="cap">Heat turns water into vapour.</span></div></div>
+        <span class="tile t1"><b>Explainer</b></span><span class="tile t2"><b>AI</b></span><span class="tile t3"><b class="deva">हिंदी</b></span><span class="tile t4"><b>Reels</b></span><span class="tile t5"><b>Voice</b></span><span class="tile t6"><b>60s</b></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="sheet pad" aria-labelledby="sheet-title">
+  <div class="max">
+    <div><h2 id="sheet-title">Ember Gold brand basics</h2><p class="lede">Warm black base, amber for every action, gold-cream gradients on a few headline words. Bright color is used sparingly so the page stays professional.</p></div>
+
+    <div><p class="label">Colors</p><div class="sw">
+      <div><i style="background:#0B0806"></i><p>Warm black<span>Page background</span><code>#0B0806</code></p></div>
+      <div><i style="background:#15100B"></i><p>Surface<span>Cards, sections</span><code>#15100B</code></p></div>
+      <div><i style="background:#F5A524"></i><p>Amber<span>Buttons, links, icons</span><code>#F5A524</code></p></div>
+      <div><i style="background:#E8901A"></i><p>Deep amber<span>Button gradient end</span><code>#E8901A</code></p></div>
+      <div><i style="background:#FFE2A8"></i><p>Gold cream<span>Headline gradient</span><code>#FFE2A8</code></p></div>
+      <div><i style="background:#F7EFE6"></i><p>Text<span>Main text</span><code>#F7EFE6</code></p></div>
+      <div><i style="background:#B5A795"></i><p>Muted text<span>Descriptions</span><code>#B5A795</code></p></div>
+      <div><i style="background:#1A1A2E"></i><p>Logo circle<span>Logo mark background</span><code>#1A1A2E</code></p></div>
+    </div></div>
+
+    <div><p class="label">Gradients and glow</p><div class="grads">
+      <div style="background:var(--grad-text);color:#1A1005">Headline words</div>
+      <div style="background:var(--grad-btn);color:#1A1005">Buttons</div>
+      <div style="background:var(--grad-tile);color:#FFE2A8">Glossy 3D tiles</div>
+      <div style="background:radial-gradient(circle,#F5A52466,transparent 70%),#0B0806;color:#F7EFE6">Amber glow</div>
+    </div></div>
+
+    <div class="cols">
+      <div class="type"><p class="label">Typography</p>
+        <div class="row"><small>Display · Exo 2 ExtraBold</small><span style="font:800 34px/1.1 var(--display)">Explain anything in 60s</span></div>
+        <div class="row"><small>Body · Ubuntu Regular / Medium</small><span style="font-size:16px;color:var(--muted)">Type an idea or paste your notes, and get a storyboard in about 30 seconds.</span></div>
+        <div class="row"><small>Hindi · Noto Sans Devanagari SemiBold</small><span style="font:600 22px var(--deva)">पानी का चक्र कैसे काम करता है</span></div>
+        <div class="row"><small>Labels · JetBrains Mono</small><span style="font:500 13px var(--mono);color:var(--amber)">SCENE 02 · PROCESS FLOW</span></div>
+      </div>
+      <div style="display:grid;gap:22px;align-content:start">
+        <div><p class="label">Buttons</p><div class="comp"><button class="cta" type="button">Create your first reel <i>↗</i></button><button class="signin" type="button">Sign in</button><button class="ghost" type="button">Watch a sample</button></div></div>
+        <div><p class="label">Status</p><div class="status"><span style="background:#0F2E1E;color:#4ADE80">Ready</span><span style="background:#2A1D08;color:#F5A524">Generating</span><span style="background:#2E2410;color:#FFD27A">Needs review</span><span style="background:#33141B;color:#FB7185">Failed</span></div></div>
+        <div><p class="label">Shape</p><p style="margin:0;color:var(--muted)">Pill buttons (fully round), 16px corners on cards and tiles, soft amber glow only on the main action.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
