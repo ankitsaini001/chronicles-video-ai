@@ -92,6 +92,8 @@ export function HowItWorks() {
 
 /* ---------- Examples (showcase) ---------- */
 
+// Image files carry a version suffix (-v2): Next.js caches resized images by URL, so a changed
+// image must get a new file name or visitors keep seeing the old one.
 const EXAMPLES = [
   {
     title: "The Water Cycle",
@@ -99,7 +101,7 @@ const EXAMPLES = [
     language: "English",
     seconds: 64,
     voice: "Female voice",
-    image: "/examples/water-cycle.jpg",
+    image: "/examples/water-cycle-v2.jpg",
   },
   {
     title: "बचत खाता बनाम FD",
@@ -108,7 +110,7 @@ const EXAMPLES = [
     language: "हिंदी Hindi",
     seconds: 72,
     voice: "Male voice",
-    image: "/examples/savings-vs-fd.jpg",
+    image: "/examples/savings-vs-fd-v2.jpg",
   },
   {
     title: "Opportunity cost kya hai?",
@@ -116,7 +118,7 @@ const EXAMPLES = [
     language: "Hinglish",
     seconds: 68,
     voice: "Female voice",
-    image: "/examples/opportunity-cost.jpg",
+    image: "/examples/opportunity-cost-v2.jpg",
   },
   {
     title: "How UPI works",
@@ -124,7 +126,7 @@ const EXAMPLES = [
     language: "English",
     seconds: 81,
     voice: "Male voice",
-    image: "/examples/how-upi-works.jpg",
+    image: "/examples/how-upi-works-v2.jpg",
   },
 ] as const;
 
