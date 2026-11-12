@@ -37,7 +37,7 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 
 ## Steps
 - [x] 1. Create the Next.js app in apps/web, register the workspace, one React version
-- [ ] 2. Add Tailwind + Ember Gold colour tokens
+- [x] 2. Add Tailwind + Ember Gold colour tokens
 - [ ] 3. Add the 4 fonts (self-hosted)
 - [ ] 4. Build the 5 basic components + style sheet page
 - [ ] 5. Typecheck/tests cover the web app; prototype tests still pass
@@ -55,3 +55,4 @@ A plain page at http://localhost:3000 with the dark Ember Gold background and th
 |---|---|
 | 2026-11-12 | Started. Founder agreed: env check moves to F06; Tailwind only (no shadcn). |
 | 2026-11-12 | Step 1: Next.js **16.4.3** (released 2026-10-23; newest 16.4.6 was 3 days old) in `apps/web` (`@bytereel/web`), written by hand (no create-next-app sample files): package.json, tsconfig.json (bundler resolution), next.config.ts, app/layout.tsx, app/page.tsx. Root workspaces = `apps/*`, `packages/*`; root `npm run dev` starts the website. **One React:** react/react-dom 19.2.9 everywhere (single copy in node_modules). `.gitignore`: `.next/`, `next-env.d.ts`. `next dev` added `.next/dev/types/**/*.ts` to the web tsconfig include and generated `apps/web/AGENTS.md` (note for AI tools: read `node_modules/next/dist/docs/` for this version) — kept. Check: page serves HTTP 200 with title "ByteReel"; prototype tests 186/186; typecheck clean. `transpilePackages` not added yet: the web app does not import `@bytereel/pipeline` until F12+. |
+| 2026-11-12 | Step 2: Tailwind **4.3.3** + `@tailwindcss/postcss` 4.3.3 (4.3.4/4.3.5 were <2 weeks old), set up as in the bundled Next.js docs (`postcss.config.mjs`, `app/globals.css` with `@import "tailwindcss"`, imported in layout). Ember Gold tokens from BRAND.md §2/§4 in `@theme` (bg, surface, surface-2, screen, amber, amber-deep, amber-light, gold-cream, text, muted, line, on-amber, logo-circle, 4 status pairs, shadow-card, shadow-glow) + utilities `text-gradient-gold`, `bg-button`, `bg-atmosphere`; base styles: dark background, gold-cream focus ring (§9), reduced-motion. Placeholder page shows swatches, status badges and button fill; screenshot checked. Prototype tests 186/186. |
