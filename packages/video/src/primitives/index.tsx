@@ -1,6 +1,6 @@
 import type React from "react";
 import { mix, seededRandom, hashString } from "../anim";
-import { COLORS, FONT_FAMILY, FONT_SIZE, RADIUS } from "../../../packages/pipeline/src/theme";
+import { COLORS, FONT_FAMILY, FONT_SIZE, RADIUS } from "@bytereel/pipeline/theme";
 
 export { Icon, iconFor, iconForLabel, ICON_NAMES, type IconName } from "./Icon";
 

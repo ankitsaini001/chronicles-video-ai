@@ -1,5 +1,5 @@
 import type React from "react";
-import type { SceneType } from "../../../packages/pipeline/src/contracts";
+import type { SceneType } from "@bytereel/pipeline/contracts";
 import { Chart } from "./Chart";
 import { Comparison } from "./Comparison";
 import { LabeledDiagram } from "./LabeledDiagram";

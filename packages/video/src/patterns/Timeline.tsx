@@ -1,7 +1,7 @@
 import type React from "react";
 import { entranceStyle, mix } from "../anim";
 import { Card, Text } from "../primitives";
-import { COLORS, FONT_SIZE, STAGE } from "../../../packages/pipeline/src/theme";
+import { COLORS, FONT_SIZE, STAGE } from "@bytereel/pipeline/theme";
 import type { PatternProps } from "./types";
 
 /**

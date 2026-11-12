@@ -1,7 +1,7 @@
-import { PlanSchema, type CaptionTrack, type SceneType, type Timeline, type TimelineScene } from "../../packages/pipeline/src/contracts";
-import { CAPTION_STYLE } from "../../packages/pipeline/src/theme";
-import { breakLines, compileTimeline, synthesizeSceneAlignment, WIDTH_METHOD } from "../../packages/pipeline/src/timing";
-import waterCyclePlan from "../../fixtures/water-cycle.plan.json";
+import { PlanSchema, type CaptionTrack, type SceneType, type Timeline, type TimelineScene } from "@bytereel/pipeline/contracts";
+import { CAPTION_STYLE } from "@bytereel/pipeline/theme";
+import { breakLines, compileTimeline, synthesizeSceneAlignment, WIDTH_METHOD } from "@bytereel/pipeline/timing";
+import waterCyclePlan from "../../../fixtures/water-cycle.plan.json";
 
 /**
  * Studio preview data. Not pipeline output and never written to a run folder.

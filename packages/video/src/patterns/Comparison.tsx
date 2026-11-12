@@ -1,8 +1,8 @@
 import type React from "react";
-import type { TimelineObject } from "../../../packages/pipeline/src/contracts";
+import type { TimelineObject } from "@bytereel/pipeline/contracts";
 import { entranceStyle } from "../anim";
 import { Card, Circle, Icon, iconFor, Text } from "../primitives";
-import { COLORS, FONT_SIZE, RADIUS, STAGE } from "../../../packages/pipeline/src/theme";
+import { COLORS, FONT_SIZE, RADIUS, STAGE } from "@bytereel/pipeline/theme";
 import type { PatternProps } from "./types";
 
 /**

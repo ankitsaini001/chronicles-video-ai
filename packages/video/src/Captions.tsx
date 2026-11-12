@@ -1,9 +1,9 @@
 import type React from "react";
 import { useLayoutEffect, useRef } from "react";
 import { cancelRender, useCurrentFrame } from "remotion";
-import type { CaptionTrack } from "../../packages/pipeline/src/contracts";
+import type { CaptionTrack } from "@bytereel/pipeline/contracts";
 import { ramp } from "./anim";
-import { CANVAS, CAPTION_STYLE, CAPTION_ZONE, COLORS, FONT_FAMILY, RADIUS } from "../../packages/pipeline/src/theme";
+import { CANVAS, CAPTION_STYLE, CAPTION_ZONE, COLORS, FONT_FAMILY, RADIUS } from "@bytereel/pipeline/theme";
 
 /**
  * Phrase captions (PIPELINE_DESIGN.md §7): high contrast, max two pre-broken lines, no word-by-word

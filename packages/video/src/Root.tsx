@@ -4,7 +4,7 @@ import { Captions } from "./Captions";
 import { Explainer, type ExplainerProps } from "./Explainer";
 import { loadPackagedFonts } from "./fonts";
 import { DEVANAGARI_SAMPLES, devanagariSample, patternGallery, waterCycleFixture } from "./samples";
-import { CANVAS, COLORS, FONT_FAMILY } from "../../packages/pipeline/src/theme";
+import { CANVAS, COLORS, FONT_FAMILY } from "@bytereel/pipeline/theme";
 
 loadPackagedFonts();
 

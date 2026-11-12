@@ -11,7 +11,7 @@ import type { CaptionTrack, Timeline } from "../contracts";
  * Rendering never calls AI providers; the composition draws only the compiled timeline.
  */
 
-export const VIDEO_ENTRY = path.resolve(import.meta.dirname, "../../../../src/video/index.ts");
+export const VIDEO_ENTRY = path.resolve(import.meta.dirname, "../../../video/src/index.ts");
 export const COMPOSITION_ID = "Explainer";
 
 export interface RenderJob {

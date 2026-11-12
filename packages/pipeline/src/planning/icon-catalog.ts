@@ -3,7 +3,7 @@
  * by a fixed keyword table (first match wins; "bulb" when nothing matches).
  *
  * It lives in planning (not video) so the planner prompt and the Remotion icon component share
- * one list. The SVG artwork stays in src/video/primitives/Icon.tsx.
+ * one list. The SVG artwork stays in packages/video/src/primitives/Icon.tsx.
  */
 
 export const ICON_NAMES = [
