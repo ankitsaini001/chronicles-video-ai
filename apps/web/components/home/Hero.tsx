@@ -25,8 +25,12 @@ const PHONE_STEPS = [
 
 function PhoneMockup() {
   return (
-    <div className="relative mx-auto aspect-[9/18] w-[min(100%,300px)] rounded-[36px] border border-amber/40 bg-surface-2 p-3 shadow-card">
-      <div className="flex h-full flex-col rounded-[28px] border border-amber/25 bg-screen p-4">
+    <div
+      role="img"
+      aria-label="Example reel: The Water Cycle"
+      className="relative mx-auto aspect-[9/18] w-[min(100%,300px)] rounded-[36px] border border-amber/40 bg-surface-2 p-3 shadow-card"
+    >
+      <div aria-hidden="true" className="flex h-full flex-col rounded-[28px] border border-amber/25 bg-screen p-4">
         <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-amber">Science</p>
         <p className="mt-1 font-display text-lg font-bold">The Water Cycle</p>
         <ul className="mt-4 flex flex-col gap-2.5">
