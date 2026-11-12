@@ -36,7 +36,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 |---|---|---|---|
 | F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | ✅ Done |
 | F02 | [Web app skeleton (Next.js + Ember Gold styles)](F02-web-app-skeleton.md) | F01 | ✅ Done |
-| F03 | [Home page (landing)](F03-home-page.md) | F02 | 🧪 Ready for founder testing |
+| F03 | [Home page (landing)](F03-home-page.md) | F02 | ✅ Done |
 
 ### A2 · Accounts and database
 
@@ -98,4 +98,4 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F03. F04 (database doc) can be written any time before F05.
+**Next up:** F04 (database explained in plain words). Phase A1 (F01–F03) is done and merged to `main`.

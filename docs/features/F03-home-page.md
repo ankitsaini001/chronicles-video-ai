@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Ready for founder testing |
+| **Status** | ✅ Done |
 | **Phase** | A1 · Foundation (project setup) |
 | **Depends on** | F02 |
 | **Design** | Stitch: ByteReel — Home Landing Page (`docs/design/stitch/home-landing-v1.html`), chosen by the founder on 2026-11-12; was Home v2 |
@@ -32,7 +32,7 @@ The full home page: hero, How it works, Examples, Languages, Why ByteReel, FAQ, 
 ## Steps
 - [x] Build sections one by one
 - [x] Check mobile
-- [ ] Founder review
+- [x] Founder review
 
 ## How we test it (done when all are ticked)
 - [x] Page matches the design on desktop
@@ -40,7 +40,7 @@ The full home page: hero, How it works, Examples, Languages, Why ByteReel, FAQ, 
 - [x] No voice names, prices or invented stats
 - [ ] Links go to the right routes
 - [x] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
@@ -49,3 +49,4 @@ The full home page: hero, How it works, Examples, Languages, Why ByteReel, FAQ, 
 | 2026-11-12 | Code review: nothing blocking. Fixed, each in its own commit: headline wraps below 360px instead of being cut off; `data-scroll-behavior="smooth"` so page changes don't scroll-animate (Next 16); title template `%s · ByteReel`; phone mockup read as one image by screen readers; footer links 44px tap targets; header links use `/#…` so they work from other pages; voice labels look non-clickable (same muted style, no amber ▶); bold Hindi weight 700 loaded; examples use one `lang` field, icon names typed. Re-checked: typecheck, production build, screenshots at 320 / 1440. Founder decided: build a Contact page with a mailto link to a dummy address for now. |
 | 2026-11-12 | Added `/contact` (founder's decision): heading, short text and an "Email us" mailto button. The address lives in one place, `apps/web/lib/site.ts` (`CONTACT_EMAIL = "contact@example.com"`, a reserved dummy domain); replacing it with the real address is listed in F38. Checked: typecheck, production build, page title "Contact · ByteReel", mailto link, screenshots at 1440 and 390. |
 | 2026-11-12 | Founder asked to switch to the first Stitch home design ("Home Landing Page") and its 4 showcase images. Saved the design to `docs/design/stitch/home-landing-v1.html`. Rebuilt hero (detailed phone, 6 tiles), How it works, Showcase, Languages, Why ByteReel, FAQ, final CTA, header, footer. Images: the design's JPEGs at full size (768×1376), cropped to remove AI-added page chrome (fake "Home Landing Page" header, website nav, view counts, "© ByteReel Financial Technologies") and padded to 9:16. Copy deliberately changed from the design (claims V1 can't back up): "Real reels created by educators & coaches" → "What your reels can look like"; fake creators/view counts → "Sample reel · Female/Male voice"; "Join 1,200+ educators" removed; voice names and "Most popular" removed (Female/Male only); YouTube/LinkedIn, regional-language alpha, weekly credits and pricing removed from the FAQ; nav "Features"/"Pricing" → "FAQ"; "Sign In" → "Log in"; "Word-sync" → "Synced captions"; "Free in beta" → "Free in private beta". Code review: fixed headline overflow at 360px, tiles covering phone text, emoji losing colour, hover effects on non-playable sample cards, label readability over images, logo tagline size. Open for the founder: the UPI image shows real bank/wallet logos and a phone labelled "ByteReel App"; the Hindi and Hinglish sample images contain English text (and USD amounts). |
+| 2026-11-12 | Founder: blur the bank logos for now (done; image will be replaced by real reels later); endorsement spelled "TechByte Chronicles"; product name may change, so all visible names now come from `apps/web/lib/site.ts`. Sample images renamed `*-v2.jpg` because Next.js kept serving cached old versions under the same name. Founder said OK → ✅. |
