@@ -14,6 +14,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 3. **Keep it simple.** No extra features, no shortcuts that hide where things are.
 4. **Real services, set up together.** MongoDB Atlas, Cloudflare R2 and the Meta app are created in the founder's own accounts, step by step, so the founder always knows where the data lives.
 5. Update the feature's *Progress log* after every work session.
+6. **Git:** all work happens on the `dev` branch. When a feature is ✅ Done, it is committed and pushed to `dev`. At the end of each phase (A1, A2, …), after the founder's OK, `dev` is merged into `main`. `main` only ever holds approved, working code.
 
 ## Status legend
 ⬜ Not started · 🔄 In progress · 🧪 Testing · ✅ Done · ⏸ Parked
@@ -33,7 +34,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | ⬜ Not started |
+| F01 | [Repo setup: npm workspaces + move prototype code](F01-repo-workspaces.md) | — | 🔄 In progress |
 | F02 | [Web app skeleton (Next.js + Ember Gold styles)](F02-web-app-skeleton.md) | F01 | ⬜ Not started |
 | F03 | [Home page (landing)](F03-home-page.md) | F02 | ⬜ Not started |
 
