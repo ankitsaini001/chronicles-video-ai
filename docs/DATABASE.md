@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.0 · 2026-11-13 |
+| **Version** | 1.1 · 2026-11-13 (code-review fixes; open questions decided except Q10) |
 | **Status** | Draft for founder review (feature F04). Nothing is created yet: this is a document only |
 | **Sources** (priority order) | [`ARCHITECTURE.md`](ARCHITECTURE.md) §7, §8, §9, §20.5 · [`API.md`](API.md) · [`PRD.md`](../PRD.md) §15 (older short list, see §12.2) |
 | **Companion** | [`API.md`](API.md): every endpoint that reads or writes these collections |
@@ -66,7 +66,7 @@ A **document** is a JSON-like record. Atlas shows it like this:
 MySQL refuses a row that doesn't fit the table. MongoDB, by default, accepts any document. That's flexible, but it also means mistakes can slip in. We protect against that in two layers (1.4).
 
 ### 1.4 Validators (the database's own rules)
-A **validator** is a rule attached to a collection, for example "`state` must be one of these 12 words" or "`ownerId` is required". MongoDB rejects a write that breaks the rule. Our code checks everything with Zod first; the validator is the last safety net if a bug slips through. This document lists the key validator rules for each collection under **Rules**. (ARCHITECTURE requires Zod but doesn't name database validators; see Q9.)
+A **validator** is a rule attached to a collection, for example "`state` must be one of these 12 words" or "`ownerId` is required". MongoDB rejects a write that breaks the rule. Our code checks everything with **Zod** first: that is the real check, and the **Rules** under each collection describe what our code enforces. The database validator is kept **minimal** (Q9): on every collection that belongs to a user, it only requires `ownerId` (an ObjectId) and `schemaVersion` (except the short-lived helper records `idempotencyKeys` and `usageCounters`, which only require `ownerId`). That one rule catches the worst bug (a document with no owner, which could leak between users) without making every future change a two-place edit. Better Auth's own collections get no validator.
 
 ### 1.5 Indexes
 An **index** works the same as in MySQL: a sorted lookup list that makes a search fast. A **unique** index also forbids duplicates ("one account per email"). Two kinds you may not have used:
@@ -156,14 +156,14 @@ Why: video and audio files are large (a 75-second reel ≈ 18 MB). 512 MB of dat
 | 4.4 | `verification` | Admin-issued one-time password-reset links (Better Auth) | F35 | A6 |
 | 4.5 | `allowlist` | Emails invited to the private beta | F07 | A2 |
 | 4.6 | `rateLimits` | Short-lived counters for "too many attempts" | F08, F09 | A2 |
-| 4.7 | `healthchecks` | Temporary: one test record to prove the connection | F06 | A2 |
+| 4.7 | `healthchecks` | Temporary: one test record to prove the connection; dropped at the end of F06 | F06 | A2 |
 | 4.8 | `projects` | One document per video project (idea, state, pointers) | F12 | A3 |
 | 4.9 | `jobs` | Background work and its progress (plan, revise, generate, caption, publish) | F15 | A3 |
 | 4.10 | `planVersions` | Every version of a storyboard (never edited) | F15 | A3 |
 | 4.11 | `revisions` | The creator's change requests ("make it shorter") | F18 | A3 |
 | 4.12 | `storyboardApprovals` | Approval #1: "I approve this exact storyboard" | F20 | A3 |
 | 4.13 | `idempotencyKeys` | Remembers button clicks for 24 h so a double-click does nothing twice | F12 | A3 |
-| 4.14 | `usageCounters` | Daily counts for the limits (projects, videos) | F27 (see Q7) | A4 |
+| 4.14 | `usageCounters` | Daily/monthly counts for the limits (projects, videos, voice characters) | F12 (counting), F27 (limits enforced) | A3 |
 | 4.15 | `providerUsage` | Every paid AI/render call and its estimated cost | F14 | A3 |
 | 4.16 | `auditLogs` | Who did what important thing, and when | F20 | A3 |
 | 4.17 | `settings` | One global document: limits, ceilings, models, maintenance | F27, F36 | A4 |
@@ -176,7 +176,7 @@ Why: video and audio files are large (a 75-second reel ≈ 18 MB). 512 MB of dat
 | 4.24 | `notifications` | In-app messages ("Your video is ready") | F32 | A5 |
 | 4.25 | `deletionRequests` | Account deletion and Meta data-deletion requests | F33, F37 | A6 |
 
-25 collections in total (24 permanent + 1 temporary). Sources: 4.1–4.5, 4.8–4.12, 4.15–4.23 are in ARCHITECTURE §8; 4.6, 4.13, 4.14, 4.24, 4.25 are named only in API.md (their fields are partly undefined, see Q2); 4.7 is from the F06 feature file.
+25 collections in total (24 permanent + 1 temporary). Sources: 4.1–4.5, 4.8–4.12, 4.15–4.23 are in ARCHITECTURE §8; 4.6, 4.13, 4.14, 4.24, 4.25 are named only in API.md; their fields are defined in this document (Q2) and copied into ARCHITECTURE §8 (Q3); 4.7 is from the F06 feature file.
 
 ---
 
@@ -340,13 +340,14 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
   signedUpUserId: ObjectId("67330c1a9f1e4b2a7c0d1e01")
 }
 ```
+Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ email: "<your email>", invitedBy: null, note: "added by setup command", … }`.
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id` | ObjectId | Entry id | Auto |
 | `email` | string, lowercased, ≤ 254 | The invited email | Yes |
 | `note` | string ≤ 200 | Admin's note ("who is this?") | No |
-| `invitedBy` | ObjectId → `user` | The admin who added it (see Q14 for F07) | Auto |
+| `invitedBy` | ObjectId? → `user` | The admin who added it. `null` for entries added by the setup command (F07, Q14) | Auto |
 | `createdAt` | date | When it was added | Auto |
 | `signedUpUserId` | ObjectId \| null → `user` | Set when this person signs up | No |
 
@@ -357,14 +358,31 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 #### 4.6 `rateLimits`
 **Purpose:** short-lived counters behind "Too many attempts. Please wait 15 minutes". Each counter belongs to an IP address, a lowercased email or a user, and counts attempts in a fixed time window (API.md §3.7, e.g. 5 sign-in attempts per 15 minutes per IP and per email).
 
-**Example and field list:** not defined yet. API.md only says "counters live in the `rateLimits` collection (fixed windows, TTL-expired)" (Q2, Q13).
+```js
+{
+  _id: "signin-email:sha256:3f9a…c21e:2026-11-12T04:30:00.000Z",
+  count: 3,
+  expiresAt: ISODate("2026-11-12T04:45:00.000Z")
+}
+```
 
-**Rules:** counters disappear automatically when their window ends (TTL). The account lockout (`failedLoginCount`, `lockedUntil`) is stored on `user`, not here.
+| Field | Type | Meaning | Req |
+|---|---|---|---|
+| `_id` | string | `<rule>:<sha256(subject)>:<windowStart>`. `rule` names the limit (e.g. `signin-ip`, `signin-email`, `create-project`); `subject` is the IP address, the lowercased email or the user id; `windowStart` is when this fixed window began. **No raw IP or email is stored**, only the hash | Auto |
+| `count` | int | Attempts in this window so far | Auto |
+| `expiresAt` | date | End of the window | Auto |
 
-**Indexes:** TTL index so old counters delete themselves (field name to be defined, Q2).
+**Rules**
+- **One collection for all limits, including login and sign-up** (Q13). Each request does one atomic "add 1, create if missing" (`updateOne` with `$inc` and `upsert`) and compares `count` with the limit. Fixed windows: e.g. 5 sign-ins per 15 minutes.
+- Better Auth's own rate limiter is **turned off**: by default it keeps its counters in server memory, which is useless on Vercel (every function instance has its own memory).
+- Counters disappear when their window ends (TTL), and the code ignores a counter whose `expiresAt` has passed (§1.5).
+- The account lockout (`failedLoginCount`, `lockedUntil`) is stored on `user`, not here.
+- A plain hash of an IP address could be guessed back by trying every IP; we accept that because a counter lives at most one hour.
+
+**Indexes:** TTL on `expiresAt` (`expireAfterSeconds: 0`). The `_id` itself is the lookup key, so no other index is needed.
 
 #### 4.7 `healthchecks` (temporary)
-**Purpose:** F06 writes **one test record** and reads it back to prove the app can talk to your Atlas database. You see it in Browse Collections, then it is deleted. Its fields are decided in F06 (something like a message and a time); it never holds user data. Whether the empty collection is dropped afterwards is Q16.
+**Purpose:** F06 writes **one test record** and reads it back to prove the app can talk to your Atlas database. Its fields are decided in F06 (something like a message and a time); it never holds user data. **At the end of F06**, after you have seen the record in Browse Collections, the record is deleted and the empty `healthchecks` collection is dropped (Q16). Later health checks don't write anything: they send MongoDB's `ping` command (`db.command({ ping: 1 })`).
 
 ### Projects and storyboard (phase A3)
 
@@ -468,12 +486,12 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 | `error` | `{ code, message, retryable }`? | Why it failed; `retryable` → show **Retry** | No |
 | `needsInput` | `{ reason, message, sceneId }`? | When the creator must change something (e.g. video longer than 90 s) | No |
 | `result` | `{ planVersionId?, renderId?, revisionId?, postId? }`? | What the job produced | No |
-| `idempotencyKey` | string, unique | Stops duplicate jobs from double-clicks, e.g. `plan:{projectId}:{inputHash}`, `gen:{planVersionId}` (see Q6) | Yes |
+| `idempotencyKey` | string, unique, **required** | Stops duplicate jobs from double-clicks. One format per job type (Q6): `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. Also used as the Inngest event id | Yes |
 | `inngestRunId` | string? | Link to the run in the Inngest dashboard (for debugging) | No |
 | `cancelRequestedAt` | date? | Set when the creator presses Cancel; the job stops between steps | No |
 | `createdAt`, `updatedAt`, `startedAt`, `finishedAt` | date | Timestamps | Auto |
 
-**Rules:** only one active job per project (`projects.activeJobId`). A retry keeps the same job, adds 1 to `attempt`, and skips finished stages (no repeated paid calls). Jobs never create approvals.
+**Rules:** every job **must** have an `idempotencyKey` (a missing key would count as `null` in the unique index, so only one such job could ever exist). Only one active job per project (`projects.activeJobId`). A retry keeps the same job, adds 1 to `attempt`, and skips finished stages (no repeated paid calls). Jobs never create approvals.
 
 **Indexes**
 - unique `idempotencyKey`: the same job can't be created twice.
@@ -514,7 +532,7 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 | `plan` | object | The full storyboard, exactly the code contract (PIPELINE_DESIGN §5, API.md §11.2) | Yes |
 | `planHash` | string `sha256:…` | Fingerprint of the plan. Any change gives a different hash | Yes |
 | `validation` | `{ valid, issues[], warnings[] }` | Result of the plan checks | Yes |
-| `stats` | `{ sceneCount, wordCount, estimatedSeconds }` | Shown on the storyboard (names: see Q4) | Yes |
+| `stats` | `{ sceneCount, wordCount, estimatedSeconds }` | Shown on the storyboard. Same names as the code (`PlanStats` in `packages/pipeline/src/planning/semantic-validation.ts`, Q4) | Yes |
 | `plannerUsage` | `{ model, promptTokens, outputTokens, thinkingTokens, attempts }` | The AI call that made it (for AI-made versions) | No |
 | `createdAt` | date | When it was made | Auto |
 
@@ -603,11 +621,33 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 #### 4.13 `idempotencyKeys`
 **Purpose:** remembers recent important button clicks for **24 hours**. Each click sends a random key; if the same key arrives again (a double-click, a network retry), the server replays the first answer instead of creating a second project, job or post (API.md §6).
 
-**What it stores (from API.md §6):** the owner + the key, a fingerprint of the request (`sha256` of method + path + body), and the saved status code + response body once finished (or a marker that the first request is still running). **Example and exact field names:** not defined yet (Q2).
+```js
+{
+  _id: ObjectId("67330d5e9f1e4b2a7c0d0c01"),
+  ownerId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
+  key: "9b2f4c1e-7d3a-4e8b-a1c5-2f6d8e0b4a71",
+  fingerprint: "sha256:0c4e…9a1f",
+  status: "done",
+  lockedUntil: null,
+  responseStatus: 202,
+  responseBody: { /* the original answer, replayed on a repeat */ },
+  createdAt: ISODate("2026-11-12T05:00:00.000Z")
+}
+```
 
-**Rules:** scoped per user. A key reused with a different request body → `IDEMPOTENCY_KEY_REUSED`. Server errors (5xx) are not saved, so the client can retry.
+| Field | Type | Meaning | Req |
+|---|---|---|---|
+| `_id`, `ownerId` | ObjectId | Record id; whose click | Auto |
+| `key` | string 8–128 | The `Idempotency-Key` header sent by the browser | Yes |
+| `fingerprint` | string | `sha256` of method + path + body: proves the repeat is the same request | Yes |
+| `status` | `in_progress` \| `done` | `in_progress` while the first request is still running | Yes |
+| `lockedUntil` | date? | Only while `in_progress`: now + **~60 s**. If the first request crashed, the marker would block the key forever; after `lockedUntil` the marker counts as **abandoned** and the next request with the key may run it again | No |
+| `responseStatus`, `responseBody` | int, object | The saved answer, once `done` | When done |
+| `createdAt` | date | When the key was first seen | Auto |
 
-**Indexes:** unique owner + key; TTL 24 hours (field names to be defined, Q2, Q8).
+**Rules:** scoped per user. A key reused with a different request body → `IDEMPOTENCY_KEY_REUSED`. A repeat while `in_progress` (and before `lockedUntil`) → `IDEMPOTENCY_IN_PROGRESS`. Server errors (5xx) are not saved (the record is removed), so the client can retry. Running a request twice after an abandoned lock is still safe, because the domain keys (`jobs.idempotencyKey`, `posts.publishKey`, unique approvals) stop duplicates (API.md §6 "Second layer").
+
+**Indexes:** unique `{ ownerId: 1, key: 1 }`; TTL on `createdAt` with `expireAfterSeconds: 86400` (24 hours).
 
 #### 4.14 `usageCounters`
 **Purpose:** counts for the daily limits shown as "Videos today: 1 of 3". API.md mentions it twice: creating a project adds 1 to the projects counter (C2) and approving a storyboard adds 1 to the videos counter (D8).
@@ -616,7 +656,31 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 **In plain words: the voice limit is the one that really matters.** Each user may use **3,000 narration characters per month** (ARCHITECTURE §23: "ElevenLabs characters per user per month | 3,000"; API.md §10.1: "ElevenLabs characters per user per month | 3,000 | Reserved before each speech call"). One video needs about **1,000 characters** of narration (ARCHITECTURE §25.4: "ElevenLabs (~1,000 characters)"). So each user can make **about 3 voiced videos per month**, and the "3 videos per day" limit will rarely be reached. Re-using recorded narration (§4.18) and caption fixes don't use characters; re-recording after a narration edit uses characters only for the changed scenes.
 
-**Example and field list:** not defined yet. Also undecided: where the **20 plan + revision requests per project** and the **3,000 narration characters per month** are counted (Q2, Q7).
+```js
+{
+  _id: ObjectId("67330d5e9f1e4b2a7c0d0d01"),
+  ownerId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
+  kind: "videos",
+  period: "2026-11-13",
+  count: 1,
+  expiresAt: ISODate("2026-11-21T18:30:00.000Z")
+}
+```
+
+| Field | Type | Meaning | Req |
+|---|---|---|---|
+| `_id`, `ownerId` | ObjectId | Record id; whose count | Auto |
+| `kind` | `videos` \| `projects` \| `voiceChars` | What is counted | Yes |
+| `period` | string | The day (`"2026-11-13"`) for `videos`/`projects`, the month (`"2026-11"`) for `voiceChars`, **in the user's timezone** | Yes |
+| `count` | int | Used so far in this period (characters for `voiceChars`) | Yes |
+| `expiresAt` | date | A week after the period ends; old counters then delete themselves | Yes |
+
+**Rules (Q7)**
+- Increased inside the same transaction as the action (C2, D8; `voiceChars` when characters are reserved), with one atomic "add, create if missing" on `{ ownerId, kind, period }`, and only if the result stays within the limit.
+- **Counting starts in F12** (projects) and grows with each feature; **enforcement** (the friendly "limit reached" message) comes in **F27**.
+- The **20 plan + revision requests per project** are not here: they are `projects.planRequestCount` (4.8), because they never reset.
+
+**Indexes:** unique `{ ownerId: 1, kind: 1, period: 1 }`; TTL on `expiresAt` (`expireAfterSeconds: 0`).
 
 #### 4.15 `providerUsage`
 **Purpose:** a record of every paid call: Gemini (AI planner), ElevenLabs (voice), Vercel Sandbox (rendering), Meta (free, logged for completeness). It feeds the spend ceilings and the admin "spend" page, and later tells us the real cost per video.
@@ -679,7 +743,7 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 **Rules:** append-only. No automatic expiry in V1. On account deletion the entries are **anonymized**, not deleted (§6.7).
 
-**Indexes:** none listed in ARCHITECTURE (Q8).
+**Indexes:** none in V1 (Q8). Nothing on screen searches it yet; add one when the admin page needs it.
 
 #### 4.17 `settings` (one global document)
 **Purpose:** the admin's control panel values: limits, spend ceilings, AI models, enabled voices and a maintenance switch. There is exactly **one** document. The app caches it for 60 seconds.
@@ -833,7 +897,7 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 **Rules:** each (scene, phrase) appears once per set; Hindi text must be Devanagari and Hinglish Roman. Caption fixes **don't count** toward the 3 videos/day. Kept across visual-only revisions (PIPELINE_DESIGN §5).
 
-**Indexes:** none listed in ARCHITECTURE (Q8).
+**Indexes:** none in V1 (Q8). A set is always reached through `renders.captionOverrideSetId` (a lookup by `_id`).
 
 ### Instagram (phase A5)
 
@@ -967,7 +1031,7 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 **Rules:** append-only. A Meta data-deletion request deletes the request/response payloads (§6.8).
 
-**Indexes:** none listed in ARCHITECTURE (Q8).
+**Indexes:** `{ postId: 1 }`: show a post's attempts, and find them for Meta data deletion (Q8).
 
 #### 4.24 `notifications`
 **Purpose:** in-app messages for the bell and the banners on your next visit ("Your video is ready", "Post published", "Instagram needs reconnecting"). V1 sends no emails, so this is how ByteReel tells you things.
@@ -997,9 +1061,11 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 | `readAt` | date? | When you marked it read | No |
 | `createdAt` | date | When | Auto |
 
-Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user-owned document has). ARCHITECTURE §8 doesn't list this collection yet (API A-12, Q2).
+Source: the `Notification` shape in API.md §11.3 (+ `ownerId` and `schemaVersion`, which every user-owned document has); copied into ARCHITECTURE §8 (Q2, Q3).
 
-**Indexes:** owner + newest first, and unread lookups (proposed, Q8).
+**Rules:** created by the server only (in the same transaction as the event it reports, §7). B6 sets `readAt`. Deleted with the account.
+
+**Indexes:** `{ ownerId: 1, createdAt: -1 }`: the bell list, newest first; also used for "unread only" (a user has few notifications, so no separate index, Q8).
 
 ### Compliance (phase A6)
 
@@ -1016,16 +1082,20 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
   completedAt: ISODate("2026-11-12T08:00:04.000Z")
 }
 ```
+(While it is still `pending`, it also holds `igUserId: "17841400000000001"`, so the background job knows whose data to delete.)
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id` | ObjectId | Request id (B3 returns it as `deletionRequestId`) | Auto |
-| `kind` | string | `meta_data` for Meta's callback. The value for account deletion is not named (Q10) | Yes |
-| `confirmationCode` | string `DEL-` + 8 characters | Meta requests only; shown on the public status page | Meta only |
+| `kind` | `account` \| `meta_data` | `account` = the creator deleted their account (B3; recommended value, Q10); `meta_data` = Meta's callback (J2) | Yes |
 | `status` | `pending` \| `completed` \| `failed` | Progress | Yes |
 | `requestedAt`, `completedAt` | date | Timestamps | Auto / No |
+| `confirmationCode` | string `DEL-` + 8 characters | Meta requests only; shown on the public status page | Meta only |
+| `ownerId` | ObjectId? | `account` requests: whose account. **Removed when completed** | While pending |
+| `igUserId` | string? | `meta_data` requests: which Instagram account. **Removed when completed** | While pending |
+| `error` | `{ code, message }`? | Why it failed (no personal data) | No |
 
-**Rules:** the public status page (J3) returns no personal data. What else this record keeps, and how long, is open (Q10).
+**Rules:** the public status page (J3) returns no personal data. When a request completes, `ownerId` and `igUserId` are removed, so the record keeps only `{ kind, status, requestedAt, completedAt }` (+ the Meta confirmation code). How long these records are kept is part of Q10.
 
 **Indexes:** **partial** unique `confirmationCode`, created with `partialFilterExpression: { confirmationCode: { $type: "string" } }`, for the status page lookup. Why partial: account-deletion records have no code, and a plain unique index treats every missing field as `null`, so the second record without a code would be refused as a "duplicate".
 
@@ -1198,7 +1268,7 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 
 ## 8. Indexes summary
 
-"Source" = where the index is defined. **Required (BA)** = Better Auth index that **we create ourselves** with the setup script in F06/F08, because Better Auth's MongoDB adapter may not create indexes (verified in F08). All of them are needed for **phase A2**.
+"Source" = where the index is defined (Q = decided in §12.3). **Required (BA)** = Better Auth index that **we create ourselves** with the setup script in F06/F08, because Better Auth's MongoDB adapter may not create indexes (verified in F08). All of them are needed for **phase A2**.
 
 | Collection | Index | Unique? | Why (plain words) | Source |
 |---|---|---|---|---|
@@ -1210,7 +1280,7 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `verification` | `identifier` | No | Find a reset link | Required (BA) |
 | `verification` | `expiresAt` TTL (`expireAfterSeconds: 0`) | No | Expired reset links delete themselves | Required (BA) |
 | `allowlist` | `email` | Yes | An email is invited once | ARCH §8.2 |
-| `rateLimits` | window end (TTL) | No | Old counters delete themselves | API §3.7 (field: Q2) |
+| `rateLimits` | `expiresAt` TTL (`expireAfterSeconds: 0`); lookups use `_id` | No | Old counters delete themselves | API §3.7 + Q2/Q13 |
 | `projects` | `{ ownerId, updatedAt: -1 }` | No | My videos list, newest first | ARCH §8.3 |
 | `projects` | `{ ownerId, state }` | No | The tabs | ARCH §8.3 |
 | `planVersions` | `{ projectId, versionNumber: -1 }` | Yes | No duplicate version numbers; history order | ARCH §8.4 |
@@ -1220,8 +1290,10 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `jobs` | `idempotencyKey` | Yes | No duplicate jobs from double-clicks | ARCH §8.9 |
 | `jobs` | `{ projectId, createdAt: -1 }` | No | A project's jobs | ARCH §8.9 |
 | `jobs` | `{ state, updatedAt }` | No | Find stuck jobs | ARCH §8.9 |
-| `idempotencyKeys` | owner + key | Yes | A click is processed once | API §6 (implied) |
-| `idempotencyKeys` | created time (TTL 24 h) | No | Forget clicks after a day | API §6 |
+| `idempotencyKeys` | `{ ownerId, key }` | Yes | A click is processed once | API §6 + Q2 |
+| `idempotencyKeys` | `createdAt` TTL (`expireAfterSeconds: 86400`) | No | Forget clicks after a day | API §6 + Q2 |
+| `usageCounters` | `{ ownerId, kind, period }` | Yes | One counter per user, kind and day/month | Q2/Q7 |
+| `usageCounters` | `expiresAt` TTL (`expireAfterSeconds: 0`) | No | Old counters delete themselves | Q2 |
 | `speechArtifacts` | `{ ownerId, cacheKey }` | Yes | One recording per exact setup per owner; enables reuse | ARCH §8.7 |
 | `renders` | `{ projectId, renderNumber }` | Yes | No duplicate video numbers | ARCH §8.8 |
 | `renders` | `{ ownerId, projectId }` | No | Owner-scoped list | ARCH §8.8 |
@@ -1234,9 +1306,10 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `posts` | `{ state, scheduledAt }` | No | Find posts that are due | ARCH §8.12 |
 | `posts` | `projectId` where `state` ∈ {`scheduled`, `publishing`, `outcome_unknown`} (partial) | Yes | One live post per project | ARCH §8.12 + API A-14 (Q5) |
 | `providerUsage` | `{ at: -1 }`, `{ ownerId, at: -1 }`, `{ provider, at: -1 }` | No | Spend totals by time, user, service | ARCH §8.14 |
-| `notifications` | `{ ownerId, createdAt: -1 }` | No | The bell list | Proposed |
+| `publishAttempts` | `postId` | No | A post's attempts; Meta data deletion | Q8 |
+| `notifications` | `{ ownerId, createdAt: -1 }` | No | The bell list (also unread only) | Q8 |
 | `deletionRequests` | `confirmationCode`, **partial**: only where it is a string (`$type: "string"`) | Yes | Meta status page lookup; account-deletion records have no code (missing = `null` would clash) | Decided (Q8) |
-| `captionOverrides`, `publishAttempts`, `auditLogs`, `usageCounters`, `settings`, `healthchecks` | none defined | | Small or not looked up by field yet | Q8 |
+| `captionOverrides`, `auditLogs`, `settings` | none in V1 | | Reached by `_id`, or not searched yet | Q8 |
 
 A partial index with a list of states (`$in`) needs MongoDB 6.0 or newer; Atlas runs a current version.
 
@@ -1294,13 +1367,13 @@ A collection appears in Atlas the first time something is written to it (or when
 | Feature | You'll see in Atlas (Browse Collections) |
 |---|---|
 | **F05** Atlas setup | Your free cluster and the `bytereel` database, empty. (Atlas shows a database only once it has a collection; we decide in F05 whether to create it now or let F06 create it) |
-| **F06** Connect the app | `healthchecks` with **exactly one test record**, which is then deleted |
+| **F06** Connect the app | `healthchecks` with **exactly one test record**. At the end of F06, after you have seen it, the record is deleted and the collection dropped |
 | **F07** Allow-list | `allowlist` with your email |
 | **F08** Sign up | `user` (you), `account` (your password hash, scrambled), `session` (your login); `rateLimits` counters. Our setup script also creates the **required Better Auth indexes** (§8), visible under each collection's *Indexes* tab |
 | **F09** Log in / out | More/fewer `session` documents as you log in and out; `rateLimits` counters that vanish after 15 min; `failedLoginCount` on your `user` |
 | **F10, F11** | Nothing new (F11 only reads) |
-| ✅ **End of A2** | `user`, `session`, `account`, `allowlist`, `rateLimits` (+ empty `healthchecks` if kept, Q16) |
-| F12 | `projects`, `idempotencyKeys` |
+| ✅ **End of A2** | `user`, `session`, `account`, `allowlist`, `rateLimits` (and the Better Auth indexes, including those for `verification`) |
+| F12 | `projects`, `idempotencyKeys`, `usageCounters` (counting starts; limits enforced in F27) |
 | F14 | `providerUsage` (brainstorm calls) |
 | F15 | `jobs`, `planVersions` |
 | F17, F19 | More `planVersions` (`user_edit`) |
@@ -1310,7 +1383,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F22 | Nothing in MongoDB: your R2 bucket |
 | F23 | `speechArtifacts`, `renders` (files in R2) |
 | F25 | `captionOverrides` |
-| F27 | `usageCounters`, `settings` |
+| F27 | `settings`; the limits in `usageCounters` and `projects.planRequestCount` start being enforced |
 | F28 | `instagramConnections` |
 | F30, F31 | `posts`, `publishAttempts` |
 | F32 | `notifications` |
@@ -1374,25 +1447,37 @@ PRD §15 is an older short list. ARCHITECTURE §8 and API.md are the later, appr
 | 11 | `auditLogs.userId`, `createdAt` | `actorId`, `at` |
 | 12 | (not listed) | `jobs`, `storyboardApprovals`, `publishAttempts`, `settings`, `notifications`, `deletionRequests`, `idempotencyKeys`, `rateLimits`, `usageCounters` |
 
-### 12.3 Open questions
-Things the source documents don't define or contradict. Nothing here blocks phase A2 except Q1, Q13, Q14 and Q17, which we settle while building F05–F09.
+### 12.3 Open questions (decided 2026-11-13, except Q10)
+These were the gaps and contradictions in the source documents. **Decided 2026-11-13** (engineering decisions after the code review, following "keep it as simple as possible and protect money"), except **Q10, which waits for you**.
 
-| # | Question | Suggestion |
+| # | Question | Decision |
 |---|---|---|
-| Q1 | **Database name and dev/prod split.** ARCHITECTURE names only `MONGODB_DB`; F05 says `bytereel`. ARCHITECTURE §26.1 wants separate dev and prod databases, but Atlas allows one free M0 cluster per Atlas project | Use `bytereel` now; decide the production setup in F38 |
-| Q2 | **Collections named only in API.md, fields not defined:** `rateLimits`, `idempotencyKeys`, `usageCounters`, `deletionRequests` (partly), `notifications` (fields only from the API shape) | Define their fields in ARCHITECTURE §8 when building F08/F09, F12, F27, F32, F33 |
-| Q3 | **Fields used by API.md but missing from ARCHITECTURE §8:** `user.status = deleting`, `user.lastLoginAt` (in §10.1 but not the §8.1 list), `allowlist.signedUpUserId`, `projects.stateBeforeArchive`, `jobs.attempt/error/needsInput/result/startedAt/finishedAt/createdAt/updatedAt`, `revisions.assistantReply/jobId/createdAt/updatedAt`, `renders.mp4Sha256/readyAt/error/createdAt`, `instagramConnections.connectedAt/revokedAt`, `posts.jobId/nextAttemptAt/publishedAt/createdAt/updatedAt`, all `settings` fields | Add them to ARCHITECTURE §8 (this document already includes them) |
-| Q4 | **`planVersions.stats` names.** ARCHITECTURE §8.4 says `{ scenes, words, estimatedSeconds }`; API.md and the code use `{ sceneCount, wordCount, estimatedSeconds }`. API A-18 says ARCHITECTURE was aligned, but it wasn't | Follow the code; fix ARCHITECTURE §8.4 |
-| Q5 | **One-live-post index.** ARCHITECTURE §8.12 covers `scheduled`, `publishing`; API A-14 adds `outcome_unknown` | Follow API (safer); update ARCHITECTURE |
-| Q6 | **Job `idempotencyKey` formats** are defined only for `plan` and `generate` jobs. The unique index needs every job to have a key (a missing key counts as `null`, so only one such job could exist) | Define keys for `revise`, `caption`, `publish` jobs before F18 |
-| Q7 | **Where the "20 plan + revision requests per project" and "3,000 characters per month" are counted** (a counter? counting `jobs`/`providerUsage`?). Also whether F12 or F27 first creates `usageCounters` (C2 already increments it) | Decide in F27 |
-| Q8 | **Indexes not defined in the docs** (marked "Proposed" in §8): Better Auth collections, `notifications`, `deletionRequests`, `idempotencyKeys`; none at all for `captionOverrides`, `publishAttempts`, `auditLogs` | Confirm the proposed ones; add others only when a screen needs them |
-| Q9 | **Database validators** aren't specified in ARCHITECTURE (only Zod). This document assumes a `$jsonSchema` validator on each of *our* collections (not on Better Auth's, which Better Auth controls), created by the setup script | Confirm |
-| Q10 | **Account deletion details:** (a) ARCHITECTURE §22 keeps `providerUsage` for 12 months, but deletion removes "every owner-scoped collection": delete or anonymize? (b) Is the `allowlist` entry (an email) removed? (c) What does the `deletionRequests` record keep after the user is gone, and for how long? (d) Its `kind` value for account deletion | Decide in F33 |
-| Q11 | **Event after commit.** The background event is sent after the transaction. If sending fails, the job stays `queued`, and the stuck-job sweeper only looks at `running` jobs | Let the sweeper also re-send old `queued` jobs (decide in F15) |
-| Q12 | **Connect Instagram (G3) and Meta deauthorize (J1)** change several documents (connection + scheduled posts + notifications + audit) but API.md doesn't call them transactions | Use a transaction for both |
-| Q13 | **`rateLimits` naming and method.** Better Auth's built-in database rate limiter uses its own collection name by default; API says `rateLimits`. API says "fixed windows"; ARCHITECTURE §21.2 says "token bucket" | Use fixed windows (API) in a `rateLimits` collection; settle in F08/F09 |
-| Q14 | **`allowlist.invitedBy` in F07:** your own email is added by a command before any admin user exists | Allow `null` ("added by setup command") |
-| Q15 | **Reset tokens** sit as plain text in `verification.identifier` for up to 1 hour (Better Auth's way) | Acceptable for one-time, 1-hour tokens; revisit at public launch |
-| Q16 | **`healthchecks`** after F06: drop the empty collection or keep it for a health check | Decide in F06 |
-| Q17 | **Better Auth housekeeping fields** (session token, IP address, user agent, `account.accountId`, timestamps on `verification`) aren't in our docs | Look at real documents in F08 and add them here |
+| Q1 | Database name and dev/prod split (Atlas allows one free M0 per Atlas project) | **Decided 2026-11-13.** Development uses database **`bytereel`** on the one free M0 (also when running the app on your computer, §2.3). At **F38**, production gets a **second Atlas project with its own free M0** (no cost), so test data and real users' data never mix |
+| Q2 | Collections named only in API.md had no field list | **Decided 2026-11-13.** Shapes defined in this document: `rateLimits` (4.6), `idempotencyKeys` (4.13), `usageCounters` (4.14), `notifications` (4.24), `deletionRequests` (4.25) |
+| Q3 | Fields used by API.md but missing from ARCHITECTURE §8 | **Decided 2026-11-13.** Copied into ARCHITECTURE §8, so ARCHITECTURE, API.md and this document match |
+| Q4 | `planVersions.stats` names | **Decided 2026-11-13.** The code's names: `sceneCount`, `wordCount`, `estimatedSeconds` (`PlanStats`, `packages/pipeline/src/planning/semantic-validation.ts`). ARCHITECTURE §8.4 fixed |
+| Q5 | One-live-post index | **Decided 2026-11-13.** Covers `scheduled`, `publishing` **and `outcome_unknown`** (API A-14). ARCHITECTURE §8.12 fixed |
+| Q6 | Job `idempotencyKey` formats | **Decided 2026-11-13.** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. The key is **required** on every job (4.9) |
+| Q7 | Where the per-project and per-user limits are counted | **Decided 2026-11-13.** The 20 plan + revision requests: `projects.planRequestCount`, increased in the same transaction and only if below the limit. Per-user daily/monthly counts (projects, videos, voice characters): `usageCounters`. **Counting starts in F12, enforcement in F27** |
+| Q8 | Indexes not defined in the docs | **Decided 2026-11-13.** The list in §8: required Better Auth indexes, partial unique `deletionRequests.confirmationCode`, `notifications { ownerId: 1, createdAt: -1 }`, `publishAttempts { postId: 1 }`, plus the `rateLimits`/`idempotencyKeys`/`usageCounters` indexes. **No** extra indexes on `captionOverrides` or `auditLogs`; the sparse `activeJobId` index is dropped |
+| Q9 | Database validators | **Decided 2026-11-13.** A **minimal** validator: on owner-scoped collections, only `ownerId` (ObjectId) and `schemaVersion` are required (`idempotencyKeys`, `usageCounters`: `ownerId` only). Zod in our code is the real check (§1.4) |
+| Q10 | **Account deletion details** | **Open: waiting for the founder.** See the recommendation below |
+| Q11 | An event lost after commit leaves a job `queued` forever | **Decided 2026-11-13.** The stuck-job sweeper also **re-sends the event for `queued` jobs older than ~2 minutes**. The event id is the job's key, so Inngest drops a duplicate if the first send did arrive. ARCHITECTURE §13.1/§20.3 updated |
+| Q12 | Are G3 (connect Instagram) and J1 (Meta deauthorize) transactions? | **Decided 2026-11-13.** Yes, both (§7.2 rows 13 and 15) |
+| Q13 | `rateLimits` name and method | **Decided 2026-11-13.** Our own `rateLimits` collection with **fixed windows** for **all** limits, including login and sign-up. Better Auth's built-in limiter is **off** (it counts in server memory, useless on serverless). ARCHITECTURE §21.2 ("token bucket") fixed |
+| Q14 | `allowlist.invitedBy` for your own email in F07 | **Decided 2026-11-13.** `invitedBy: null`, `note: "added by setup command"` |
+| Q15 | Reset tokens are plain text in `verification.identifier` for up to 1 hour | **Decided 2026-11-13.** Accepted for the beta: links are one-time, last 1 hour, and only admins create them; the TTL index deletes expired ones. Same caution as the plain-text **session tokens** (4.2): database read access must be protected. Revisit at public launch |
+| Q16 | `healthchecks` after F06 | **Decided 2026-11-13.** Dropped at the end of F06 (after you've seen the test record in Atlas). Later health checks use `db.command({ ping: 1 })`, which writes nothing |
+| Q17 | Better Auth housekeeping fields | **Decided 2026-11-13.** Filled in from Better Auth's documented core schema (4.1–4.4). **F08 confirms** them against real documents, including whether `userId` is stored as an ObjectId |
+
+**Q10 — for you to decide (recommendation).** When a creator deletes their account, we recommend:
+- **(a) `providerUsage` is anonymized, not deleted.** The person's ids (`ownerId`, `projectId`, `jobId`) are removed; the provider, amount and cost stay. Otherwise the spend ceilings and monthly totals would "forget" money that was really spent.
+- **(b) The `allowlist` entry is deleted.** Their email is gone from ByteReel; to come back, they need a new invite.
+- **(c) The `deletionRequests` record keeps only `{ kind, status, requestedAt, completedAt }`**, with no personal data, as proof that the deletion happened.
+- **(d) Its `kind` is `"account"`.**
+
+Until you confirm, §6.7 is marked "recommended". Decide by F33 at the latest.
+
+**Open items for later features (not questions for now)**
+- **F30/F31:** check the Inngest free plan's maximum sleep for posts scheduled up to 75 days ahead; fallback: a small cron that uses the `posts { state, scheduledAt }` index (4.22).
+- **F05:** read the current M0 limits (connections, operations per second, data transfer) on Atlas (§9), and choose the Atlas region together with the Vercel function region (§2.1).
