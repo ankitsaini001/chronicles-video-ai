@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
-    "./idea-text": "./src/idea-text.ts"
+    "./idea-text": "./src/idea-text.ts",
+    "./voices": "./src/voices.ts"
   },
   "dependencies": {
     "mongodb": "7.7.0",
