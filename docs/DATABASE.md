@@ -222,7 +222,7 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 - `timezone`, `defaultLanguage`, `defaultVoiceGender` and `name` change only through `PATCH /api/v1/me` (B2).
 - Sign-up only succeeds if the email is in `allowlist` (4.5).
 
-**Indexes:** unique `email` = one account per email (proposed; see §8 and Q8).
+**Indexes (required, phase A2):** unique `email` = one account per email. **We create the Better Auth indexes ourselves** (setup script, F06/F08), because Better Auth's MongoDB adapter may not create any; F08 verifies this. Full list in §8.
 
 #### 4.2 `session` (Better Auth)
 **Purpose:** one document per logged-in browser. Your browser holds a cookie; on every request the server looks up the matching session here. Logging out deletes the document.
@@ -250,7 +250,7 @@ Better Auth also keeps a few housekeeping fields of its own here, such as the se
 - Deleted on logout; **all** of a user's sessions are deleted on password reset, suspension and account deletion. Changing your password deletes all your *other* sessions.
 - The cookie cache is off: every request reads this collection, so a deleted session stops working immediately.
 
-**Indexes:** lookup by token and by `userId` (proposed, Q8).
+**Indexes (required, phase A2, created by us, see 4.1):** unique `token` (every request finds its session by token); `userId` (log a user out everywhere); **TTL on `expiresAt`** with `expireAfterSeconds: 0` (MongoDB deletes a session soon after it expires, see §1.5).
 
 #### 4.3 `account` (Better Auth)
 **Purpose:** holds the **login credential** for a user. In V1 the only kind is email + password (`providerId: "credential"`), so each user has exactly one `account` document holding the **password hash**.
@@ -278,7 +278,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 
 **Rules:** written only by Better Auth (sign-up, change password, reset password). Never returned by any endpoint, never logged.
 
-**Indexes:** lookup by `userId` (proposed, Q8).
+**Indexes (required, phase A2, created by us, see 4.1):** `{ userId: 1, providerId: 1 }`: find a user's password on login.
 
 #### 4.4 `verification` (Better Auth)
 **Purpose:** stores the **one-time password-reset links** an admin creates (there is no "forgot password" email in V1). Better Auth would normally use it for email verification too, but V1 sends no emails.
@@ -301,7 +301,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 
 **Rules:** one live link per user (creating a new one deletes older unused ones); the row is deleted when used; after 1 hour it's invalid. The token is never logged or shown again (see Q15).
 
-**Indexes:** lookup by `identifier` (proposed, Q8).
+**Indexes (required, created by us, see 4.1):** `identifier` (find a reset link); **TTL on `expiresAt`** with `expireAfterSeconds: 0` (expired links delete themselves). Created in phase A2 with the other Better Auth indexes, although the collection is first used in F35.
 
 #### 4.5 `allowlist`
 **Purpose:** the invite list for the private beta. Sign-up is refused unless the email is here. Admins manage it (F34); in F07 you add your own email with a small command.
@@ -835,7 +835,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | `scopes` | list of strings | Permissions granted | Yes |
 | `status` | `active` \| `expired` \| `revoked` \| `error` | Can we publish? | Yes |
 
-**Rules:** the token is never returned to the browser, never logged. Disconnecting removes the token and invalidates scheduled posts. Connecting a *different* Instagram account invalidates scheduled posts too.
+**Rules:** the token is never returned to the browser, never logged. Disconnecting removes the token and invalidates `scheduled` and `publish_failed` posts. Connecting a *different* Instagram account invalidates them too.
 
 **Indexes**
 - unique `ownerId`: **one connection per user**.
@@ -894,8 +894,9 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 
 **Rules (the hard rule: nothing publishes without approval)**
 - A post is created **only** by the creator through H2. Jobs, admins and the AI can never create an approval.
-- **Any change requested on the project** (revision, narration edit, voice switch, undo, caption fix), disconnecting or switching the Instagram account, or a new render moves a `scheduled` post to `approval_invalidated` **at the moment the change is requested**, in the same transaction (§7). Re-approving creates a new approval id, so a new `publishKey`.
-- The publish job uses **conditional updates** ("move to `publishing` only if still `scheduled` and `approval.renderId` is still X"), so a change made at the last second can't slip through.
+- **Any change requested on the project** (revision, narration edit, voice switch, undo, caption fix), disconnecting or switching the Instagram account, Meta's deauthorize callback, suspending the user, or a new render moves a post that is **`scheduled` or `publish_failed`** to `approval_invalidated` **at the moment the change is requested**, in the same transaction (§7). Why `publish_failed` too: a failed post can be retried (H6, admin I9), and a retry must never publish with an approval that no longer matches. Archiving the project and deleting the account move both states to `cancelled` instead. Re-approving creates a new approval id, so a new `publishKey`.
+- The publish job uses **conditional updates** ("move to `publishing` only if the post is still `scheduled`"), so a change made at the last second can't slip through.
+- **The full re-check** (right before posting, and in every retry, H6 and I9) also requires: the project is **not archived**, the owner's `user.status` is **`active`**, the project's `currentRenderId` is still `approval.renderId`, and the project's `currentPlanVersionId` and `approvedPlanVersionId` still equal that render's `planVersionId`. Any difference → no publish.
 - `captionHash` is computed by the server; `igUserId` is copied from the connection.
 
 **Indexes**
@@ -989,7 +990,7 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
 
 **Rules:** the public status page (J3) returns no personal data. What else this record keeps, and how long, is open (Q10).
 
-**Indexes:** unique `confirmationCode` for the status page lookup (proposed, Q8).
+**Indexes:** **partial** unique `confirmationCode`, created with `partialFilterExpression: { confirmationCode: { $type: "string" } }`, for the status page lookup. Why partial: account-deletion records have no code, and a plain unique index treats every missing field as `null`, so the second record without a code would be refused as a "duplicate".
 
 ---
 
@@ -1087,14 +1088,14 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
 
 ### 6.6 Archive is not delete
 - **Archiving** a project (C5, the "delete" on a project card) is a **soft delete**: `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. The project disappears from My videos.
-- **Nothing is deleted**: not in MongoDB, **not in R2**. A running job is asked to stop and a scheduled post is cancelled.
+- **Nothing is deleted**: not in MongoDB, **not in R2**. A running job is asked to stop, and a `scheduled` or `publish_failed` post is `cancelled` (so it can never be published or retried).
 - Archiving is refused while a post is being published right now.
 - Real deletion of data happens only through account deletion (6.7).
 
 ### 6.7 Account deletion (India DPDP Act)
 The creator deletes their account in Settings (B3, F33) with their password and by typing `DELETE`.
 
-1. **Immediately, in one transaction (§7):** user `status = deleting`, **all sessions deleted** (logged out everywhere), scheduled posts `cancelled`, running jobs asked to stop, a `deletionRequests` record created.
+1. **Immediately, in one transaction (§7):** user `status = deleting`, **all sessions deleted** (logged out everywhere), `scheduled` and `publish_failed` posts `cancelled`, running jobs asked to stop, a `deletionRequests` record created.
 2. **Then, in the background** (the `delete-account` job, a few moments later):
    - deletes the R2 folder `users/{ownerId}/` (all videos, audio, thumbnails);
    - deletes the Instagram token and connection;
@@ -1106,7 +1107,7 @@ The creator deletes their account in Settings (B3, F33) with their password and 
 Open details (allow-list entry, `providerUsage` 12-month retention, what the `deletionRequests` record keeps): Q10.
 
 ### 6.8 Meta data-deletion request
-When someone removes ByteReel in their Instagram settings, Meta calls us (J2, F37). We create a `deletionRequests` record (`kind: meta_data`), then delete the Instagram connection document (token, username, picture), remove Instagram-derived fields on that user's posts (`igContainerId`, `igMediaId`, `permalink`; `approval.igUserId` is replaced by a hash), delete the `publishAttempts` request/response payloads, and invalidate scheduled posts. The ByteReel account and videos stay (they aren't Meta's data).
+When someone removes ByteReel in their Instagram settings, Meta calls us (J2, F37). We create a `deletionRequests` record (`kind: meta_data`), then delete the Instagram connection document (token, username, picture), remove Instagram-derived fields on that user's posts (`igContainerId`, `igMediaId`, `permalink`; `approval.igUserId` is replaced by a hash), delete the `publishAttempts` request/response payloads, and invalidate `scheduled` and `publish_failed` posts. The ByteReel account and videos stay (they aren't Meta's data).
 
 ---
 
@@ -1123,22 +1124,22 @@ The checks (is this still the current version? is the job slot free? quota left?
 |---|---|---|---|---|
 | 1 | Create project | C2 · F12/F15 | insert `projects` (`planning`) + insert `plan` job + set `activeJobId` + projects counter +1 | A project stuck in "planning" with no job, or a used quota with no project |
 | 2 | Edit idea after a failed storyboard | C4 · F15 | `projects` idea text, title, `stateVersion` (one document: atomic anyway) | — |
-| 3 | Edit narration / switch voice | D3, D4 · F17, F19 | insert `planVersions` + project pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, state, `stateVersion`) + scheduled post → `approval_invalidated` + notification | A new storyboard while an old publish approval stays live |
-| 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + scheduled post → `approval_invalidated` + notification | Same as 3; or a revision with no job |
-| 5 | Undo / restore a version | D7 · F17 | project pointers + scheduled post → `approval_invalidated` (ARCHITECTURE §17.5) | Same as 3 |
+| 3 | Edit narration / switch voice | D3, D4 · F17, F19 | insert `planVersions` + project pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, state, `stateVersion`) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | A new storyboard while an old publish approval stays live |
+| 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | Same as 3; or a revision with no job |
+| 5 | Undo / restore a version | D7 · F17 | project pointers + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (ARCHITECTURE §17.5) | Same as 3 |
 | 6 | **Approve storyboard** (approval #1) | D8 · F20 | insert `storyboardApprovals` + insert `generate` job + project `generating`, `approvedPlanVersionId`, `activeJobId` + videos counter +1. Re-approving a version that already has a video instead points the project back to that render (no job, no quota) | Approval with no job, or a counted video with no job |
-| 7 | Caption fix | F4 · F25 | insert `captionOverrides` + insert `caption` job + project `generating`, `activeJobId` + scheduled post → `approval_invalidated` + notification (**no** quota counter) | A caption change while the old approval stays live |
+| 7 | Caption fix | F4 · F25 | insert `captionOverrides` + insert `caption` job + project `generating`, `activeJobId` + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (**no** quota counter) | A caption change while the old approval stays live |
 | 8 | **Publish now / schedule** (approval #2) | H2 · F30, F31 | insert `posts` (approval snapshot with a new approval id, `publishKey`) + insert `publish` job + project `publishing`/`scheduled` + audit `post.approved` | A post without a job (never published), or a job without its approval record |
-| 9 | Archive project | C5 · F21 | running job `cancelRequestedAt` + scheduled post `cancelled` + project `archived` | An archived project whose post still publishes |
-| 10 | Disconnect Instagram | G4 · F28 | connection token removed, `status = revoked`, `revokedAt` + all scheduled posts → `approval_invalidated` + notifications + audit | Scheduled posts aimed at an account that is gone |
-| 11 | Suspend a user (admin) | I6 · F34 | user `suspended` + all sessions deleted + jobs asked to stop + scheduled posts → `approval_invalidated` | A suspended user still logged in, or their post still publishing |
-| 12 | **Delete account** | B3 · F33 | user `deleting` + all sessions deleted + scheduled posts `cancelled` + jobs asked to stop + insert `deletionRequests` | A half-deleted account that can still log in or post |
+| 9 | Archive project | C5 · F21 | running job `cancelRequestedAt` + `scheduled`/`publish_failed` post `cancelled` + project `archived` | An archived project whose post still publishes or can be retried |
+| 10 | Disconnect Instagram | G4 · F28 | connection token removed, `status = revoked`, `revokedAt` + all `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit | Scheduled posts aimed at an account that is gone |
+| 11 | Suspend a user (admin) | I6 · F34 | user `suspended` + all sessions deleted + jobs asked to stop + `scheduled`/`publish_failed` posts → `approval_invalidated` | A suspended user still logged in, or their post still publishing |
+| 12 | **Delete account** | B3 · F33 | user `deleting` + all sessions deleted + `scheduled`/`publish_failed` posts `cancelled` + jobs asked to stop + insert `deletionRequests` | A half-deleted account that can still log in or post |
 
 (Connecting Instagram (G3) and Meta's deauthorize callback (J1) also change several documents, but API.md doesn't mark them as transactions; see Q12.)
 
 ### 7.3 Other safety tools (no transaction needed)
 - **One-document changes are always atomic.** Updating several fields of one project at once is all-or-nothing by itself.
-- **Conditional updates:** "update only if the document is still in the state I expect", e.g. move a post to `publishing` only if it is still `scheduled` with the same `approval.renderId`. If someone changed it meanwhile, nothing happens.
+- **Conditional updates:** "update only if the document is still in the state I expect", e.g. move a post to `publishing` only if it is still `scheduled`. If someone changed it meanwhile, nothing happens.
 - **`stateVersion` (optimistic concurrency):** every project change sends the version it saw. If another tab changed the project first, the request fails with "This project changed in another tab, refresh."
 - **Unique indexes as the last guard:** even if two requests race, the database refuses a second approval for the same version, a second live post for a project, or a second job with the same key.
 
@@ -1149,14 +1150,17 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 
 ## 8. Indexes summary
 
-"Source" = where the index is defined. **Proposed** = not in ARCHITECTURE/API but needed for a documented rule or lookup; to be confirmed (Q8).
+"Source" = where the index is defined. **Required (BA)** = Better Auth index that **we create ourselves** with the setup script in F06/F08, because Better Auth's MongoDB adapter may not create indexes (verified in F08). All of them are needed for **phase A2**.
 
 | Collection | Index | Unique? | Why (plain words) | Source |
 |---|---|---|---|---|
-| `user` | `email` | Yes | One account per email | Proposed |
-| `session` | session token; `userId` | token: Yes | Find your session on each request; log a user out everywhere | Proposed |
-| `account` | `userId` | No | Find a user's password on login | Proposed |
-| `verification` | `identifier` | No | Find a reset link | Proposed |
+| `user` | `email` | Yes | One account per email | Required (BA) |
+| `session` | `token` | Yes | Find your session on each request | Required (BA) |
+| `session` | `userId` | No | Log a user out everywhere | Required (BA) |
+| `session` | `expiresAt` TTL (`expireAfterSeconds: 0`) | No | Expired sessions delete themselves | Required (BA) |
+| `account` | `{ userId: 1, providerId: 1 }` | No | Find a user's password on login | Required (BA) |
+| `verification` | `identifier` | No | Find a reset link | Required (BA) |
+| `verification` | `expiresAt` TTL (`expireAfterSeconds: 0`) | No | Expired reset links delete themselves | Required (BA) |
 | `allowlist` | `email` | Yes | An email is invited once | ARCH §8.2 |
 | `rateLimits` | window end (TTL) | No | Old counters delete themselves | API §3.7 (field: Q2) |
 | `projects` | `{ ownerId, updatedAt: -1 }` | No | My videos list, newest first | ARCH §8.3 |
@@ -1184,7 +1188,7 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `posts` | `projectId` where `state` ∈ {`scheduled`, `publishing`, `outcome_unknown`} (partial) | Yes | One live post per project | ARCH §8.12 + API A-14 (Q5) |
 | `providerUsage` | `{ at: -1 }`, `{ ownerId, at: -1 }`, `{ provider, at: -1 }` | No | Spend totals by time, user, service | ARCH §8.14 |
 | `notifications` | `{ ownerId, createdAt: -1 }` | No | The bell list | Proposed |
-| `deletionRequests` | `confirmationCode` | Yes | Meta status page lookup | Proposed |
+| `deletionRequests` | `confirmationCode`, **partial**: only where it is a string (`$type: "string"`) | Yes | Meta status page lookup; account-deletion records have no code (missing = `null` would clash) | Decided (Q8) |
 | `captionOverrides`, `publishAttempts`, `auditLogs`, `usageCounters`, `settings`, `healthchecks` | none defined | | Small or not looked up by field yet | Q8 |
 
 A partial index with a list of states (`$in`) needs MongoDB 6.0 or newer; Atlas runs a current version.
@@ -1241,7 +1245,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | **F05** Atlas setup | Your free cluster and the `bytereel` database, empty. (Atlas shows a database only once it has a collection; we decide in F05 whether to create it now or let F06 create it) |
 | **F06** Connect the app | `healthchecks` with **exactly one test record**, which is then deleted |
 | **F07** Allow-list | `allowlist` with your email |
-| **F08** Sign up | `user` (you), `account` (your password hash, scrambled), `session` (your login); `rateLimits` counters |
+| **F08** Sign up | `user` (you), `account` (your password hash, scrambled), `session` (your login); `rateLimits` counters. Our setup script also creates the **required Better Auth indexes** (§8), visible under each collection's *Indexes* tab |
 | **F09** Log in / out | More/fewer `session` documents as you log in and out; `rateLimits` counters that vanish after 15 min; `failedLoginCount` on your `user` |
 | **F10, F11** | Nothing new (F11 only reads) |
 | ✅ **End of A2** | `user`, `session`, `account`, `allowlist`, `rateLimits` (+ empty `healthchecks` if kept, Q16) |
