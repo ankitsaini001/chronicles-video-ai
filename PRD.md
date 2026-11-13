@@ -250,7 +250,7 @@ All patterns share **one polished default visual style**, using free, commercial
 ```
 
 - Generated with **Gemini structured outputs** against a strict schema. Only existing patterns and props are allowed.
-- **Validated** before use. If a scene is invalid, it is retried once, then falls back to a simple key-text scene (never a broken video).
+- **Validated** before use. If the plan is invalid, the AI is asked to repair it once; if it is still invalid, the storyboard step fails with "Couldn't build a good storyboard, try rephrasing." and **Try again** / **Edit idea**. There is no key-text fallback scene, and never a broken video (decision #24b).
 
 ### 8.3 Synchronization pipeline
 1. Gemini produces the script + scene plan.
@@ -274,7 +274,7 @@ Rules:
 - The language is chosen once per project (on the Idea step). Changing a project's language is not in V1: to make the video in another language, the creator creates a new project. Only the voice (Male/Female) can be switched on an existing project (decision #25).
 - The **Indian accent comes mainly from the selected voice**, so voice and model are evaluated together for each language.
 - **Voice (Male/Female)** can be changed on the storyboard screen before generating. Changing it after a video exists regenerates the narration for all scenes and creates a new render version (which resets any publish approval).
-- If a configured voice becomes unavailable, the system falls back to the other configured voice of the same gender and language, or shows a clear error. It never silently switches gender.
+- If a configured voice becomes unavailable, generation stops with a clear error ("Voice service unavailable right now") and the team is alerted. The system never substitutes another voice (decision #24c).
 - **Hinglish risk:** TTS may mispronounce Roman-script Hindi words. The scene plan may therefore store a separate `spokenText` (sent to TTS, e.g. Devanagari for Hindi words) and `captionText` (shown on screen, Roman). Captions are timed at **phrase level** by mapping phrases between the two. Phase 0 decides whether this is needed.
 - Brainstorming, revisions and the Instagram caption follow the project language.
 
@@ -337,7 +337,7 @@ Durable, step-based workflows. Each step retries independently, so completed (pa
 | Very long pasted notes | Accept up to the limit; the AI picks the single core concept for 60–90s and says what it left out |
 | Topic needs more than 90s | AI narrows the scope and suggests splitting into follow-up videos |
 | Unsafe / disallowed topic | Polite refusal with a reason; nothing generated |
-| Gemini returns invalid JSON / unknown pattern | Retry once → fall back to the key-text scene for that scene only |
+| Gemini returns invalid JSON / unknown pattern | Repair once → if still invalid, "Couldn't build a good storyboard, try rephrasing." + **Try again** / **Edit idea**; no key-text fallback scene (decision #24b) |
 | Gemini rate-limited (free tier) | Queue and retry with backoff; show "busy, retrying" |
 | ElevenLabs fails or quota exhausted | Retry with backoff → clear error + **Retry**; storyboard is preserved |
 | Narration too long/short for 60–90s | Auto-adjust pacing; if still outside, propose a shortened/expanded script for re-approval |
@@ -519,7 +519,7 @@ Everything else follows the course plan, so our code stays in sync.
 
 ## 22. Open Items (resolved during build, do not block it)
 - Domain + trademark check for **ByteReel** (.com / .ai / .in / get… / try… variants); backups: ByteMotion, ByteKahaani
-- Pick 1 male + 1 female ElevenLabs voice per language (6 voices total) after listening tests
+- Pick 1 male + 1 female ElevenLabs voice for Indian English and for Hindi (**4 voices total**) after listening tests. *Voice count resolved by decision #18 (Hinglish reuses the Hindi voices); the earlier "6 voices" is superseded.*
 - Whether Hinglish needs separate spoken/caption text (Phase 0 result)
 - Vercel Sandbox render benchmark result → keep or change the render host
 - Free, commercially licensed icon/illustration set
