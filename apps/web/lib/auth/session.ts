@@ -21,10 +21,18 @@ export const AFTER_LOGIN_PATH = "/dashboard";
  */
 export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const requestHeaders = await headers();
-  const session = await getAuth().api.getSession({ headers: requestHeaders });
-  if (!session) return null;
-  return { id: session.user.id, name: session.user.name, email: session.user.email };
+  return toSessionUser(await getAuth().api.getSession({ headers: requestHeaders }));
 });
+
+/**
+ * The page-safe user from a Better Auth session, or null. Every server-side session read requires
+ * `status: "active"` (API.md §3.1): a session that still exists for a suspended or deleting user
+ * (e.g. one created before the status changed) counts as signed out.
+ */
+export function toSessionUser(session: { user: { id: string; name: string; email: string; status?: unknown } } | null | undefined): SessionUser | null {
+  if (!session || session.user.status !== "active") return null;
+  return { id: session.user.id, name: session.user.name, email: session.user.email };
+}
 
 /**
  * For public pages (home header, /login, /signup): if the database can't be reached, show the
