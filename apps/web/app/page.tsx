@@ -11,7 +11,7 @@ import { SITE } from "@/lib/site";
 export const metadata: Metadata = {
   title: { absolute: `${SITE.name} · Turn any topic into a ready-to-post Reel` },
   description:
-    `Type an idea or paste your notes. ${SITE.name} writes the script, animates every concept and adds a natural voice in English, Hindi or Hinglish.`,
+    `Type an idea or paste your notes. ${SITE.name} writes the script, animates every concept and adds a natural voice in English or Hindi.`,
 };
 
 export default function HomePage() {

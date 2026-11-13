@@ -113,7 +113,7 @@ export function Hero() {
           </h1>
           <p className="max-w-xl text-base leading-relaxed text-muted sm:text-lg">
             Type an idea or paste your notes. {SITE.name} writes the script, animates every concept and adds a natural voice in
-            English, Hindi or Hinglish.
+            English or Hindi.
           </p>
           <ul className="flex w-full max-w-lg flex-col gap-3.5 pt-2">
             {POINTS.map((point, i) => (
