@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔄 In progress |
+| **Status** | 🔄 In progress (English samples work; the 4 Hindi/Hinglish samples wait for the founder: the Hindi voices need a paid ElevenLabs plan, see below) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F12 |
 | **Design** | Stitch: ByteReel — Step 1 Idea (▶ next to Female voice / Male voice) |
@@ -32,11 +32,37 @@ Working ▶ buttons on the Idea screen.
 - Admin switching a voice off (`enabled: false`): I12. Until then every preset is `enabled: true`.
 
 ## Steps
-_Filled in as we build._
+- [x] **1. Shared voice list** (`0d92cfd`): `packages/db/src/voices.ts` → `VOICE_PRESET_LIST` (6 presets: language, gender, label, sample URL, sentence; no voice names or IDs). One list for the Idea screen, B4 and the recorder. A test keeps it equal to the pipeline's presets.
+- [x] **2. One-time recorder** `npm run voices:samples` (`d66ad7a`, `tools/cli/voice-samples.ts`): same ElevenLabs model, voice settings and seed as real videos, 64 kbps MP3 (small). Skips files that already exist (`--force` to redo), shows the characters first and refuses above 600, checks every setting before the first call, ONE call per file (no retries), stops at the first failure. Never prints keys or voice IDs.
+- [ ] **3. Record the 6 samples** — 2 of 6 done (`30ed871`): `indian-english-female.mp3` (29.8 KB, 3.8 s) and `indian-english-male.mp3` (38.6 KB, 4.9 s). Hindi female failed with ElevenLabs 402 "Free users cannot use library voices via the API"; the recorder stopped at once. **Founder decision needed** (below).
+- [x] **4. B4 `GET /api/v1/voices`** (`648a637`): signed-in creators, optional `?language=en|hi|hinglish` (anything else → 400), shared 300/min read limit, `enabled: true` for all until I12.
+- [x] **5. ▶ buttons on the Idea screen** (`9e14ded`): a round ▶ right after Female voice and Male voice plays the sample for the chosen language from the static MP3. One plays at a time; pressing it again stops (■); changing the language stops it. While playing, the sentence is shown under the voices (Hindi in `lang="hi"`, Hinglish in `lang="hi-Latn"`). The Voice choice is now a group of real radio buttons (a ▶ button may not sit inside a chip or a radiogroup); it looks and works the same (←/→ choose). With Hindi chosen, the labels read "महिला आवाज़ (Female)" / "पुरुष आवाज़ (Male)" (API.md labels).
+- [x] **6. End-to-end check** (`6eed97b`): `tools/e2e/f13-voices.ts` (B4 over HTTP, the MP3s, the ▶ buttons, no ElevenLabs in any page script); the F12 check follows the new Voice markup. Test database only.
+
+### Founder decision needed: Hindi voices
+The two Hindi voice IDs in `.env` are ElevenLabs **"professional" library voices**. On the free plan the API refuses them (402), so the Hindi/Hinglish samples can't be recorded, and **Hindi/Hinglish videos would fail the same way later (F23)**. The English voices are free "premade" voices, which is why they worked (note: ElevenLabs labels both English voices' accent as *british*, not Indian; worth a listen).
+Options:
+1. **Pick free voices for Hindi** (premade voices usable on the free plan), put their IDs in `ELEVENLABS_VOICE_ID_HINDI_FEMALE` / `_MALE`, then run `npm run voices:samples` (it records only the 4 missing files, about 202 characters).
+2. **Upgrade ElevenLabs** (costs money every month; against the zero-spend rule for V1).
+Until then the Hindi/Hinglish ▶ shows "Couldn't play this sample. Please try again."
+
+### Characters spent
+110 of the about 450 approved (2 English samples × 55). The refused Hindi call was not charged (account read afterwards: 110 / 10,000 used). The 4 remaining samples need about 202 more (48 + 48 + 53 + 53), 312 in total.
+
+### Decisions in this feature (please check)
+- **Hinglish pronunciation:** the pipeline already has a rule (Hinglish words that need help are sent in Devanagari, the screen keeps Roman script). The Hinglish sample follows it: it is sent as "Hello दोस्तों! आज हम समझेंगे कि rainbow कैसे बनता है।" and shown as "Hello doston! Aaj hum samjhenge ki rainbow kaise banta hai."
+- **The list lives in `packages/db`** (named `VOICE_PRESET_LIST`, because `VOICE_PRESETS` is already the plain list of ids in the pipeline). The web app doesn't use the pipeline package.
+- **The Idea screen doesn't call B4**: it reads the same list directly (no extra request). B4 exists and returns the same data.
+- **Samples are 64 kbps** (real videos use 128 kbps): a 4-second preview is about 30–40 KB.
+
+### How to try it (founder)
+1. `npm run dev`, log in, press **Create your first reel**.
+2. English chosen: press ▶ next to Female voice, then next to Male voice (the first stops). Press ■ to stop. Switch the language while playing: it stops.
+3. Phone: same, the sound starts on the tap.
 
 ## How we test it (done when all are ticked)
-- [ ] Each ▶ plays the right language and gender
-- [ ] No ElevenLabs call happens when you click ▶
+- [ ] Each ▶ plays the right language and gender (English: e2e checks the right file is served; your ears decide. Hindi/Hinglish: after the voice decision)
+- [x] No ElevenLabs call happens when you click ▶ (only the static MP3 is loaded; e2e: no page script mentions ElevenLabs)
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
@@ -44,3 +70,4 @@ _Filled in as we build._
 | Date | What happened |
 |---|---|
 | 2026-11-13 | Started. Founder decided: 6 samples (Hinglish says its own sentence with the Hindi voices), the three sentences above, about 450 ElevenLabs characters, one time. |
+| 2026-11-13 | Built steps 1, 2, 4, 5, 6. Recorded 2 of 6 samples (English, 110 characters); Hindi refused by ElevenLabs (402: library voices need a paid plan), recorder stopped as designed. 526 unit tests, typecheck and `next build` pass; e2e F13 (all pass, 4 Hindi/Hinglish files skipped) and F12 (68/68) on `bytereel_test` (dropped afterwards). Waiting for the founder's Hindi voice decision, then the code review. |
