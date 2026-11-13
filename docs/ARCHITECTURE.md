@@ -411,7 +411,8 @@ One document with `_id: "global"`: `version`, `maintenance { active, message }`,
 | `idempotencyKeys` | `ownerId`, `key`, `fingerprint`, `status` (`in_progress` \| `done`), `lockedUntil?` (~60 s; after it the marker counts as abandoned), `responseStatus`, `responseBody`, `createdAt` | unique `{ ownerId, key }`; TTL 24 h on `createdAt` |
 | `usageCounters` | `ownerId`, `kind` (`videos` \| `projects` \| `voiceChars`), `period` (`YYYY-MM-DD` or `YYYY-MM` in the user's timezone), `count`, `expiresAt` | unique `{ ownerId, kind, period }`; TTL `expiresAt` |
 | `notifications` | `ownerId`, `schemaVersion`, `type`, `projectId?`, `postId?`, `title`, `message`, `readAt?`, `createdAt` | `{ ownerId: 1, createdAt: -1 }` |
-| `deletionRequests` | `kind` (`account` \| `meta_data`), `status`, `requestedAt`, `completedAt?`, `confirmationCode?` (Meta), `ownerId?`/`igUserId?` (removed when completed), `error?` | partial unique `confirmationCode` where it is a string |
+| `deletionRequests` | `kind` (`account` \| `meta_data`), `status` (`pending`\|`completed`\|`failed`\|`cancelled`), `requestedAt`, `eraseAfter?` (account: +30 days), `completedAt?`, `confirmationCode?` (Meta), `ownerId?`/`igUserId?` (removed when completed), `error?` | partial unique `confirmationCode` where it is a string |
+| `deletionLog` | random string `_id` (`acct_…`), `signedUpMonth`, `deletionRequestedMonth`, `erasedMonth`, `reason`, counts, `languagesUsed`, `aiCostRange`, `schemaVersion`: anonymous, kept forever (DATABASE.md 4.26) | none |
 
 ---
 
@@ -749,7 +750,7 @@ Meta deauthorize and data-deletion callbacks verify the `signed_request` HMAC wi
 - **India DPDP Act:** privacy policy + terms before the beta; clear purpose (generating and publishing the user's videos); consent at sign-up; **account deletion** removes MongoDB records, the R2 prefix and Instagram tokens (and audit logs are anonymized).
 - **Provider data use:** while on **Gemini's free tier**, only test content may be used. **Switch to Gemini's paid tier before real beta users' content** (so it isn't used for training). The ElevenLabs commercial plan is required before publishing real users' videos (the free plan is non-commercial/attribution).
 - **Meta Platform Terms:** data-deletion callback, a deauthorize handler, only the needed scopes, Meta data never used for other purposes.
-- **Retention (V1):** keep user content until deletion; provider usage logs 12 months.
+- **Retention (V1):** keep user content until deletion. **Account deletion = 30-day soft delete** (hidden, restorable by an admin; Instagram data deleted right away), then personal data and files are erased and one anonymous `deletionLog` entry is kept forever (founder decision 2026-11-13, DATABASE.md §6.7). Provider usage rows are anonymized at erase (kept for spend totals).
 - **Content safety:** Gemini safety settings + refusal handling; the creator approval step; a terms clause that the creator is responsible for published content.
 
 ---

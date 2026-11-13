@@ -386,7 +386,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeletionAccepted'
-              example: { deletionRequestId: 673312aa9f1e4b2a7c0d9c01, status: pending, requestedAt: '2026-11-12T10:00:00.000Z' }
+              example: { deletionRequestId: 673312aa9f1e4b2a7c0d9c01, status: pending, requestedAt: '2026-11-12T10:00:00.000Z', eraseAfter: '2026-12-12T10:00:00.000Z' }
         '400':
           $ref: '#/components/responses/InvalidInput'
         '401':
@@ -4573,7 +4573,8 @@ components:
             $ref: '#/components/schemas/BrainstormIdea'
     DeletionAccepted:
       type: object
-      required: [deletionRequestId, status, requestedAt]
+      required: [deletionRequestId, status, requestedAt, eraseAfter]
+      description: The account is hidden and logged out now; personal data is erased at eraseAfter (30-day grace period, an admin can restore it until then).
       properties:
         deletionRequestId:
           $ref: '#/components/schemas/ObjectId'
@@ -4581,6 +4582,8 @@ components:
           type: string
           const: pending
         requestedAt:
+          $ref: '#/components/schemas/Timestamp'
+        eraseAfter:
           $ref: '#/components/schemas/Timestamp'
     MetaDataDeletionResponse:
       type: object

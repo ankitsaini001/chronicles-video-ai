@@ -905,10 +905,10 @@ Success `200` → `Me`. Errors: `400 INVALID_INPUT`.
 ```
 
 #### B3. `DELETE /api/v1/me` — Delete account
-Purpose: permanently delete the account and all data (DPDP; ARCHITECTURE §22). Auth: creator. Rate: 3/hour. **Idempotency-Key required.**
+Purpose: delete the account (DPDP; ARCHITECTURE §22; DATABASE.md §6.7). **30-day soft delete** (founder decision, 2026-11-13): the account is hidden and logged out right away and can be restored by an admin within 30 days; then personal data is erased and one anonymous `deletionLog` entry is kept. Auth: creator. Rate: 3/hour. **Idempotency-Key required.**
 Body: `password` string (required, re-authentication) · `confirm` must equal `"DELETE"`.
-Effect (one transaction, see DATABASE.md §7): user `status = deleting`, all sessions deleted, `scheduled` and `publish_failed` posts `cancelled`, active jobs get `cancelRequestedAt`, a `deletionRequests` record; then the `delete-account` Inngest function deletes the R2 prefix `users/{ownerId}/`, the Instagram token and every owner-scoped collection, anonymizes audit logs and finally removes the Better Auth rows.
-Success `202` → `{ deletionRequestId, status: "pending", requestedAt }` and the session cookie is cleared.
+Effect (one transaction, see DATABASE.md §7): user `status = deleting`, all sessions deleted, `scheduled` and `publish_failed` posts `cancelled`, active jobs get `cancelRequestedAt`, a `deletionRequests` record with `eraseAfter` = now + 30 days. Right after the transaction, the Instagram token and connection are deleted (Meta's rule). At `eraseAfter`, the `delete-account` Inngest function writes the anonymous `deletionLog` entry, deletes the R2 prefix `users/{ownerId}/` and every owner-scoped collection, deletes the `allowlist` entry, anonymizes `providerUsage` and audit logs and finally removes the Better Auth rows and the request record (DATABASE.md §6.7).
+Success `202` → `{ deletionRequestId, status: "pending", requestedAt, eraseAfter }` and the session cookie is cleared.
 Errors: `400 INVALID_INPUT` (wrong `confirm`) · `403 FORBIDDEN` (`details.reason: "wrong_password"`) · `409 INVALID_STATE` (a post is `publishing` right now; try again in a few minutes).
 ```json
 { "password": "Monsoon-Maths-Notes-77", "confirm": "DELETE" }
@@ -1747,7 +1747,7 @@ Success `200` → `AdminUser & { usage: { videosToday, projectsToday, voiceChara
 ```
 
 #### I6. `PATCH /api/v1/admin/users/{userId}` — Suspend / reactivate
-Body: `status` `active` \| `suspended` ✓ · `reason` string ≤ 200 (required when suspending). Admins can't change their own status or a `deleting` user. Suspending (transaction): `status = suspended`, all sessions deleted, active jobs `cancelRequestedAt`, `scheduled` and `publish_failed` posts → `approval_invalidated`. Reactivating also clears `lockedUntil`/`failedLoginCount`.
+Body: `status` `active` \| `suspended` ✓ · `reason` string ≤ 200 (required when suspending). Admins can't change their own status. A `deleting` user can only be **restored** (`status: active`) before the request's `eraseAfter` (30-day grace period; the `deletionRequests` record becomes `cancelled`, posts stay cancelled, Instagram must be connected again); after that → `409 INVALID_STATE`. Suspending (transaction): `status = suspended`, all sessions deleted, active jobs `cancelRequestedAt`, `scheduled` and `publish_failed` posts → `approval_invalidated`. Reactivating also clears `lockedUntil`/`failedLoginCount`.
 Success `200` → `AdminUser`. Errors: `400 INVALID_INPUT` · `404` · `409 INVALID_STATE` (self / deleting).
 ```json
 { "status": "suspended", "reason": "Repeated attempts to generate unsafe content" }

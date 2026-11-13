@@ -19,6 +19,7 @@ The 'ByteReel — Admin' screen (Allow-list + Users tabs).
 - Add/remove emails
 - List users
 - Suspend/reactivate
+- Restore a deleted account within its 30-day grace period (DATABASE.md §6.7)
 - Admin-only access
 
 ## Not in this feature

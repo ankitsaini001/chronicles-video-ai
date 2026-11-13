@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.1 · 2026-11-13 (code-review fixes; open questions decided except Q10) |
+| **Version** | 1.2 · 2026-11-13 (code-review fixes; all open questions decided; account deletion = 30-day soft delete + anonymous log) |
 | **Status** | Draft for founder review (feature F04). Nothing is created yet: this is a document only |
 | **Sources** (priority order) | [`ARCHITECTURE.md`](ARCHITECTURE.md) §7, §8, §9, §20.5 · [`API.md`](API.md) · [`PRD.md`](../PRD.md) §15 (older short list, see §12.2) |
 | **Companion** | [`API.md`](API.md): every endpoint that reads or writes these collections |
@@ -175,8 +175,9 @@ Why: video and audio files are large (a 75-second reel ≈ 18 MB). 512 MB of dat
 | 4.23 | `publishAttempts` | Log of every call to Instagram for a post | F30 | A5 |
 | 4.24 | `notifications` | In-app messages ("Your video is ready") | F32 | A5 |
 | 4.25 | `deletionRequests` | Account deletion and Meta data-deletion requests | F33, F37 | A6 |
+| 4.26 | `deletionLog` | Permanent anonymous facts about each deleted account (no personal data) | F33 | A6 |
 
-25 collections in total (24 permanent + 1 temporary). Sources: 4.1–4.5, 4.8–4.12, 4.15–4.23 are in ARCHITECTURE §8; 4.6, 4.13, 4.14, 4.24, 4.25 are named only in API.md; their fields are defined in this document (Q2) and copied into ARCHITECTURE §8 (Q3); 4.7 is from the F06 feature file.
+26 collections in total (25 permanent + 1 temporary). Sources: 4.1–4.5, 4.8–4.12, 4.15–4.23 are in ARCHITECTURE §8; 4.6, 4.13, 4.14, 4.24, 4.25 are named only in API.md, and 4.26 was added by the founder's account-deletion decision (6.7); their fields are defined in this document (Q2) and copied into ARCHITECTURE §8 (Q3); 4.7 is from the F06 feature file.
 
 ---
 
@@ -1087,18 +1088,57 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId` and `schemaVersio
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id` | ObjectId | Request id (B3 returns it as `deletionRequestId`) | Auto |
-| `kind` | `account` \| `meta_data` | `account` = the creator deleted their account (B3; recommended value, Q10); `meta_data` = Meta's callback (J2) | Yes |
-| `status` | `pending` \| `completed` \| `failed` | Progress | Yes |
+| `kind` | `account` \| `meta_data` | `account` = the creator deleted their account (B3); `meta_data` = Meta's callback (J2) | Yes |
+| `status` | `pending` \| `completed` \| `failed` \| `cancelled` | Progress; `cancelled` = an admin restored the account within the 30 days | Yes |
+| `eraseAfter` | date | `account` requests: when the 30-day grace period ends and the erase starts (`requestedAt` + 30 days) | `account` only |
 | `requestedAt`, `completedAt` | date | Timestamps | Auto / No |
 | `confirmationCode` | string `DEL-` + 8 characters | Meta requests only; shown on the public status page | Meta only |
 | `ownerId` | ObjectId? | `account` requests: whose account. **Removed when completed** | While pending |
 | `igUserId` | string? | `meta_data` requests: which Instagram account. **Removed when completed** | While pending |
 | `error` | `{ code, message }`? | Why it failed (no personal data) | No |
 
-**Rules:** the public status page (J3) returns no personal data. When a request completes, `ownerId` and `igUserId` are removed, so the record keeps only `{ kind, status, requestedAt, completedAt }` (+ the Meta confirmation code). How long these records are kept is part of Q10.
+**Rules:** the public status page (J3) returns no personal data. `meta_data` records: when the request completes, `igUserId` is removed, so the record keeps only `{ kind, status, requestedAt, completedAt, confirmationCode }` (needed for Meta's status page). `account` records live only while the deletion is in progress; the erase step deletes them after writing the `deletionLog` entry (6.7).
 
 **Indexes:** **partial** unique `confirmationCode`, created with `partialFilterExpression: { confirmationCode: { $type: "string" } }`, for the status page lookup. Why partial: account-deletion records have no code, and a plain unique index treats every missing field as `null`, so the second record without a code would be refused as a "duplicate".
 
+
+#### 4.26 `deletionLog`
+**Purpose:** the **permanent, anonymous** record of each deleted account (founder decision, 2026-11-13). It lets you see how long people stayed, how much they used ByteReel and what a user costs, **without keeping the person**. Written once, by the erase step after the 30-day grace period (6.7), and never changed.
+
+```js
+{
+  _id: "acct_7f3k9q2m",             // random code, NOT an ObjectId and not linked to anything
+  signedUpMonth: "2026-12",
+  deletionRequestedMonth: "2027-02",
+  erasedMonth: "2027-03",
+  reason: "user_request",
+  projectsCount: 14,
+  videosCount: 9,
+  postsPublishedCount: 6,
+  languagesUsed: ["en", "hi"],
+  aiCostRange: "₹100-200",
+  schemaVersion: 1
+}
+```
+
+| Field | Type | Meaning | Req |
+|---|---|---|---|
+| `_id` | string `acct_` + 8 random characters | A random code. We keep **no table** that maps it back to the user | Yes |
+| `signedUpMonth`, `deletionRequestedMonth`, `erasedMonth` | string `YYYY-MM` | **Month only**, never the exact date | Yes |
+| `reason` | `user_request` | Why the account was deleted (only creator requests in V1) | Yes |
+| `projectsCount`, `videosCount`, `postsPublishedCount` | int | How much they used ByteReel | Yes |
+| `languagesUsed` | array of `en` \| `hi` \| `hinglish` | Which languages they made videos in | Yes |
+| `aiCostRange` | string range, e.g. `₹0-100`, `₹100-200`, `₹200-500`, `₹500+` | Total AI cost, **in a range**, never exact | Yes |
+| `schemaVersion` | int | Shape version | Yes |
+
+**Rules (why it stays anonymous):**
+- **Why the rounding?** With only a few beta users, an exact date plus an exact cost could be enough to guess who it was, which would make it personal data again under the DPDP Act. Months and ranges prevent that.
+- **Why not an ObjectId?** An ObjectId contains the exact moment it was created, which would undo the month rounding.
+- **Never stored here:** name, email, phone, the creator's own words (topics, notes, scripts), Instagram username or ids, IP addresses, file keys.
+- Topics are not stored: V1 projects have no topic category field, only the creator's own text, which is personal. If a category field is added later, categories (not text) may be added here.
+- Not owner-scoped, so the minimal validator (Q9) doesn't require `ownerId`; it requires `schemaVersion`.
+
+**Indexes:** none (only `_id`). It's small and read rarely.
 ---
 
 ## 5. How the collections connect
@@ -1200,23 +1240,26 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId` and `schemaVersio
 - Archiving is refused while a post is being published right now (`publishing`) **or** its outcome is still being checked (`outcome_unknown`).
 - Real deletion of data happens only through account deletion (6.7).
 
-### 6.7 Account deletion (India DPDP Act)
-> **Recommended — founder to confirm (Q10).** Steps 1 and 3 come from API.md B3; the exact list in step 2 (especially the `providerUsage`, `allowlist` and `deletionRequests` rules) is our recommendation until you confirm Q10.
+### 6.7 Account deletion (India DPDP Act): final rule
+> **Founder decision, 2026-11-13 (Q10).** Deleting an account is a **30-day soft delete**, then a real erase of personal data, with one **anonymous** entry kept forever in `deletionLog` (4.26). Before the public launch, the privacy policy (F37) must say this in plain words, and it should be checked once by someone who knows Indian privacy law (F37).
 
 The creator deletes their account in Settings (B3, F33) with their password and by typing `DELETE`.
 
-1. **Immediately, in one transaction (§7):** user `status = deleting`, **all sessions deleted** (logged out everywhere), `scheduled` and `publish_failed` posts `cancelled`, running jobs asked to stop, a `deletionRequests` record created.
-2. **Then, in the background** (the `delete-account` job, a few moments later):
+1. **Right away, in one transaction (§7):** user `status = deleting` (they can't log in; nothing of theirs is visible to anyone), **all sessions deleted** (logged out everywhere), `scheduled` and `publish_failed` posts `cancelled`, running jobs asked to stop, and a `deletionRequests` record with `eraseAfter = requestedAt + 30 days`.
+2. **Right away, in the background:** the **Instagram token and connection are deleted** (Meta's rule: Meta data goes as soon as the user leaves). If they come back within 30 days they connect Instagram again.
+3. **For 30 days (grace period):** everything else is kept. If the creator writes to us ("I deleted by mistake"), an admin can **restore** the account (F34): `status` back to `active`, the `deletionRequests` record becomes `cancelled`. Cancelled posts stay cancelled (the creator approves again).
+4. **After 30 days** (the `delete-account` job, started at `eraseAfter`):
+   - **first writes one anonymous `deletionLog` entry** (4.26): rounded facts only, no name, email, words or Instagram data;
    - deletes the R2 folder `users/{ownerId}/` (all videos, audio, thumbnails);
-   - deletes the Instagram token and connection;
    - deletes every document with that `ownerId`: `projects`, `planVersions`, `revisions`, `storyboardApprovals`, `jobs`, `speechArtifacts`, `renders`, `captionOverrides`, `posts`, `publishAttempts`, `notifications`, `idempotencyKeys`, `usageCounters`;
    - deletes the person's **`allowlist` entry** (their email), so coming back needs a new invite;
-   - `rateLimits`: the counters hold only a **hash** of the IP, email or user id (never the raw value) and delete themselves within their short window (TTL), so there is nothing personal to clean up; counters for the user's id and email are deleted anyway by re-computing the hash;
-   - **anonymizes** `providerUsage` (not deleted): `ownerId`, `projectId` and `jobId` are removed, the provider, units, cost and date stay. Reason: the spend ceilings and the monthly totals must stay correct; deleting the rows would make it look as if that money was never spent;
+   - `rateLimits`: the counters hold only a **hash** of the IP, email or user id and delete themselves within their short window (TTL); counters for the user's id and email are deleted anyway by re-computing the hash;
+   - **anonymizes** `providerUsage` (not deleted): `ownerId`, `projectId` and `jobId` are removed; provider, units, cost and date stay, so the spend ceilings and monthly totals stay correct;
    - **anonymizes** `auditLogs` (the entries stay, but no longer point to the person);
-   - **finally** removes the Better Auth rows (`user`, `account`, `session`, `verification`);
-   - the `deletionRequests` record (`kind: "account"`) keeps only `{ kind, status, requestedAt, completedAt }`: its `ownerId` is removed when it completes.
-3. The background job can be repeated safely if it is interrupted (it just deletes whatever is left).
+   - **finally** removes the Better Auth rows (`user`, `account`, `session`, `verification`) and the `deletionRequests` record itself (its job is done; the permanent record is the `deletionLog` entry).
+5. The background job can be repeated safely if it is interrupted (it just deletes whatever is left; the `deletionLog` entry is written once, keyed by the request).
+
+**What is never kept after the 30 days:** name, email, phone, password hash, the creator's topics, notes and scripts, video/audio files, Instagram username or ids, IP addresses.
 
 ### 6.8 Meta data-deletion request
 When someone removes ByteReel in their Instagram settings, Meta calls us (J2, F37). We create a `deletionRequests` record (`kind: meta_data`), then delete the Instagram connection document (token, username, picture), remove Instagram-derived fields on that user's posts (`igContainerId`, `igMediaId`, `permalink`; `approval.igUserId` is replaced by a hash), delete the `publishAttempts` request/response payloads, and invalidate `scheduled` and `publish_failed` posts. The ByteReel account and videos stay (they aren't Meta's data).
@@ -1252,7 +1295,7 @@ The checks (is this still the current version? is the job slot free? quota left?
 | 14 | Disconnect Instagram | G4 · F28 | connection token removed, `status = revoked`, `revokedAt` + all `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit | Scheduled posts aimed at an account that is gone |
 | 15 | Meta deauthorize callback | J1 · F37 | connection `revoked`, token removed + `scheduled`/`publish_failed` posts → `approval_invalidated` + notification `instagram_reconnect` + audit | Same as 14 |
 | 16 | Suspend a user (admin) | I6 · F34 | user `suspended` + all sessions deleted + jobs asked to stop + `scheduled`/`publish_failed` posts → `approval_invalidated` | A suspended user still logged in, or their post still publishing |
-| 17 | **Delete account** | B3 · F33 | user `deleting` + all sessions deleted + `scheduled`/`publish_failed` posts `cancelled` + jobs asked to stop + insert `deletionRequests` | A half-deleted account that can still log in or post |
+| 17 | **Delete account** | B3 · F33 | user `deleting` + all sessions deleted + `scheduled`/`publish_failed` posts `cancelled` + jobs asked to stop + insert `deletionRequests` (with `eraseAfter` = +30 days) | A half-deleted account that can still log in or post |
 | 18 | **A job finishes** (the last step of every background job, and the stuck-job sweeper) | Inngest functions · F15 onwards | job final state (`succeeded`/`failed`/`needs_input`/`cancelled`) + project state + clear `activeJobId` + project pointers (e.g. `currentPlanVersionId`, `currentRenderId`) + notification. A short transaction: only these few writes | A finished job while the project still shows "working" forever, or a new video the project doesn't point to |
 
 ### 7.3 Other safety tools (no transaction needed)
@@ -1362,7 +1405,7 @@ Per user, the account records (`user`, `account`, `session`s, `allowlist`, `inst
 
 ## 11. What gets created when
 
-A collection appears in Atlas the first time something is written to it (or when the setup script creates its indexes). To keep "what you see = what we built", **each feature creates only its own collections and indexes**, not all 25 on day one.
+A collection appears in Atlas the first time something is written to it (or when the setup script creates its indexes). To keep "what you see = what we built", **each feature creates only its own collections and indexes**, not all 26 on day one.
 
 | Feature | You'll see in Atlas (Browse Collections) |
 |---|---|
@@ -1387,7 +1430,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F28 | `instagramConnections` |
 | F30, F31 | `posts`, `publishAttempts` |
 | F32 | `notifications` |
-| F33 | `deletionRequests` (account deletion) |
+| F33 | `deletionRequests` (account deletion), `deletionLog` (anonymous record written after the 30 days) |
 | F35 | `verification` (reset links) |
 | F36 | `settings` edits from the admin page |
 | F37 | `deletionRequests` (Meta requests) |
@@ -1447,7 +1490,7 @@ PRD §15 is an older short list. ARCHITECTURE §8 and API.md are the later, appr
 | 11 | `auditLogs.userId`, `createdAt` | `actorId`, `at` |
 | 12 | (not listed) | `jobs`, `storyboardApprovals`, `publishAttempts`, `settings`, `notifications`, `deletionRequests`, `idempotencyKeys`, `rateLimits`, `usageCounters` |
 
-### 12.3 Open questions (decided 2026-11-13, except Q10)
+### 12.3 Open questions (all decided 2026-11-13)
 These were the gaps and contradictions in the source documents. **Decided 2026-11-13** (engineering decisions after the code review, following "keep it as simple as possible and protect money"), except **Q10, which waits for you**.
 
 | # | Question | Decision |
@@ -1461,7 +1504,7 @@ These were the gaps and contradictions in the source documents. **Decided 2026-1
 | Q7 | Where the per-project and per-user limits are counted | **Decided 2026-11-13.** The 20 plan + revision requests: `projects.planRequestCount`, increased in the same transaction and only if below the limit. Per-user daily/monthly counts (projects, videos, voice characters): `usageCounters`. **Counting starts in F12, enforcement in F27** |
 | Q8 | Indexes not defined in the docs | **Decided 2026-11-13.** The list in §8: required Better Auth indexes, partial unique `deletionRequests.confirmationCode`, `notifications { ownerId: 1, createdAt: -1 }`, `publishAttempts { postId: 1 }`, plus the `rateLimits`/`idempotencyKeys`/`usageCounters` indexes. **No** extra indexes on `captionOverrides` or `auditLogs`; the sparse `activeJobId` index is dropped |
 | Q9 | Database validators | **Decided 2026-11-13.** A **minimal** validator: on owner-scoped collections, only `ownerId` (ObjectId) and `schemaVersion` are required (`idempotencyKeys`, `usageCounters`: `ownerId` only). Zod in our code is the real check (§1.4) |
-| Q10 | **Account deletion details** | **Open: waiting for the founder.** See the recommendation below |
+| Q10 | **Account deletion details** | **Decided by the founder, 2026-11-13.** 30-day soft delete (account hidden and restorable by an admin), Instagram data deleted right away, then personal data erased and one anonymous `deletionLog` entry kept forever (rounded months and cost range, random id). `providerUsage` and `auditLogs` anonymized, `allowlist` entry deleted. See 6.7 and 4.26 |
 | Q11 | An event lost after commit leaves a job `queued` forever | **Decided 2026-11-13.** The stuck-job sweeper also **re-sends the event for `queued` jobs older than ~2 minutes**. The event id is the job's key, so Inngest drops a duplicate if the first send did arrive. ARCHITECTURE §13.1/§20.3 updated |
 | Q12 | Are G3 (connect Instagram) and J1 (Meta deauthorize) transactions? | **Decided 2026-11-13.** Yes, both (§7.2 rows 13 and 15) |
 | Q13 | `rateLimits` name and method | **Decided 2026-11-13.** Our own `rateLimits` collection with **fixed windows** for **all** limits, including login and sign-up. Better Auth's built-in limiter is **off** (it counts in server memory, useless on serverless). ARCHITECTURE §21.2 ("token bucket") fixed |
@@ -1470,13 +1513,7 @@ These were the gaps and contradictions in the source documents. **Decided 2026-1
 | Q16 | `healthchecks` after F06 | **Decided 2026-11-13.** Dropped at the end of F06 (after you've seen the test record in Atlas). Later health checks use `db.command({ ping: 1 })`, which writes nothing |
 | Q17 | Better Auth housekeeping fields | **Decided 2026-11-13.** Filled in from Better Auth's documented core schema (4.1–4.4). **F08 confirms** them against real documents, including whether `userId` is stored as an ObjectId |
 
-**Q10 — for you to decide (recommendation).** When a creator deletes their account, we recommend:
-- **(a) `providerUsage` is anonymized, not deleted.** The person's ids (`ownerId`, `projectId`, `jobId`) are removed; the provider, amount and cost stay. Otherwise the spend ceilings and monthly totals would "forget" money that was really spent.
-- **(b) The `allowlist` entry is deleted.** Their email is gone from ByteReel; to come back, they need a new invite.
-- **(c) The `deletionRequests` record keeps only `{ kind, status, requestedAt, completedAt }`**, with no personal data, as proof that the deletion happened.
-- **(d) Its `kind` is `"account"`.**
-
-Until you confirm, §6.7 is marked "recommended". Decide by F33 at the latest.
+**Q10 — decided (2026-11-13).** The founder wants to keep records of deleted accounts. Final rule (6.7): a 30-day soft delete, then personal data is erased and an anonymous `deletionLog` entry (4.26) is kept forever. Keeping the personal data itself was ruled out because the DPDP Act requires erasure on request and Meta requires deleting Instagram data.
 
 **Open items for later features (not questions for now)**
 - **F30/F31:** check the Inngest free plan's maximum sleep for posts scheduled up to 75 days ahead; fallback: a small cron that uses the `posts { state, scheduledAt }` index (4.22).

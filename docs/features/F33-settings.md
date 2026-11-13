@@ -19,7 +19,7 @@ The 'ByteReel — Settings' screen.
 - Name, default language/voice, timezone
 - Today's usage
 - Change password
-- Delete account (removes projects/videos, disconnects Instagram)
+- Delete account: 30-day soft delete (hidden + logged out now, Instagram disconnected now), then personal data and videos erased and one anonymous `deletionLog` entry written (DATABASE.md §6.7, founder decision 2026-11-13). The Settings screen tells the user about the 30 days
 
 ## Not in this feature
 - —
