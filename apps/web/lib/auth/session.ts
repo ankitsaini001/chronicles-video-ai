@@ -1,3 +1,4 @@
+import { DEFAULT_TIMEZONE, isValidTimezone } from "@bytereel/db";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
@@ -9,8 +10,32 @@ import { getAuth } from "./server";
 // off), so after logging out, or after an admin removes a session, the name disappears at once.
 // Checking only that a cookie exists is never enough: a page that needs login calls requireUser().
 
-/** What pages may show about the signed-in user. Nothing else leaves the server. */
-export type SessionUser = { id: string; name: string; email: string };
+/**
+ * What server code may use about the signed-in user (profile and defaults, API.md §11.3 `Me`).
+ * Never the login-protection fields (failedLoginCount, lockedUntil, lastLoginAt). Pages pass only
+ * the fields a component needs to client components.
+ */
+export type SessionUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  /** IANA timezone; an unknown value reads as Asia/Kolkata. */
+  timezone: string;
+  defaultLanguage: Language;
+  defaultVoiceGender: VoiceGender;
+  /** ISO-8601 UTC. */
+  createdAt: string;
+};
+
+export type UserRole = "creator" | "admin";
+export type Language = "en" | "hi" | "hinglish";
+export type VoiceGender = "female" | "male";
+
+// Same values as LANGUAGES in packages/pipeline/src/contracts/common.ts (API.md §11.1); the web app
+// doesn't depend on the pipeline package, so they are repeated here.
+const LANGUAGES: readonly Language[] = ["en", "hi", "hinglish"];
+const VOICE_GENDERS: readonly VoiceGender[] = ["female", "male"];
 
 export const LOGIN_PATH = "/login";
 export const AFTER_LOGIN_PATH = "/dashboard";
@@ -29,9 +54,38 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
  * `status: "active"` (API.md §3.1): a session that still exists for a suspended or deleting user
  * (e.g. one created before the status changed) counts as signed out.
  */
-export function toSessionUser(session: { user: { id: string; name: string; email: string; status?: unknown } } | null | undefined): SessionUser | null {
+export function toSessionUser(session: { user: BetterAuthUser } | null | undefined): SessionUser | null {
   if (!session || session.user.status !== "active") return null;
-  return { id: session.user.id, name: session.user.name, email: session.user.email };
+  const u = session.user;
+  // Values the server set at sign-up; anything unexpected falls back to the safe default
+  // (an unknown role reads as "creator", never "admin").
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role === "admin" ? "admin" : "creator",
+    timezone: typeof u.timezone === "string" && isValidTimezone(u.timezone) ? u.timezone : DEFAULT_TIMEZONE,
+    defaultLanguage: LANGUAGES.find((l) => l === u.defaultLanguage) ?? "en",
+    defaultVoiceGender: VOICE_GENDERS.find((g) => g === u.defaultVoiceGender) ?? "female",
+    createdAt: toIso(u.createdAt),
+  };
+}
+
+type BetterAuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  status?: unknown;
+  role?: unknown;
+  timezone?: unknown;
+  defaultLanguage?: unknown;
+  defaultVoiceGender?: unknown;
+  createdAt?: unknown;
+};
+
+function toIso(value: unknown): string {
+  const date = value instanceof Date ? value : new Date(typeof value === "string" || typeof value === "number" ? value : NaN);
+  return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString();
 }
 
 /**
