@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (founder review) |
+| **Status** | ✅ Done |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | — |
 | **Design** | — |
@@ -25,14 +25,14 @@ A document to read. No database is created yet.
 
 ## Steps
 - [x] Write the doc
-- [ ] Founder reads it
-- [ ] Answer questions / fix
-- [ ] Founder approves
+- [x] Founder reads it
+- [x] Answer questions / fix
+- [x] Founder approves
 
 ## How we test it (done when all are ticked)
-- [ ] Founder has read it and the questions are answered
+- [x] Founder has read it and the questions are answered
 - [x] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
@@ -41,3 +41,4 @@ A document to read. No database is created yet.
 | 2026-11-13 | Code-review fixes applied (all must-fix, should-fix and nice-to-have items). Must-fix: a change, archive, suspend, disconnect, Meta deauthorize or account deletion now also stops `publish_failed` posts (not only `scheduled`), and the publish re-check (job, H6, I9) also requires project not archived, user `active` and the approved render/plan still current (API.md, openapi.yaml, ARCHITECTURE §17/§18 updated too); `deletionRequests.confirmationCode` is a partial unique index; the Better Auth indexes are required for A2 and created by our setup script. Also: TTL caveats, region next to the server (Atlas Mumbai + Vercel `bom1`, decided in F05), local development on the Atlas dev database, complete transactions list, account-deletion list, session-token security note, Better Auth core fields, M0 limits, voice-limit note (about 3 voiced videos per user per month). Open questions Q1–Q17 decided, except **Q10 (account deletion details), which waits for the founder**. ARCHITECTURE §8 aligned; F05, F06, F08, F38 updated. |
 | 2026-11-13 | Founder: region = Mumbai for Atlas and Vercel; keep the 3,000 voice characters/user/month limit for now (review later). Account deletion (Q10): founder wants to keep records; options being discussed. |
 | 2026-11-13 | Founder decided Q10: account deletion = 30-day soft delete (restorable by an admin), Instagram data deleted right away, then personal data erased and one anonymous `deletionLog` entry kept forever (months and cost ranges only, random id). DATABASE.md v1.2 (§6.7, new §4.26); API.md B3/I-status, openapi, ARCHITECTURE, F33/F34/F37 updated. All open questions decided. |
+| 2026-11-13 | Founder: "F04 looks okay" → ✅. Account deletion stays self-service (password + type DELETE) with the 30-day admin restore as the safety net. |
