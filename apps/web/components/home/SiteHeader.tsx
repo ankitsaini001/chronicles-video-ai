@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { Logo } from "@/components/Logo";
-import { Button } from "@/components/ui";
+import { HeaderAccount, HeaderAccountPlaceholder } from "./HeaderAccount";
 
 // Public site nav (Stitch "ByteReel — Home Landing Page"; BRAND §8). Changes from the design:
 // "Sign In" reads "Log in" to match the login screen; "Features" and "Pricing" are replaced by
 // "FAQ" (there is no pricing in the beta, and no separate features page).
+// F09: when signed in, "Log in" is replaced by the user's name and menu (HeaderAccount). Only that
+// part waits for the session; the rest of the page streams first.
 
 const linkClass = "inline-flex min-h-11 items-center rounded font-mono text-xs text-muted transition hover:text-text";
 
@@ -30,9 +33,9 @@ export function SiteHeader() {
             FAQ
           </Link>
         </nav>
-        <Button href="/login" size="sm">
-          Log in
-        </Button>
+        <Suspense fallback={<HeaderAccountPlaceholder />}>
+          <HeaderAccount />
+        </Suspense>
       </div>
     </header>
   );
