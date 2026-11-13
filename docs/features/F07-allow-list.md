@@ -37,5 +37,4 @@ Nothing in the UI yet. You add your email with one simple command and see it in 
 ## Progress log
 | Date | What happened |
 |---|---|
-| | |
 | 2026-11-13 | Built in one go. `packages/db/src/allowlist.ts` + `npm run db -- invite add/list/remove`. Emails are trimmed and lowercased; invalid emails and notes over 200 characters are refused before touching the database; `invitedBy: null` for command-added entries (DATABASE.md Q14). The unique `email_unique` index is created on the first add. Live test on Atlas: `  F07-Test@Example.COM ` saved as `f07-test@example.com`, re-adding in another case changed nothing, a direct duplicate insert was refused by the database (error 11000), remove worked, list now empty. The `bytereel` database is back in Atlas with an empty `allowlist` collection. 260 tests pass (25 new), typecheck clean. Waiting for the code review, then the founder adds their own email. |
