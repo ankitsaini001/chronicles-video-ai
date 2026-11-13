@@ -43,7 +43,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | # | Feature | Depends on | Status |
 |---|---|---|---|
 | F04 | [Database design document (doc only)](F04-database-design-doc.md) | — | ✅ Done |
-| F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ⬜ Not started |
+| F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ✅ Done |
 | F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ⬜ Not started |
 | F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ⬜ Not started |
 | F08 | [Sign up](F08-sign-up.md) | F07 | ⬜ Not started |
@@ -98,4 +98,4 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F05 (create the MongoDB Atlas database together, Mumbai). Phase A1 (F01–F03) is merged to `main`; F04 done.
+**Next up:** F06 (connect the app to MongoDB and save one test record you can see in Atlas). F04 and F05 done.

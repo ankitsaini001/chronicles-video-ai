@@ -712,7 +712,9 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 - Project updates use `stateVersion` optimistic concurrency. A stale tab gets `STALE_VERSION` → "This project changed in another tab, refresh".
 
 ### 20.5 Backups
-**Not in V1** (decision D6; the PRD also excludes a backup system). The MongoDB Atlas free tier has no automated backups. This is accepted for the private beta, and backups are planned for a later version (e.g. the Atlas paid tier or a scheduled `mongodump` to R2).
+**Not in V1** (decision D6; the PRD also excludes a backup system). This is accepted for the private beta, and backups are planned for a later version (e.g. the Atlas paid tier or a scheduled `mongodump` to R2).
+
+**Update (2026-11-13, F05):** Atlas now offers a **free daily snapshot for free clusters** (up to 4 kept, no cost; DATABASE.md §10). Switching it on isn't building a backup system, so D6 still holds for anything that costs money or needs code.
 
 ---
 

@@ -1382,7 +1382,19 @@ Per user, the account records (`user`, `account`, `session`s, `allowlist`, `inst
 - At the full beta pace in ARCHITECTURE §25.2 (~22 videos a day), that's ~65 MB a month, so we'd reach ARCHITECTURE's **upgrade trigger of 300 MB** after roughly 4–5 months. Early beta use will be much lower.
 - We'll replace these guesses with real numbers after F15 and F23 (Atlas shows each collection's size).
 
-**Other free-tier (M0) limits besides size.** M0 also limits the number of **open connections**, the **operations per second** and the **data transfer** per week. The exact numbers change over time, so we read them on Atlas's current M0 page in **F05** and don't write them here as fact. What we do about them:
+**Other free-tier limits besides size** (read on 2026-11-13 from MongoDB's page "Atlas Free Cluster Limits", https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/; they can change, so re-check before launch):
+
+| Limit | Free cluster |
+|---|---|
+| Storage (documents + indexes) | 0.5 GB |
+| Open connections | 500 |
+| Operations per second | 100 |
+| Data transfer | 10 GB in + 10 GB out per rolling 7 days |
+| Databases / collections | 100 databases, 500 collections in total |
+| Free clusters per Atlas project | 1 (production uses a second project, Q1) |
+| Inactivity | **Paused after 30 days with zero connections** (can be resumed); idle free clusters may be deactivated under the Terms of Service |
+
+Our 26 collections are far below 500. Checked in F05: the cluster runs **MongoDB 8.0** as a **replica set**, so transactions (§7) and partial indexes with `$in` work. What we do about the limits:
 - **Cache the MongoDB client globally.** On Vercel each server function can start many times; if every start opened a new connection, we would run out of connections. `packages/db` keeps one client in a global variable and reuses it (the usual Next.js pattern).
 - **Polling is the main load.** While a job runs, the browser asks for the status **every 2 seconds** (C6, decision D2): about 30 small reads per minute per open tab. That, not storage, is what pushes against the operations limit. Keep each status read to one or two small indexed queries, and stop polling when nothing is running (`pollAfterMs: null`).
 
@@ -1392,7 +1404,7 @@ Per user, the account records (`user`, `account`, `session`s, `allowlist`, `inst
 
 ## 10. Backups
 
-- **ARCHITECTURE §20.5 (decision D6): no backup system in V1.** The free M0 cluster has **no automatic backups**. This is accepted for the private beta. Backups are planned for later (the Atlas paid tier or a scheduled `mongodump` to R2).
+- **Correction (2026-11-13, F05):** free clusters **can** have backups now. MongoDB's page says: "You can enable backups on Free clusters", and then "Atlas takes a daily snapshot and retains up to four snapshots" (https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/). It costs nothing, so we **recommend switching it on** (Atlas → the cluster → *Backup*). It gives a copy of the last ~4 days, which is enough to recover from a mistake. ARCHITECTURE §20.5 (decision D6, "no backup system in V1") was written when this didn't exist; switching on the free snapshot isn't building a backup system, so D6 still holds for anything that costs money or needs code.
 - R2 files aren't backed up either. If the database were lost, the videos would still be in R2, but the accounts and projects that point to them would be gone.
 
 **Simple, free safety net (proposed, no cost):** before any risky change (a data migration, a bulk delete, a cluster change), take a manual copy:
