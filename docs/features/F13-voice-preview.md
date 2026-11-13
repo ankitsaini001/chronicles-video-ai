@@ -64,7 +64,7 @@ Also: ElevenLabs labels both "Indian English" voices with a *British* accent. Pl
 - [ ] Each ▶ plays the right language and gender (English now; Hindi/Hinglish show no ▶ until their samples are recorded before F23)
 - [x] No ElevenLabs call happens when you click ▶ (only the static MP3 is loaded; e2e: no page script mentions ElevenLabs)
 - [x] Code review passed (code-reviewer agent; no must-fix, all 8 suggestions applied)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
@@ -75,3 +75,4 @@ Also: ElevenLabs labels both "Indian English" voices with a *British* accent. Pl
 | 2026-11-13 | Code review: no must-fix. Applied all 8 suggestions. Recorder (`bacb1ae`): checks that ffprobe runs and that voice IDs look right (refused by variable name) before any paid call; a recording whose check fails is kept as `{preset}.mp3.unverified` instead of deleted; after any failure it still shows the account usage, and says "may have been charged" for a timeout or unreadable answer; voice IDs are blanked out of provider errors; a 0-byte file counts as missing; `.part` is always cleaned up; `*.part` / `*.unverified` ignored by git. Player (`4915fc8`): ignores a late error from an older sample, lets go of the file when you leave the page; the "couldn't play" status line is always in the page so screen readers announce it. No ElevenLabs calls (characters spent still 110). 539 unit tests, typecheck and `next build` pass; e2e F13 and F12 (68/68) pass on `bytereel_test` (dropped afterwards). Waiting for the founder's test. |
 | 2026-11-13 | Founder noticed the English samples weren't the voices they chose. Reason: on 12 Nov (prototype) the founder's English voices, Ranbir (male) and Riya Rao (female), Indian-accent Voice Library voices, were refused on the free ElevenLabs plan, so `.env` was switched to the free British premade voices Daniel/Alice (originals kept as comments). Founder prefers US English for testing: `.env` now uses the free premade US voices **Eric** (male) and **Matilda** (female); Ranbir/Riya Rao stay as comments for when there's a paid plan. Re-recorded the 2 English samples (about 110 characters; about 220 in total so far). The voice decision before F23 now covers all four chosen voices (Ranbir, Riya Rao, Viraj, Monika Sogam are all library voices). |
 | 2026-11-13 | Founder liked Matilda (female). Male switched from Eric to the free US voice **Brian** ("Deep, Resonant and Comforting"), calmer for explainers; sample re-recorded (about 55 characters, about 275 in total so far). |
+| 2026-11-13 | Founder listened to Matilda and Brian and said "sounds good" → ✅ (English ▶ only; Hindi/Hinglish ▶ waits for the voice decision before F23). |
