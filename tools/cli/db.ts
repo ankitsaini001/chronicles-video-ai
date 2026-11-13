@@ -1,6 +1,5 @@
 import { parseArgs } from "node:util";
 import {
-  cleanupHealthCheck,
   closeMongoClient,
   ensureIndexes,
   explainDbError,
@@ -12,27 +11,22 @@ import {
   ping,
   readDbConfig,
   redactConnectionString,
-  runHealthCheck,
 } from "@bytereel/db";
 import { loadLocalEnvFile } from "@bytereel/pipeline/config/config";
 
 /**
  * Database commands (F06). Reads MONGODB_URI / MONGODB_DB from .env in the project root.
- *   npm run db -- check            write + read one test record (see it in Atlas → Data Explorer)
  *   npm run db -- ping             connection check that writes nothing
- *   npm run db -- cleanup          delete the test record and the healthchecks collection
  *   npm run db -- indexes [--feature F08 ...] [--apply]
  *                                  list the indexes; --apply creates those of the given features
  * Exit codes: 0 = ok, 1 = failed, 2 = usage error.
  */
 
 const USAGE = `Usage:
-  npm run db -- check
   npm run db -- ping
-  npm run db -- cleanup
   npm run db -- indexes [--feature ${INDEX_FEATURES.join("|")} ...] [--apply]`;
 
-const COMMANDS = ["check", "ping", "cleanup", "indexes"] as const;
+const COMMANDS = ["ping", "indexes"] as const;
 type Command = (typeof COMMANDS)[number];
 type Print = (lines: string[]) => void;
 
@@ -88,26 +82,10 @@ export async function runDbCommand(argv: string[], print: Print, env: NodeJS.Pro
   try {
     const db = getDb(result.config);
     switch (parsed.command) {
-      case "check": {
-        const r = await runHealthCheck(db);
-        safePrint([
-          "Connected to MongoDB ✓",
-          `  Wrote and read back 1 test record in ${r.roundTripMs} ms.`,
-          `  See it in Atlas: Data Explorer → your cluster → ${r.database} → ${r.collection}`,
-          `  Record: _id "${r.record._id}", message "${r.record.message}", writtenAt ${r.record.writtenAt.toISOString()}`,
-          "  When you have seen it, remove it with: npm run db -- cleanup",
-        ]);
-        return 0;
-      }
       case "ping": {
         const r = await ping(db);
         safePrint([r.ok ? `MongoDB answered the ping ✓ (${r.roundTripMs} ms). Nothing was written.` : "MongoDB answered, but the ping was not ok."]);
         return r.ok ? 0 : 1;
-      }
-      case "cleanup": {
-        const r = await cleanupHealthCheck(db);
-        safePrint([r.dropped ? `Deleted the test record and the healthchecks collection from "${db.databaseName}".` : "Nothing to clean up: the healthchecks collection does not exist."]);
-        return 0;
       }
       case "indexes": {
         const created = await ensureIndexes(db, indexesForFeatures(parsed.features));

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  cleanupHealthCheck,
   closeMongoClient,
   ensureIndexes,
   explainDbError,
@@ -8,21 +7,17 @@ import {
   passwordsIn,
   ping,
   getMongoClient,
-  HEALTHCHECK_COLLECTION,
-  HEALTHCHECK_ID,
   INDEXES,
   indexesForFeatures,
   readDbConfig,
   redactConnectionString,
-  runHealthCheck,
-  type HealthRecord,
 } from "@bytereel/db";
 import { runDbCommand } from "../tools/cli/db";
 
-// F06: database settings, shared client, plain errors, health check and the db command.
+// F06: database settings, shared client, plain errors, ping, index setup and the db command.
 // None of these tests talks to a real database.
 
-type Db = Parameters<typeof runHealthCheck>[0];
+type Db = Parameters<typeof ping>[0];
 
 const GOOD = "mongodb+srv://app_user:s3cret-Pass@bytereel-dev.abcde.mongodb.net/?retryWrites=true&w=majority";
 
@@ -139,52 +134,6 @@ describe("getMongoClient", () => {
   });
 });
 
-describe("runHealthCheck", () => {
-  function fakeDb() {
-    const store = new Map<string, HealthRecord>();
-    const calls: string[] = [];
-    const db = {
-      databaseName: "bytereel",
-      command: async () => ({ ok: 1 }),
-      collection: (name: string) => {
-        calls.push(name);
-        return {
-          replaceOne: async (filter: { _id: string }, doc: HealthRecord, options: { upsert: boolean }) => {
-            expect(options.upsert).toBe(true);
-            store.set(filter._id, doc);
-          },
-          findOne: async (filter: { _id: string }) => store.get(filter._id) ?? null,
-        };
-      },
-    } as unknown as Db;
-    return { db, store, calls };
-  }
-
-  it("writes one fixed record and reads it back", async () => {
-    const { db, store, calls } = fakeDb();
-    const now = new Date("2026-11-13T10:00:00.000Z");
-    const r = await runHealthCheck(db, now);
-    expect(calls).toEqual([HEALTHCHECK_COLLECTION]);
-    expect(store.size).toBe(1);
-    expect(r.record._id).toBe(HEALTHCHECK_ID);
-    expect(r.record.writtenAt).toEqual(now);
-    expect(r).toMatchObject({ database: "bytereel", collection: "healthchecks" });
-  });
-
-  it("fails clearly if the record can't be read back", async () => {
-    const { db } = fakeDb();
-    const broken = { ...db, collection: () => ({ replaceOne: async () => undefined, findOne: async () => null }) } as unknown as Db;
-    await expect(runHealthCheck(broken)).rejects.toThrow("could not be read back");
-  });
-
-  it("running it twice keeps a single record", async () => {
-    const { db, store } = fakeDb();
-    await runHealthCheck(db, new Date("2026-11-13T10:00:00.000Z"));
-    await runHealthCheck(db, new Date("2026-11-13T10:05:00.000Z"));
-    expect(store.size).toBe(1);
-  });
-});
-
 describe("index list", () => {
   it("has the indexes phase A2 needs (DATABASE.md §8)", () => {
     const names = INDEXES.map((i) => `${i.collection}.${i.name}`);
@@ -222,12 +171,12 @@ describe("npm run db (command)", () => {
   it("prints usage for an unknown command", async () => {
     const out: string[] = [];
     expect(await runDbCommand(["nope"], (l) => out.push(...l), {})).toBe(2);
-    expect(out.join("\n")).toContain("npm run db -- check");
+    expect(out.join("\n")).toContain("npm run db -- ping");
   });
 
   it("explains a missing MONGODB_URI without contacting MongoDB", async () => {
     const out: string[] = [];
-    expect(await runDbCommand(["check"], (l) => out.push(...l), {})).toBe(1);
+    expect(await runDbCommand(["ping"], (l) => out.push(...l), {})).toBe(1);
     expect(out.join("\n")).toContain("nothing was sent to MongoDB");
     expect(out.join("\n")).toContain("MONGODB_URI is missing");
   });
@@ -266,7 +215,7 @@ describe("npm run db (command)", () => {
   });
 });
 
-describe("cleanup and ping", () => {
+describe("ping", () => {
   function dbWith(existing: string[]) {
     const dropped: string[] = [];
     const db = {
@@ -277,18 +226,6 @@ describe("cleanup and ping", () => {
     } as unknown as Db;
     return { db, dropped };
   }
-
-  it("drops the healthchecks collection when it exists", async () => {
-    const { db, dropped } = dbWith(["healthchecks"]);
-    expect(await cleanupHealthCheck(db)).toEqual({ dropped: true });
-    expect(dropped).toEqual(["healthchecks"]);
-  });
-
-  it("does nothing when it doesn't exist", async () => {
-    const { db, dropped } = dbWith([]);
-    expect(await cleanupHealthCheck(db)).toEqual({ dropped: false });
-    expect(dropped).toEqual([]);
-  });
 
   it("ping reports ok without writing", async () => {
     const { db } = dbWith([]);
