@@ -2,7 +2,12 @@ import { randomBytes } from "node:crypto";
 import {
   API_RATE_LIMITS,
   addInvite,
+  beginIdempotency,
   closeMongoClient,
+  createProject as createProjectInDb,
+  CreateProjectBodySchema,
+  IdempotencyLockLostError,
+  releaseIdempotency,
   ensureIndexes,
   getDb,
   indexesForFeatures,
@@ -104,7 +109,7 @@ async function main(): Promise<void> {
   check("/projects/new renders inside the shell (200)", r.status === 200 && html.includes("Videos today"), `status ${r.status}`);
   check("title 'New video · <product>'", /<title>New video · [^<]+<\/title>/.test(html));
   check("heading labels the box: 'What do you want to explain?'", /<label for="idea-text">What do you want to explain\?<\/label>/.test(html));
-  check("textarea max 5,000 + live counter '0 / 5,000'", /<textarea[^>]*maxLength="5000"/i.test(html) && html.includes("0 / 5,000"));
+  check("textarea + live counter '0 / 5,000' (only a 20,000 safety stop; the limit is on the cleaned text)", /<textarea[^>]*maxLength="20000"/i.test(html) && html.includes("0 / 5,000"));
   check("helper text", html.includes("Type a topic, or paste your notes (up to 5,000 characters)."));
   check("Language and Voice are labelled radiogroups", (html.match(/role="radiogroup"/g) ?? []).length === 2 && (html.match(/aria-labelledby="/g) ?? []).length >= 2 && html.includes(">Language</p>") && html.includes(">Voice</p>"));
   const radios = html.match(/<button[^>]*role="radio"[^>]*>.*?<\/button>/g) ?? [];
@@ -219,7 +224,7 @@ async function main(): Promise<void> {
   // --- The temporary project page.
   r = await page(`/projects/${p.id}`, a.cookie);
   html = await htmlOf(r);
-  check("owner: /projects/[id] shows the saved topic, language and voice", r.status === 200 && html.includes(VALID.text) && html.includes(">English<") && html.includes("Female voice") && html.includes("The AI storyboard arrives in F15"), `status ${r.status}`);
+  check("owner: /projects/[id] shows the saved topic, language and voice", r.status === 200 && html.includes(VALID.text) && html.includes(">English<") && html.includes("Female voice") && html.includes("Your storyboard will appear here soon."), `status ${r.status}`);
   check("owner: stepper on Idea", /aria-current="step"[^>]*>.*?Idea/.test(html));
   html = await htmlOf(await page(`/projects/${notes.project!.id}`, a.cookie));
   check("owner: Hindi project shows हिंदी Hindi + Male voice", html.includes('<span lang="hi">हिंदी</span> Hindi') && html.includes("Male voice"));
@@ -282,6 +287,37 @@ async function main(): Promise<void> {
     pairStatuses.join(","),
   );
   check("double-click: exactly one project saved and counted", (await db.collection("projects").countDocuments({ ownerId: b.id })) === 1 && (await db.collection("usageCounters").findOne({ ownerId: b.id, kind: "projects" }))?.count === 1);
+  await clearRateLimits();
+
+  // --- Slow request A, takeover by B (F12 review), on the real database with real transactions.
+  const slowKey = key();
+  const lockA = await beginIdempotency(db, b.id.toHexString(), slowKey, "sha256:e2e", new Date(Date.now() - 120_000));
+  const lockB = await beginIdempotency(db, b.id.toHexString(), slowKey, "sha256:e2e");
+  check("takeover: B takes over A's abandoned marker with a new lockId", lockA.kind === "new" && lockB.kind === "new" && lockA.recordId === lockB.recordId && lockA.lockId !== lockB.lockId);
+  if (lockA.kind === "new" && lockB.kind === "new") {
+    const body = CreateProjectBodySchema.parse({ ...VALID, text: "Slow click project" });
+    const before = await db.collection("projects").countDocuments({ ownerId: b.id });
+    let lost = false;
+    try {
+      await createProjectInDb(db, { ownerId: b.id.toHexString(), timezone: "Asia/Kolkata", body, idempotencyLock: lockA });
+    } catch (error) {
+      lost = error instanceof IdempotencyLockLostError;
+    }
+    check(
+      "takeover: slow A's transaction rolls back (no project, quota not counted)",
+      lost && (await db.collection("projects").countDocuments({ ownerId: b.id })) === before && (await db.collection("usageCounters").findOne({ ownerId: b.id, kind: "projects" }))?.count === before,
+    );
+    await releaseIdempotency(db, lockA);
+    check("takeover: A's release doesn't delete B's record", (await db.collection("idempotencyKeys").countDocuments({ ownerId: b.id, key: slowKey })) === 1);
+    await createProjectInDb(db, { ownerId: b.id.toHexString(), timezone: "Asia/Kolkata", body, idempotencyLock: lockB });
+    const rec = await db.collection("idempotencyKeys").findOne({ ownerId: b.id, key: slowKey });
+    check("takeover: B saves exactly one project and its answer", (await db.collection("projects").countDocuments({ ownerId: b.id })) === before + 1 && rec?.status === "done" && rec.responseStatus === 201);
+  }
+
+  // --- Control characters are removed before saving (F12 review).
+  r = await createProject(b.cookie, { ...VALID, text: "Control\u0000 chars\u0007 go\tstay" });
+  const ctrl = (await r.json()) as CreatedJson;
+  check("C2: control characters removed (tab kept)", r.status === 201 && ctrl.project?.input?.text === "Control chars go\tstay", JSON.stringify(ctrl.project?.input?.text));
   await clearRateLimits();
 
   // --- Rate limit: 10 per hour per user.
