@@ -10,7 +10,8 @@ import { availableSamples } from "@/lib/voices";
 // F12: topic/notes, Language, Voice and "Create storyboard" (saves the project, C2).
 // F13: ▶ voice samples (static MP3s, components/project/VoicePicker.tsx), only for presets whose
 // MP3 is recorded (checked here on the server; Hindi/Hinglish wait until before F23).
-// Not yet: ✨ Brainstorm with AI (F14), the AI storyboard (F15).
+// F14: ✨ Brainstorm with AI (components/project/BrainstormPanel.tsx, C7).
+// Not yet: the AI storyboard (F15).
 // Language and voice start at the user's defaults (English + Female for new accounts).
 
 export const metadata: Metadata = { title: "New video" };

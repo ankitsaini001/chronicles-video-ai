@@ -1,17 +1,22 @@
 "use client";
 
 import type { VoicePresetId } from "@bytereel/db/voices";
-import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaInputType, ideaProblem } from "@bytereel/db/idea-text";
+import { brainstormIdeaText, cleanIdeaText, fitsBrainstormText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaInputType, ideaProblem } from "@bytereel/db/idea-text";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
 import type { Usage } from "@/lib/account/me";
 import type { Language, VoiceGender } from "@/lib/auth/session";
+import { BrainstormPanel, type PickedIdea } from "./BrainstormPanel";
 import { useVoicePreview } from "./useVoicePreview";
 import { VoicePicker } from "./VoicePicker";
 
-// ① Idea (Stitch "Step 1 Idea", PRD §6.1, API.md C2), without Brainstorm (F14). One box for a
-// topic or pasted notes (up to 5,000 characters), Language chips and Voice choices (single
-// choices; each voice has a ▶ sample, F13), one primary button: Create storyboard.
+// ① Idea (Stitch "Step 1 Idea", PRD §6.1, API.md C2). One box for a topic or pasted notes (up to
+// 5,000 characters), ✨ Brainstorm with AI (F14, BrainstormPanel), Language chips and Voice choices
+// (single choices; each voice has a ▶ sample, F13), one primary button: Create storyboard.
+// Picking a brainstorm idea fills the box with "Title. Hook" and the project is then sent as
+// `inputType: "brainstorm"` with `brainstormChoice { subject, title, hook }` (API.md C2). The
+// creator may still edit the text: it stays a brainstorm idea while it is 3–300 characters; emptied
+// or longer than 300, the choice is dropped and it is sent as a normal topic / notes.
 // The button sends C2 POST /api/v1/projects with an Idempotency-Key. The same key is sent again
 // if the click is repeated with the same idea after a network failure, so a lost answer can never
 // create the project twice. Success → the project's page.
@@ -81,6 +86,8 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
   const [textError, setTextError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<PickedIdea | null>(null);
+  const [announcement, setAnnouncement] = useState("");
   const textRef = useRef<HTMLTextAreaElement>(null);
   const preview = useVoicePreview();
   /** The key of the last click that got no clear answer, and the request it belonged to. */
@@ -103,7 +110,18 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
     if (problem === "too_short") return showTextError(MESSAGES.TOO_SHORT);
     if (problem === "too_long") return showTextError(MESSAGES.TOO_LONG);
 
-    const body = JSON.stringify({ inputType: ideaInputType(idea), text: idea, language, voiceGender });
+    const fromBrainstorm = picked !== null && fitsBrainstormText(idea);
+    const body = JSON.stringify(
+      fromBrainstorm
+        ? {
+            inputType: "brainstorm",
+            text: idea,
+            language,
+            voiceGender,
+            brainstormChoice: { subject: picked.subject, title: picked.idea.title, hook: picked.idea.hook },
+          }
+        : { inputType: ideaInputType(idea), text: idea, language, voiceGender },
+    );
     const key = pendingKey.current?.request === body ? pendingKey.current.key : newIdempotencyKey();
     pendingKey.current = { key, request: body };
 
@@ -153,6 +171,14 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
     }
   }
 
+  function onPick({ subject, idea }: PickedIdea) {
+    setText(brainstormIdeaText(idea.title, idea.hook));
+    setPicked({ subject, idea });
+    setTextError(null);
+    setFormError(null);
+    setAnnouncement(`Added to your idea: ${idea.title}`);
+  }
+
   const count = cleanIdeaText(text).length;
   const over = count > MAX_CHARS;
 
@@ -178,6 +204,8 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
           onChange={(e) => {
             setText(e.target.value);
             if (textError) setTextError(null);
+            // An emptied (or over 300 characters) box is no longer the picked AI idea.
+            if (picked && !fitsBrainstormText(cleanIdeaText(e.target.value))) setPicked(null);
           }}
           disabled={busy}
           aria-invalid={textError ? true : undefined}
@@ -194,10 +222,15 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
           {textError}
         </p>
       )}
-      <p id="idea-text-help" className="mt-2 mb-7 text-xs text-muted">
+      <p id="idea-text-help" className="mt-2 mb-5 text-xs text-muted">
         Type a topic, or paste your notes (up to 5,000 characters).
         {count === MAX_CHARS && <span className="text-warning"> You&apos;ve reached the limit.</span>}
         {over && <span className="text-danger"> That&apos;s {(count - MAX_CHARS).toLocaleString("en-US")} too many. Please shorten it.</span>}
+      </p>
+
+      <BrainstormPanel language={language} ideaText={text} picked={picked?.idea ?? null} onPick={onPick} timezone={timezone} disabled={busy} />
+      <p aria-live="polite" className="sr-only">
+        {announcement}
       </p>
 
       <ChoiceChips
