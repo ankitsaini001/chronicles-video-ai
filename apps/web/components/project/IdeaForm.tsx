@@ -5,10 +5,12 @@ import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
 import type { Usage } from "@/lib/account/me";
 import type { Language, VoiceGender } from "@/lib/auth/session";
+import { useVoicePreview } from "./useVoicePreview";
+import { VoicePicker } from "./VoicePicker";
 
-// ① Idea (Stitch "Step 1 Idea", PRD §6.1, API.md C2), without Brainstorm (F14) and voice
-// previews (F13). One box for a topic or pasted notes (up to 5,000 characters), Language and Voice
-// chips (single choices), one primary button: Create storyboard.
+// ① Idea (Stitch "Step 1 Idea", PRD §6.1, API.md C2), without Brainstorm (F14). One box for a
+// topic or pasted notes (up to 5,000 characters), Language chips and Voice choices (single
+// choices; each voice has a ▶ sample, F13), one primary button: Create storyboard.
 // The button sends C2 POST /api/v1/projects with an Idempotency-Key. The same key is sent again
 // if the click is repeated with the same idea after a network failure, so a lost answer can never
 // create the project twice. Success → the project's page.
@@ -32,11 +34,6 @@ const LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
     ),
   },
   { value: "hinglish", label: "Hinglish" },
-];
-
-const VOICE_OPTIONS: readonly ChoiceOption<VoiceGender>[] = [
-  { value: "female", label: "Female voice" },
-  { value: "male", label: "Male voice" },
 ];
 
 const MESSAGES = {
@@ -82,6 +79,7 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const preview = useVoicePreview();
   /** The key of the last click that got no clear answer, and the request it belonged to. */
   const pendingKey = useRef<{ key: string; request: string } | null>(null);
 
@@ -106,6 +104,7 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
     const key = pendingKey.current?.request === body ? pendingKey.current.key : newIdempotencyKey();
     pendingKey.current = { key, request: body };
 
+    preview.stop();
     setBusy(true);
     let response: Response;
     try {
@@ -198,8 +197,19 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         {over && <span className="text-danger"> That&apos;s {(count - MAX_CHARS).toLocaleString("en-US")} too many. Please shorten it.</span>}
       </p>
 
-      <ChoiceChips label="Language" options={LANGUAGE_OPTIONS} value={language} onChange={setLanguage} disabled={busy} className="mb-6" />
-      <ChoiceChips label="Voice" options={VOICE_OPTIONS} value={voiceGender} onChange={setVoiceGender} disabled={busy} className="mb-10" />
+      <ChoiceChips
+        label="Language"
+        options={LANGUAGE_OPTIONS}
+        value={language}
+        onChange={(next) => {
+          // A sample of the old language must not keep playing (F13).
+          preview.stop();
+          setLanguage(next);
+        }}
+        disabled={busy}
+        className="mb-6"
+      />
+      <VoicePicker language={language} value={voiceGender} onChange={setVoiceGender} preview={preview} disabled={busy} className="mb-10" />
 
       {formError && (
         <div role="alert" className="mb-5 rounded-2xl border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-text">

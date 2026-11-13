@@ -7,7 +7,8 @@ import { requireUser } from "@/lib/auth/session";
 
 // ① Idea (Stitch "ByteReel — Step 1 Idea", ARCHITECTURE §11 `/projects/new`).
 // F12: topic/notes, Language, Voice and "Create storyboard" (saves the project, C2).
-// Not yet: ✨ Brainstorm with AI (F14), ▶ voice previews (F13), the AI storyboard (F15).
+// F13: ▶ voice samples (static MP3s, components/project/VoicePicker.tsx).
+// Not yet: ✨ Brainstorm with AI (F14), the AI storyboard (F15).
 // Language and voice start at the user's defaults (English + Female for new accounts).
 
 export const metadata: Metadata = { title: "New video" };
