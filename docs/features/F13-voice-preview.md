@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | 🔄 In progress (English samples work; the 4 Hindi/Hinglish samples wait for the founder: the Hindi voices need a paid ElevenLabs plan, see below) |
+| **Status** | 🧪 Testing (English now, Hindi/Hinglish later: founder, 2026-11-13; waiting for the code review and the founder's test) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F12 |
 | **Design** | Stitch: ByteReel — Step 1 Idea (▶ next to Female voice / Male voice) |
-| **Data (MongoDB / storage)** | — (6 static MP3 files in `apps/web/public/voices/`) |
+| **Data (MongoDB / storage)** | — (static MP3 files in `apps/web/public/voices/`: 2 English now, 4 Hindi/Hinglish later) |
 | **API endpoints** (docs/API.md) | B4 |
 
 ## Goal
@@ -34,17 +34,16 @@ Working ▶ buttons on the Idea screen.
 ## Steps
 - [x] **1. Shared voice list** (`0d92cfd`): `packages/db/src/voices.ts` → `VOICE_PRESET_LIST` (6 presets: language, gender, label, sample URL, sentence; no voice names or IDs). One list for the Idea screen, B4 and the recorder. A test keeps it equal to the pipeline's presets.
 - [x] **2. One-time recorder** `npm run voices:samples` (`d66ad7a`, `tools/cli/voice-samples.ts`): same ElevenLabs model, voice settings and seed as real videos, 64 kbps MP3 (small). Skips files that already exist (`--force` to redo), shows the characters first and refuses above 600, checks every setting before the first call, ONE call per file (no retries), stops at the first failure. Never prints keys or voice IDs.
-- [ ] **3. Record the 6 samples** — 2 of 6 done (`30ed871`): `indian-english-female.mp3` (29.8 KB, 3.8 s) and `indian-english-male.mp3` (38.6 KB, 4.9 s). Hindi female failed with ElevenLabs 402 "Free users cannot use library voices via the API"; the recorder stopped at once. **Founder decision needed** (below).
+- [x] **3. Record the samples** — English done (`30ed871`): `indian-english-female.mp3` (29.8 KB, 3.8 s) and `indian-english-male.mp3` (38.6 KB, 4.9 s). Hindi female was refused with ElevenLabs 402 "Free users cannot use library voices via the API"; the recorder stopped at once. Founder chose **English now, Hindi later**: the 4 Hindi/Hinglish files are recorded after the voice-plan decision (a MUST before F23).
 - [x] **4. B4 `GET /api/v1/voices`** (`648a637`): signed-in creators, optional `?language=en|hi|hinglish` (anything else → 400), shared 300/min read limit, `enabled: true` for all until I12.
 - [x] **5. ▶ buttons on the Idea screen** (`9e14ded`): a round ▶ right after Female voice and Male voice plays the sample for the chosen language from the static MP3. One plays at a time; pressing it again stops (■); changing the language stops it. While playing, the sentence is shown under the voices (Hindi in `lang="hi"`, Hinglish in `lang="hi-Latn"`). The Voice choice is now a group of real radio buttons (a ▶ button may not sit inside a chip or a radiogroup); it looks and works the same (←/→ choose). With Hindi chosen, the labels read "महिला आवाज़ (Female)" / "पुरुष आवाज़ (Male)" (API.md labels).
-- [x] **6. End-to-end check** (`6eed97b`): `tools/e2e/f13-voices.ts` (B4 over HTTP, the MP3s, the ▶ buttons, no ElevenLabs in any page script); the F12 check follows the new Voice markup. Test database only.
+- [x] **6. End-to-end check** (`6eed97b`, `f06ae5b`): `tools/e2e/f13-voices.ts` (B4 over HTTP, the MP3s, the ▶ buttons, no ElevenLabs in any page script); the F12 check follows the new Voice markup. Test database only.
+- [x] **7. ▶ only where a sample exists** (`cc654d9`): the server checks which MP3s are in `public/voices/` (not empty; looked at again at most once a minute) and the Idea screen shows ▶ only for those; B4 gives `sampleUrl: null` for the others. Recording the Hindi files later turns their ▶ on with no code change. The files are included with the server code, so the check also works on Vercel.
 
-### Founder decision needed: Hindi voices
-The two Hindi voice IDs in `.env` are ElevenLabs **"professional" library voices**. On the free plan the API refuses them (402), so the Hindi/Hinglish samples can't be recorded, and **Hindi/Hinglish videos would fail the same way later (F23)**. The English voices are free "premade" voices, which is why they worked (note: ElevenLabs labels both English voices' accent as *british*, not Indian; worth a listen).
-Options:
-1. **Pick free voices for Hindi** (premade voices usable on the free plan), put their IDs in `ELEVENLABS_VOICE_ID_HINDI_FEMALE` / `_MALE`, then run `npm run voices:samples` (it records only the 4 missing files, about 202 characters).
-2. **Upgrade ElevenLabs** (costs money every month; against the zero-spend rule for V1).
-Until then the Hindi/Hinglish ▶ shows "Couldn't play this sample. Please try again."
+### Hindi voices: English now, Hindi later (founder, 2026-11-13)
+The two Hindi voice IDs in `.env` are ElevenLabs **"professional" library voices**; the free plan's API refuses them (402), and the free premade voices are all American/British/Australian (founder checked). So for now only the English ▶ buttons show; with Hindi or Hinglish chosen the voices are there without ▶.
+**MUST before F23** (also in F23 and the tracker's *Open decisions*): decide the Hindi/Hinglish voice plan — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing files (about 202 characters).
+Also: ElevenLabs labels both "Indian English" voices with a *British* accent. Please listen to the two samples and decide if they're good enough.
 
 ### Characters spent
 110 of the about 450 approved (2 English samples × 55). The refused Hindi call was not charged (account read afterwards: 110 / 10,000 used). The 4 remaining samples need about 202 more (48 + 48 + 53 + 53), 312 in total.
@@ -58,10 +57,11 @@ Until then the Hindi/Hinglish ▶ shows "Couldn't play this sample. Please try a
 ### How to try it (founder)
 1. `npm run dev`, log in, press **Create your first reel**.
 2. English chosen: press ▶ next to Female voice, then next to Male voice (the first stops). Press ■ to stop. Switch the language while playing: it stops.
-3. Phone: same, the sound starts on the tap.
+3. Choose हिंदी Hindi or Hinglish: the voices show without ▶ (no samples yet).
+4. Phone: same, the sound starts on the tap. Please also listen for the accent of the two English voices.
 
 ## How we test it (done when all are ticked)
-- [ ] Each ▶ plays the right language and gender (English: e2e checks the right file is served; your ears decide. Hindi/Hinglish: after the voice decision)
+- [ ] Each ▶ plays the right language and gender (English now; Hindi/Hinglish show no ▶ until their samples are recorded before F23)
 - [x] No ElevenLabs call happens when you click ▶ (only the static MP3 is loaded; e2e: no page script mentions ElevenLabs)
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
@@ -71,3 +71,4 @@ Until then the Hindi/Hinglish ▶ shows "Couldn't play this sample. Please try a
 |---|---|
 | 2026-11-13 | Started. Founder decided: 6 samples (Hinglish says its own sentence with the Hindi voices), the three sentences above, about 450 ElevenLabs characters, one time. |
 | 2026-11-13 | Built steps 1, 2, 4, 5, 6. Recorded 2 of 6 samples (English, 110 characters); Hindi refused by ElevenLabs (402: library voices need a paid plan), recorder stopped as designed. 526 unit tests, typecheck and `next build` pass; e2e F13 (all pass, 4 Hindi/Hinglish files skipped) and F12 (68/68) on `bytereel_test` (dropped afterwards). Waiting for the founder's Hindi voice decision, then the code review. |
+| 2026-11-13 | Founder chose **English now, Hindi later** (free premade voices are all American/British/Australian). Spent so far: **110 characters** (Hindi refused with 402 "Free users cannot use library voices via the API", not charged). ▶ now shows only for presets whose MP3 exists (server file check); B4 `sampleUrl: null` otherwise; API.md/openapi updated; MUST added to F23 and the tracker. 530 unit tests, typecheck and `next build` pass; e2e F13 and F12 (68/68) pass on `bytereel_test` (dropped afterwards). Status 🧪, waiting for the code review and the founder's test. |
