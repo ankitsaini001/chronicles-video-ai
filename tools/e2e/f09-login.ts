@@ -180,6 +180,18 @@ async function main(): Promise<void> {
   check("12 failures at the same moment: count 12, locked once at the 10th", u4?.failedLoginCount === 12 && u4?.lockedUntil instanceof Date && u4.lockedUntil.getTime() > Date.now());
   await db.collection("user").updateOne({ email }, { $set: { failedLoginCount: 0, lockedUntil: null } });
 
+  // --- A session that already exists stops counting once the account isn't active (F09 review).
+  await clearRateLimits();
+  r = await signIn({ email, password });
+  const liveCookie = cookieOf(r);
+  await db.collection("user").updateOne({ email }, { $set: { status: "suspended" } });
+  r = await page("/dashboard", liveCookie);
+  check("existing session of a suspended user: /dashboard → /login", redirectsTo(r, "/login"), `${r.status} ${r.headers.get("location")}`);
+  html = await (await page("/", liveCookie)).text();
+  check("existing session of a suspended user: header shows 'Log in', no name", /href="\/login"/.test(html) && !html.includes("E2E Tester"));
+  await db.collection("user").updateOne({ email }, { $set: { status: "active" } });
+  await db.collection("session").deleteMany({ userId: u4?._id });
+
   // --- Paused / deleting accounts.
   for (const status of ["suspended", "deleting"]) {
     await clearRateLimits();
