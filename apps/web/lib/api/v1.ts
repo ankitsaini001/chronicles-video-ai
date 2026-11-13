@@ -40,6 +40,13 @@ export interface ApiContext {
   requestId: string;
 }
 
+// TODO (F11 review), before the first POST/PATCH endpoint (B2 or C2), add as ApiEndpoint options,
+// enforced in handleApiRequest:
+//   - JSON Content-Type required for bodies → 400 INVALID_INPUT (API.md §3.6)
+//   - 64 KB body cap → 413 PAYLOAD_TOO_LARGE, counted while streaming (like readTextUpTo in
+//     lib/auth/handler.ts), also without Content-Length (API.md §2)
+//   - Origin check opt-out, only for the Meta callbacks / anonymous J3 (verified by signature)
+//   - admin role check for /api/v1/admin/* → 403 FORBIDDEN, details.reason "admin_only"
 export interface ApiEndpoint {
   /** The short-window limit for this endpoint (API.md §10.3), counted per user. */
   rateLimit: RateLimitRule;
