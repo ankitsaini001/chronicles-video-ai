@@ -15,6 +15,7 @@
     "dev": "npm run dev -w @bytereel/web",
     "pipeline": "tsx tools/cli/index.ts",
     "db": "tsx tools/cli/db.ts",
+    "voices:samples": "tsx tools/cli/index.ts voice-samples",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @bytereel/web",
