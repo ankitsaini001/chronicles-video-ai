@@ -1,12 +1,13 @@
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cn } from "./cn";
 
 // Selectable chip (pill) for choices like language and voice (docs/BRAND.md §5, Stitch "Step 1 Idea").
 // Unselected: surface-2 + thin line. Selected: amber border + warm amber-tinted background.
-// `selected` is announced to screen readers via aria-pressed. When a set of chips is a single
-// choice (language, voice), wrap them in a labelled role="radiogroup" in the screen that uses them.
+// `selected` is announced to screen readers via aria-pressed (an on/off toggle). With
+// role="radio" it is announced via aria-checked instead: single choices (language, voice) use
+// <ChoiceChips>, which wraps radio chips in a labelled role="radiogroup" with arrow-key moves.
 
-type ChipProps = Omit<ComponentPropsWithoutRef<"button">, "children"> & {
+type ChipProps = Omit<ComponentPropsWithRef<"button">, "children"> & {
   selected?: boolean;
   /** Optional leading icon, e.g. "▶" for a voice preview. */
   icon?: ReactNode;
@@ -14,11 +15,13 @@ type ChipProps = Omit<ComponentPropsWithoutRef<"button">, "children"> & {
 };
 
 export function Chip({ selected = false, icon, className, children, type = "button", ...props }: ChipProps) {
+  const isRadio = props.role === "radio";
   return (
     <button
       {...props}
       type={type}
-      aria-pressed={selected}
+      aria-pressed={isRadio ? undefined : selected}
+      aria-checked={isRadio ? selected : undefined}
       className={cn(
         "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition",
         "disabled:pointer-events-none disabled:opacity-50",
