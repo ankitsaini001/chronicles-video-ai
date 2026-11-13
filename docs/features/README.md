@@ -44,7 +44,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 |---|---|---|---|
 | F04 | [Database design document (doc only)](F04-database-design-doc.md) | — | ✅ Done |
 | F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ✅ Done |
-| F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ⬜ Not started |
+| F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | 🔄 In progress |
 | F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ⬜ Not started |
 | F08 | [Sign up](F08-sign-up.md) | F07 | ⬜ Not started |
 | F09 | [Log in and log out](F09-log-in-out.md) | F08 | ⬜ Not started |

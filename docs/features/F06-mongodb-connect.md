@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F05 |
 | **Design** | — |
@@ -27,21 +27,22 @@ A small dev-only check page/command that writes and reads one test record.
 - —
 
 ## Steps
-- [ ] Install the MongoDB driver
-- [ ] Add the db client
-- [ ] Add the health check
-- [ ] Run it
+- [x] Install the MongoDB driver
+- [x] Add the db client
+- [x] Add the health check
+- [x] Run it
 - [ ] Founder sees the record in Atlas
 - [ ] Clean up: delete the test record and drop `healthchecks` (only after the founder has seen it)
 
 ## How we test it (done when all are ticked)
 - [ ] Founder opens Atlas → Browse Collections and sees the test record
-- [ ] App shows a clear error if the database is unreachable
-- [ ] Missing `MONGODB_URI` shows a clear message (no crash dump)
-- [ ] Code review passed (code-reviewer agent)
+- [x] App shows a clear error if the database is unreachable
+- [x] Missing `MONGODB_URI` shows a clear message (no crash dump)
+- [x] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
 | | |
+| 2026-11-13 | Built in one go. New `packages/db` (`@bytereel/db`): settings check (`readDbConfig`, catches missing value, `<db_password>` left in, raw special characters in the password, a port on `+srv`), one shared client on `globalThis`, plain-language errors (auth, bad connection string, DNS/SRV lookup, unreachable/Network Access, TLS, index conflict), health check (one fixed record in `bytereel.healthchecks`), cleanup, ping, and the index list for F07/F08 with `ensureIndexes` (not applied yet: F07/F08 apply their own). `npm run db -- check | ping | cleanup | indexes`. Web: `next.config.ts` loads the root `.env` (`process.loadEnvFile`; `@next/env` caches and did nothing), `instrumentation.ts` prints a clear box when a setting is wrong while public pages keep working. Driver `mongodb@7.7.0`, one copy at the root (also listed by the web app for F08). Checks: ping Pune → Mumbai ~9 ms; 5 failure cases give clear messages and never show the password; a temporary web route using the driver built without warnings and answered ok (removed again); no connection string in `.next/static`; 240 tests pass (54 for the database), typecheck clean. Code review: 1 must-fix (badly formatted connection string crashed the command) and 5 should-fixes, all fixed. Test record written to Atlas, waiting for the founder to see it. |
