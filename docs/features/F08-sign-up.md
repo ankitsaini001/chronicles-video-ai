@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔄 In progress |
+| **Status** | 🧪 Testing |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F07 |
 | **Design** | Stitch: ByteReel — Sign up |
@@ -49,10 +49,11 @@ The 'ByteReel — Sign up' screen.
 - [x] Better Auth's real `user`/`session`/`account` documents match DATABASE.md §4.1–4.3 (Q17); the doc is updated if not
 - [x] Check whether the adapter stores `userId` as an ObjectId or a string; if a string, `packages/db` converts consistently (DATABASE.md §4 "Better Auth fields")
 - [x] Check whether the adapter created any indexes; the required ones exist (Atlas → collection → Indexes)
-- [ ] Code review passed (code-reviewer agent)
+- [x] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
 | 2026-11-13 | Built steps 1–9 in 9 commits. 353 tests pass (82 new), typecheck and `next build` clean, no secret in the browser files, one `mongodb` copy. End-to-end: 35/35 checks pass against `bytereel_test` (then dropped). The e2e found that a made-up `X-Forwarded-For` header gave fresh sign-up attempts under `next start`; fixed (header trusted only on Vercel). Q17: fields match, `userId` is an ObjectId, the adapter creates no indexes. Waiting for code review and the founder's own sign-up |
+| 2026-11-13 | Code review: the reviewer agent failed twice on an API outage (403 from the AI service), so the main session reviewed handler.ts, endpoints.ts, create-auth.ts, server.ts, route.ts, config.ts, rate-limit.ts and markInviteSignedUp directly. No must-fix: exact-path lockdown (encoded/trailing-slash/other-method → 404), Origin check (missing/`null`/foreign origin refused), role/status forced twice (strict body + hook), invite link stored as ObjectId once, atomic fixed-window counter with E11000 retry, secret never logged. **Known gap for F09 (before any deploy):** sign-in (A2) has no rate limit or lockout yet. change-password (needs a session) and reset-password (no way to create tokens until F35) stay on Better Auth defaults behind the lockdown. 353 tests pass, typecheck clean. Waiting for the founder to create their account. |

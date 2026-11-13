@@ -22,6 +22,8 @@ The 'ByteReel — Log in' screen and a Log out option.
 - 'Forgot your password? Contact the ByteReel team.' text (no email in V1)
 - Pages that need login redirect to /login
 
+- **Must, before any deploy (from the F08 review):** sign-in (A2) rate limits and the 10-failure lockout (API.md §3.7) using `hitRateLimit` in packages/db; sign-in currently has none
+
 ## Not in this feature
 - —
 
