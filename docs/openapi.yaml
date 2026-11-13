@@ -919,7 +919,8 @@ paths:
       description: |
         D3. Inline narration edit → new `user_edit` plan version (re-validated, re-hashed); the approval is
         reset. Saved even if validation fails (validation.valid = false). **expectedStateVersion required.**
-        Allowed in storyboard_ready, generate_failed, video_ready with no active job. Rate limit 60/min.
+        Allowed in storyboard_ready, generate_failed, video_ready, scheduled with no active job. A scheduled
+        post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
       tags: [Storyboard]
       security:
@@ -964,7 +965,7 @@ paths:
     post:
       operationId: changeVoice
       summary: Switch the narrator voice (new user_edit version)
-      description: D4. Male ↔ Female; only voicePreset changes. **expectedStateVersion required.** Same states as D3. 400 when the gender is unchanged. Rate limit 60/min.
+      description: D4. Male ↔ Female; only voicePreset changes. **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled; the scheduled post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1017,6 +1018,8 @@ paths:
       description: |
         D5. Starts a `revise` job; on success a new `ai_revision` version becomes current and the project
         returns to storyboard_ready (approve again). Ambiguous requests end `rejected` with an assistantReply.
+        A scheduled post's approval is cancelled immediately when the revision is requested (approval_invalidated
+        + notification), not when the revise job succeeds (PRD §7).
         **Idempotency-Key and expectedStateVersion required.** Rate limit 20/hour; quota 20 plan+revision
         requests per project (429, resetsAt null); 503 SPEND_CEILING.
       tags: [Storyboard]

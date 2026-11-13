@@ -658,6 +658,7 @@ If `media_publish` times out or the network fails, the outcome is **unknown**: w
 | Race | Handling |
 |---|---|
 | Video re-rendered or caption changed after scheduling | The approval snapshot no longer matches → `approval_invalidated`; the creator is notified to re-approve; the job won't publish |
+| Revision, narration edit, voice switch, undo or caption fix requested while a post is scheduled | The request itself moves the post to `approval_invalidated` in the same transaction (before any job runs) and notifies the creator; the post never waits for the job's result |
 | Instagram disconnected/reconnected to another account | `igUserId` mismatch → invalidated |
 | User cancels while the job sleeps | `cancelOn` + state check → no publish |
 | Double-click "Publish now" | Unique `publishKey` → one post |
@@ -674,7 +675,7 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Approval | Bound to | Created by | Checked at | Invalidated by |
 |---|---|---|---|---|
 | **Storyboard** | `planVersionId` + `planHash` | `approveStoryboard` (the creator only) | start of `generate-video` | Any new plan version (edit, revision, undo) |
-| **Publish** | `renderId` + `mp4Sha256` + `connectionId` + `igUserId` + `captionHash` | `publishNow` / `schedulePost` (the creator only) | **immediately before** container creation **and** before `media_publish` | Re-render, caption change, disconnect/reconnect, account change |
+| **Publish** | `renderId` + `mp4Sha256` + `connectionId` + `igUserId` + `captionHash` | `publishNow` / `schedulePost` (the creator only) | **immediately before** container creation **and** before `media_publish` | Re-render, caption change, disconnect/reconnect, account change, and **any change requested on the project** (revision, narration edit, voice switch, undo, caption fix): cancelled immediately when the change is requested, not when its job finishes (PRD §7) |
 
 **Implementation guarantees**
 - Approvals are separate immutable documents/snapshots; the model and background jobs can never create them.
