@@ -835,7 +835,7 @@ paths:
     post:
       operationId: brainstormIdeas
       summary: Brainstorm video ideas with AI
-      description: C7. Synchronous Gemini call (30 s timeout) returning 5–8 ideas; nothing stored. Rate limit 10/hour. 422 PROVIDER_REJECTED; 503 PROVIDER_BUSY / SPEND_CEILING.
+      description: 'C7. Synchronous Gemini call (30 s overall, at most 2 quick retries for busy errors and 1 repair of an invalid answer) returning exactly 5 ideas in the requested language; nothing stored, no project, no Idempotency-Key. Limits per user: 10 per hour (429 RATE_LIMITED) and 30 per day in the user timezone (429 QUOTA_EXCEEDED brainstorms_per_day); a refused request never reaches Gemini. Every Gemini request is logged in providerUsage (operation brainstorm), never the subject. 422 PROVIDER_REJECTED (safety block, or the model finds no safe educational video); 503 PROVIDER_BUSY (busy after the retries, 30 s reached, or no valid answer after the repair; Retry-After: 60). 503 SPEND_CEILING / MAINTENANCE arrive with F27/F36.'
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -878,20 +878,32 @@ paths:
                 $ref: '#/components/schemas/Error'
               examples:
                 rejected:
-                  $ref: '#/components/examples/ErrProviderRejected'
+                  $ref: '#/components/examples/ErrBrainstormRejected'
         '429':
-          $ref: '#/components/responses/RateLimited'
+          description: RATE_LIMITED (10 per hour, Retry-After) or QUOTA_EXCEEDED (30 brainstorms per day, details.resetsAt).
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                quotaBrainstorms:
+                  $ref: '#/components/examples/ErrQuotaBrainstorms'
+                rateLimited:
+                  $ref: '#/components/examples/ErrRateLimited'
         '500':
           $ref: '#/components/responses/Internal'
         '503':
-          description: PROVIDER_BUSY, SPEND_CEILING or MAINTENANCE.
+          description: PROVIDER_BUSY (with Retry-After), SPEND_CEILING or MAINTENANCE.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
               examples:
                 busy:
-                  $ref: '#/components/examples/ErrProviderBusy'
+                  $ref: '#/components/examples/ErrBrainstormBusy'
 
   # =============================== Storyboard ===============================
   /api/v1/projects/{projectId}/plan-versions:
@@ -3280,15 +3292,18 @@ components:
       properties:
         id:
           type: string
-          pattern: '^idea-[1-8]$'
+          pattern: '^idea-[1-5]$'
         title:
           type: string
+          minLength: 3
           maxLength: 120
         hook:
           type: string
+          minLength: 3
           maxLength: 200
         angle:
           type: string
+          minLength: 3
           maxLength: 200
     PostSummary:
       type: object
@@ -4313,6 +4328,7 @@ components:
           type: string
           minLength: 2
           maxLength: 100
+          description: Counted after removing control characters, Unicode NFC and trimming (like the idea text).
         language:
           $ref: '#/components/schemas/Language'
     NarrationEditRequest:
@@ -4587,7 +4603,7 @@ components:
         ideas:
           type: array
           minItems: 5
-          maxItems: 8
+          maxItems: 5
           items:
             $ref: '#/components/schemas/BrainstormIdea'
     DeletionAccepted:
@@ -5045,6 +5061,18 @@ components:
       summary: Gemini busy
       value:
         error: { code: PROVIDER_BUSY, message: Our AI is very busy right now. Your idea is saved; please try again in a few minutes., requestId: req_01JCXM1V4W5X }
+    ErrBrainstormBusy:
+      summary: Gemini busy (brainstorm; no project exists)
+      value:
+        error: { code: PROVIDER_BUSY, message: Our AI is very busy right now. Please try again in a few minutes., requestId: req_01JCXM1V4W6Y }
+    ErrBrainstormRejected:
+      summary: Unsafe brainstorm subject
+      value:
+        error: { code: PROVIDER_REJECTED, message: "We can't suggest ideas for this subject. Please try a different one.", requestId: req_01JCXKZZ0007 }
+    ErrQuotaBrainstorms:
+      summary: Daily brainstorm limit reached
+      value:
+        error: { code: QUOTA_EXCEEDED, message: "You've used today's 30 brainstorms. Try again tomorrow.", details: { quota: brainstorms_per_day, limit: 30, used: 30, resetsAt: '2026-11-12T18:30:00.000Z' }, requestId: req_01JCXM3A7B8D }
     ErrProviderRejected:
       summary: Unsafe topic
       value:

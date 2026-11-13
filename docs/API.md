@@ -398,7 +398,7 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 | `APPROVAL_STALE` **§12.4** | 409 | The approval doesn't match current data: `planVersionId` not current / `planHash` differs; or publish `renderId` not current / `mp4Sha256` differs / connection changed | D8, H2, H6 |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | Same `Idempotency-Key` with a different request body/path | idempotent endpoints |
 | `IDEMPOTENCY_IN_PROGRESS` | 409 | The first request with this key is still being processed; retry in a moment | idempotent endpoints |
-| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions). Caption fixes (F4) never return it (decision #24a) | C2, D5, D8 |
+| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, brainstorms/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions). Caption fixes (F4) never return it (decision #24a) | C2, C7, D5, D8 |
 | `RATE_LIMITED` | 429 | Too many requests in a short window; `Retry-After` header + `details.retryAfterSeconds` | all |
 | `SPEND_CEILING` **§12.4** | 503 | A global provider spend ceiling was reached; new generations are paused, existing videos stay available | C2, D5, D8, F4, C7, H1 |
 | `MAINTENANCE` | 503 | Admin turned on maintenance mode; reads still work | all mutations except admin |
@@ -422,9 +422,11 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 
 | Code / situation | Message | Button |
 |---|---|---|
-| `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for C7/H1) |
+| `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for H1) |
+| `PROVIDER_BUSY` (C7 brainstorm: no project exists, so nothing is "saved") | **"Our AI is very busy right now. Please try again in a few minutes."** | **Get ideas** again (re-send C7) |
 | `PROVIDER_BUSY` (ElevenLabs) | "Voice service busy. Please try again in a few minutes." | Retry |
 | `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea (C4 with `text`, then E2) |
+| `PROVIDER_REJECTED` (C7 brainstorm) | "We can't suggest ideas for this subject. Please try a different one." | — (type another subject) |
 | `PROVIDER_UNAVAILABLE` | "Voice service unavailable right now. We've been notified." | — |
 | `PLAN_INVALID` (job) | "Couldn't build a good storyboard, try rephrasing." | Edit idea (C4 with `text`, then E2) / Try again (E2) |
 | `PLAN_INVALID` (approve) | "Some scenes need fixing before you can approve." + issues per scene | — |
@@ -621,6 +623,7 @@ Idempotent-Replayed: true
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
 | Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count. **Counted and enforced since F12** (inside C2's transaction, so concurrent clicks can't pass 5) | same | `quota: projects_per_day` |
 | Plan + revision requests per project | 20 | C2 (counts 1), each D5 accepted, and each plan retry after an Edit idea (C4 → E2); stored in `projects.planRequestCount` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Brainstorms (C7) per user per day | 30 | C7 accepted (after the 10/hour check and the body check, before Gemini); busy or refused answers still count. Not in a transaction: one atomic "add 1 while under 30" on the counter (F14) | 00:00 in the user's timezone | `quota: brainstorms_per_day` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
 Current usage is in `GET /api/v1/me` → `usage`.
@@ -635,7 +638,7 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | Auth (A1, A2, A5, A6) | see §3.7 |
 | Polling reads (C6, E1, H4) | 120 / min |
 | Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
-| C7 brainstorm, H1 caption suggestions | 10 / hour each |
+| C7 brainstorm, H1 caption suggestions | 10 / hour each (C7 also 30 / day, §10.1) |
 | C2 create project | 10 / hour (plus the daily quota) |
 | D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min |
 | D5 revision | 20 / hour |
@@ -1028,7 +1031,7 @@ Errors: `400 INVALID_INPUT` · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503
 **Until F15 (built in F12, no AI yet).** C2 saves the project but starts no job. Differences from the spec above:
 - Effect (one transaction): `usageCounters.projects +1` (only while within 5/day, otherwise `429 QUOTA_EXCEEDED` and nothing is saved), insert `projects` with **state `draft`**, `stateVersion 1`, **`planRequestCount: 0`**, `activeJobId: null`, `title` = the first 120 characters of the idea (spaces and line breaks collapsed), and the answer saved on the `Idempotency-Key` record. No `jobs` document, no Inngest event.
 - Success **`201`** → `{ project: Project, job: null }` (`currentStep: "idea"`, `activeJobType: null`, `allowedActions: []` until rename/archive and the job actions exist).
-- The UI sends `inputType: "topic"` when the trimmed text is ≤ 300 characters and `"notes"` above that (one box for both, PRD §6.1). `brainstorm` is accepted by the validator but no screen sends it until F14.
+- The UI sends `inputType: "topic"` when the trimmed text is ≤ 300 characters and `"notes"` above that (one box for both, PRD §6.1). **Since F14**, after the creator picks a C7 idea, the box holds "Title. Hook" (only the title if both together are over 300 characters) and the UI sends `inputType: "brainstorm"` with `brainstormChoice { subject, title, hook }` copied from the idea. The creator may still edit the text: it stays `brainstorm` while it is 3–300 characters; emptied or over 300, the choice is dropped and the text is sent as `topic`/`notes`.
 - No `503 SPEND_CEILING` / `MAINTENANCE` yet (they arrive with the `settings` document, F27/F36).
 - After success the UI goes to the temporary project page **`/projects/[id]`** (owner only; another user's project, a missing one or a malformed id → the same 404 page). F15/F16 turn it into a redirect to the project's current step.
 - F15 switches to the full spec: state `planning`, the queued `plan` job in the same transaction, `planRequestCount: 1`, `202` with the job.
@@ -1153,10 +1156,17 @@ Success `200` → `ProjectStatus`. Errors: `404 NOT_FOUND`.
 ```
 
 #### C7. `POST /api/v1/brainstorm` — Brainstorm with AI
-Purpose: ① *✨ Brainstorm with AI*: a broad subject → 5–8 focused video ideas with hooks (synchronous Gemini call, 30 s timeout, ARCHITECTURE §14). Doesn't create a project or count toward quotas; logged in `providerUsage`. Auth: creator. Rate: 10/hour.
-Body: `subject` string 2–100 (required) · `language` `Language` (required; ideas are written in that language).
-Success `200` → `{ subject, language, ideas: [{ id: "idea-1"…, title (≤120), hook (≤200), angle (≤200) }] }` (5–8 ideas). Not stored: the UI keeps them until the user picks one and calls C2 with `inputType: "brainstorm"`.
-Errors: `400 INVALID_INPUT` · `422 PROVIDER_REJECTED` (unsafe subject) · `503 PROVIDER_BUSY` · `503 SPEND_CEILING`.
+Purpose: ① *✨ Brainstorm with AI*: a broad subject → **exactly 5** focused video ideas with hooks (founder, 2026-11-13; synchronous Gemini call, ARCHITECTURE §14). Doesn't create a project and doesn't count toward the projects quota. Auth: creator. **Limits per user: 10 per hour and 30 per day** (§10.1, §10.3; founder, 2026-11-13). **No Idempotency-Key** (C7 starts no job and saves nothing, §6); a header that is sent is ignored. **Built in F14.**
+Body (strict, unknown fields → 400): `subject` string 2–100, counted after the idea-text cleaning (control characters removed, NFC, trim; §2) · `language` `Language` (required; ideas are written in that language: `hi` in Devanagari, `hinglish` in Roman script).
+Success `200` → `{ subject, language, ideas: [{ id: "idea-1"…"idea-5", title (3–120), hook (3–200), angle (3–200) }] }` (exactly 5; `subject` is the cleaned subject). Not stored: the UI keeps them until the user picks one and calls C2 with `inputType: "brainstorm"`.
+Errors: `400 INVALID_INPUT` · `429 RATE_LIMITED` (11th in the hour) · `429 QUOTA_EXCEEDED` (`quota: brainstorms_per_day`, `limit`, `used`, `resetsAt` = next midnight in the user's timezone) · `422 PROVIDER_REJECTED` · `503 PROVIDER_BUSY` (header `Retry-After: 60`) · `500 INTERNAL` (Gemini not set up, key/model refused: details only in the server log) · `503 SPEND_CEILING` / `MAINTENANCE` (not yet: F27/F36, see "How it works").
+
+**How it works (F14)**
+- Order: Origin → session → 10/hour (`rateLimits`, counted for every request, also refused ones) → body → 30/day (`usageCounters` kind `brainstorms`, the user's day; counted once the request is accepted, before Gemini; a busy or refused answer still counts) → Gemini. **A request refused by any of these never reaches Gemini.** TODO F27/F36: `SPEND_CEILING` / `MAINTENANCE` checked before the daily count.
+- Gemini (`GEMINI_MODEL`, prompt `brainstorm-v1` in `packages/pipeline/src/brainstorm/prompts.ts`, the subject passed as delimited data, §16.3 of ARCHITECTURE): **30 s for the whole brainstorm**; busy/network errors (429, 5xx, timeouts) get at most 2 quick retries (1 s, 2.5 s; a Retry-After over 5 s is not waited for), never past the 30 s.
+- The answer is checked by our code: exactly 5 ideas, each title 3–120 and hook/angle 3–200 characters after cleaning (control characters and line breaks removed, NFC, spaces collapsed, trimmed), the right script for the language, no repeated titles. An invalid answer gets **one repair** request; still invalid → `503 PROVIDER_BUSY` (the creator just tries again).
+- `422 PROVIDER_REJECTED`: Gemini blocked the subject for safety, or the model answered that no safe educational video can be made about it. Never retried.
+- Every Gemini request (retries and the repair included) is logged in `providerUsage` (DATABASE.md §4.15): written `reserved` before it is sent, then `final`/`failed` with tokens, latency and outcome. The subject is never logged or stored.
 ```json
 { "subject": "Indian monsoon", "language": "en" }
 ```
