@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,17 +21,22 @@ const ENV = {
 class FakeSpeech implements SpeechProvider {
   readonly name = "fake";
   calls: { request: SpeechRequest; maxRetries: number | undefined }[] = [];
-  constructor(private readonly failOn: number | null = null) {}
+  constructor(
+    private readonly failOn: number | null = null,
+    private readonly failWith: () => Error = () => new ProviderError({ provider: "elevenlabs", kind: "quota", message: "quota exceeded" }),
+  ) {}
   async synthesize(request: SpeechRequest, options: { retry?: { maxRetries?: number } } = {}): Promise<SpeechResponse> {
     this.calls.push({ request, maxRetries: options.retry?.maxRetries });
-    if (this.failOn === this.calls.length) throw new ProviderError({ provider: "elevenlabs", kind: "quota", message: "quota exceeded" });
+    if (this.failOn === this.calls.length) throw this.failWith();
     return { audio: new Uint8Array([0xff, 0xfb, 1, 2, 3]), alignment: null, normalizedAlignment: null, requestId: null, characterCost: [...request.text].length, retries: 0, durationMs: 1 };
   }
 }
 
 const probe = async () => ({ codec: "mp3", sampleRate: 44100, channels: 1, decodedSeconds: 4.2 });
 
-function run(root: string, speech: FakeSpeech, over: { force?: boolean; env?: NodeJS.ProcessEnv } = {}) {
+type RunOver = { force?: boolean; env?: NodeJS.ProcessEnv; probe?: typeof probe; checkProbe?: () => Promise<void>; usage?: () => Promise<string | null> };
+
+function run(root: string, speech: FakeSpeech, over: RunOver = {}) {
   const printed: string[] = [];
   return runVoiceSamplesCommand({
     projectRoot: root,
@@ -40,8 +44,9 @@ function run(root: string, speech: FakeSpeech, over: { force?: boolean; env?: No
     print: (lines) => printed.push(...lines),
     env: over.env ?? ENV,
     speech: () => speech,
-    probe,
-    usage: async () => null,
+    probe: over.probe ?? probe,
+    checkProbe: over.checkProbe ?? (async () => undefined),
+    usage: over.usage ?? (async () => null),
   }).then((result) => ({ ...result, printed, all: [...printed, ...result.lines].join("\n") }));
 }
 
@@ -142,23 +147,89 @@ describe("voice-samples command", () => {
     });
   });
 
-  it("does not keep a file whose audio cannot be read", async () => {
+  it("keeps paid audio as .unverified when its check fails, and stops", async () => {
     await withTempDir(async (root) => {
-      const printed: string[] = [];
-      const result = await runVoiceSamplesCommand({
-        projectRoot: root,
-        force: false,
-        print: (l) => printed.push(...l),
-        env: ENV,
-        speech: () => new FakeSpeech(),
+      const speech = new FakeSpeech();
+      const result = await run(root, speech, {
         probe: async () => {
           throw new Error("not audio");
         },
-        usage: async () => null,
       });
       expect(result.ok).toBe(false);
-      expect(existsSync(path.join(root, VOICES_DIR, "indian-english-female.mp3"))).toBe(false);
-      expect(existsSync(path.join(root, VOICES_DIR, "indian-english-female.mp3.part"))).toBe(false);
+      expect(speech.calls).toHaveLength(1);
+      const dir = path.join(root, VOICES_DIR);
+      expect(await readdir(dir)).toEqual(["indian-english-female.mp3.unverified"]);
+      expect(result.all).toContain(`kept as ${path.join(VOICES_DIR, "indian-english-female.mp3.unverified")}`);
+    });
+  });
+
+  it("refuses before any call when ffprobe doesn't run", async () => {
+    await withTempDir(async (root) => {
+      const speech = new FakeSpeech();
+      const result = await run(root, speech, {
+        checkProbe: async () => {
+          throw new Error("ffprobe not found");
+        },
+      });
+      expect(result.ok).toBe(false);
+      expect(speech.calls).toHaveLength(0);
+      expect(result.all).toContain("REFUSED: ffprobe");
+      expect(result.all).toContain("Nothing was sent.");
+    });
+  });
+
+  it("refuses a voice ID with a bad format by variable name only, before any call", async () => {
+    await withTempDir(async (root) => {
+      const speech = new FakeSpeech();
+      const result = await run(root, speech, { env: { ...ENV, ELEVENLABS_VOICE_ID_HINDI_MALE: "bad/id..123" } });
+      expect(result.ok).toBe(false);
+      expect(speech.calls).toHaveLength(0);
+      expect(result.all).toContain("ELEVENLABS_VOICE_ID_HINDI_MALE must be letters and digits only");
+      expect(result.all).not.toContain("bad/id..123");
+    });
+  });
+
+  it("never prints a voice ID, even inside a provider error message", async () => {
+    await withTempDir(async (root) => {
+      const speech = new FakeSpeech(1, () => new ProviderError({ provider: "elevenlabs", kind: "voice-unavailable", status: 404, message: "voice_not_found: A voice with voice_id VoiceIndianFemale1 was not found" }));
+      const result = await run(root, speech);
+      expect(result.ok).toBe(false);
+      expect(result.all).not.toContain("VoiceIndianFemale1");
+      expect(result.all).toContain("voice_id [voice id] was not found");
+      expect(result.all).not.toContain("may have been charged");
+    });
+  });
+
+  it("after a failure still shows the account usage", async () => {
+    await withTempDir(async (root) => {
+      let reads = 0;
+      const result = await run(root, new FakeSpeech(2), { usage: async () => `read ${++reads}` });
+      expect(result.all).toContain("ElevenLabs account before: read 1");
+      expect(result.all).toContain("ElevenLabs account after: read 2");
+    });
+  });
+
+  it.each([
+    ["a timeout / network failure (no answer)", () => new ProviderError({ provider: "elevenlabs", kind: "transient", message: "request failed: timeout" }), true],
+    ["an unreadable 200 answer", () => new ProviderError({ provider: "elevenlabs", kind: "bad-response", message: "unreadable JSON" }), true],
+    ["a 429 busy answer", () => new ProviderError({ provider: "elevenlabs", kind: "transient", status: 429, message: "busy" }), false],
+    ["a 402 refusal", () => new ProviderError({ provider: "elevenlabs", kind: "account-restricted", status: 402, message: "payment_required" }), false],
+  ])("says the call may have been charged only when it might: %s", async (_label, failWith, maybe) => {
+    await withTempDir(async (root) => {
+      const result = await run(root, new FakeSpeech(1, failWith));
+      expect(result.ok).toBe(false);
+      expect(result.all.includes("This call may have been charged: 55 characters.")).toBe(maybe);
+    });
+  });
+
+  it("an empty (0-byte) sample file counts as missing and is recorded again", async () => {
+    await withTempDir(async (root) => {
+      const dir = path.join(root, VOICES_DIR);
+      await mkdir(dir, { recursive: true });
+      for (const p of VOICE_PRESET_LIST) await writeFile(path.join(dir, `${p.preset}.mp3`), p.preset === "hindi-female" ? "" : "old");
+      const speech = new FakeSpeech();
+      await run(root, speech);
+      expect(speech.calls.map((c) => c.request.voiceId)).toEqual(["VoiceHindiFemale01"]);
     });
   });
 });

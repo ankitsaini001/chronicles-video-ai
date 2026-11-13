@@ -9,6 +9,10 @@ node_modules/
 # Generated pipeline artifacts (plans, manifests, audio, video). Never contains API keys.
 runs/
 
+# Voice sample recorder (F13): half-written and unchecked recordings, never committed
+*.part
+*.unverified
+
 # Build output and tooling caches
 dist/
 build/

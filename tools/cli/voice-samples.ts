@@ -1,10 +1,11 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { VOICE_PRESET_LIST, type VoiceLanguage, type VoicePresetInfo } from "@bytereel/db/voices";
 import { loadLocalEnvFile, readConfig, voiceIdFor, VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/config";
 import { countCharacters, DEFAULT_VOICE_SETTINGS, SPEECH_SEED } from "@bytereel/pipeline/pipeline";
-import { ElevenLabsReadClient, ElevenLabsSpeech, type SpeechProvider } from "@bytereel/pipeline/providers";
+import { ElevenLabsReadClient, ElevenLabsSpeech, ProviderError, type SpeechProvider } from "@bytereel/pipeline/providers";
+import { RenderInternals } from "@remotion/renderer";
 import { probeAudioFile, type AudioProbe } from "@bytereel/pipeline/validation";
 
 /**
@@ -15,12 +16,16 @@ import { probeAudioFile, type AudioProbe } from "@bytereel/pipeline/validation";
  * Money safety (every character costs ElevenLabs credit):
  * - a file that already exists is skipped (unless --force), so running it again spends nothing;
  * - it prints the characters it is about to send and refuses above MAX_TOTAL_CHARACTERS;
- * - it checks every needed setting BEFORE the first call, so it never stops halfway for a missing key;
+ * - it checks every needed setting (and that ffprobe runs) BEFORE the first call, so it never stops
+ *   halfway for a missing key or tool; a voice ID with a bad format is refused by variable NAME;
  * - at most ONE text-to-speech call per missing file: retries are switched off, and the first
- *   failure stops the run (the files already made are kept; run again to make the rest).
+ *   failure stops the run (the files already made are kept; run again to make the rest). The
+ *   account usage is still shown after a failure, and a call that may have been charged says so;
+ * - paid audio is never thrown away: if the check of a recording fails, it is kept as
+ *   `{preset}.mp3.unverified` (ignored by git) for a listen.
  * Same model, voice settings, seed and text normalization as the real pipeline (pipeline/speech.ts);
  * only the output format is smaller (64 kbps is plenty for a 5-second preview).
- * Keys and voice IDs are never printed.
+ * Keys and voice IDs are never printed (voice IDs are also blanked out of provider error messages).
  */
 
 export const MAX_TOTAL_CHARACTERS = 600;
@@ -45,16 +50,47 @@ export interface VoiceSamplesOptions {
   projectRoot: string;
   force: boolean;
   print: (lines: string[]) => void;
-  /** Tests pass fakes; by default the real ElevenLabs adapter and the .env file. */
+  /** Tests pass fakes; by default the real ElevenLabs adapter, Remotion's ffprobe and the .env file. */
   env?: NodeJS.ProcessEnv;
   speech?: (apiKey: string) => SpeechProvider;
   probe?: (file: string) => Promise<AudioProbe>;
+  /** Throws when ffprobe can't run (checked once, before anything is paid for). */
+  checkProbe?: () => Promise<void>;
   usage?: (apiKey: string) => Promise<string | null>;
+}
+
+/** The form ElevenLabs voice IDs have (the same check the speech adapter makes). */
+const VOICE_ID_FORMAT = /^[A-Za-z0-9]{1,64}$/;
+
+/** A file that is there and not empty counts as recorded (same rule as the web app's check). */
+function recorded(file: string): boolean {
+  try {
+    const stat = statSync(file);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Replace every configured voice ID in a message, so a provider error can never print one. */
+function hideVoiceIds(text: string, voiceIds: readonly string[]): string {
+  let out = text;
+  for (const id of voiceIds) if (id) out = out.split(id).join("[voice id]");
+  return out;
+}
+
+/**
+ * True when ElevenLabs may have charged for a call that failed: the request may have reached it
+ * (network failure or timeout with no answer) or it answered 200 with a body we couldn't read.
+ */
+function mayHaveBeenCharged(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return true;
+  return error.kind === "bad-response" || (error.kind === "transient" && error.status === null);
 }
 
 export async function runVoiceSamplesCommand(opts: VoiceSamplesOptions): Promise<{ ok: boolean; lines: string[] }> {
   const dir = path.join(opts.projectRoot, VOICES_DIR);
-  const todo = VOICE_PRESET_LIST.filter((p) => opts.force || !existsSync(path.join(dir, `${p.preset}.mp3`)));
+  const todo = VOICE_PRESET_LIST.filter((p) => opts.force || !recorded(path.join(dir, `${p.preset}.mp3`)));
   const skipped = VOICE_PRESET_LIST.length - todo.length;
 
   const plan = todo.map((p) => ({ preset: p, text: speechTextFor(p), characters: countCharacters(speechTextFor(p)) }));
@@ -75,17 +111,35 @@ export async function runVoiceSamplesCommand(opts: VoiceSamplesOptions): Promise
     return { ok: false, lines: [...header, `REFUSED: ${total} characters is more than the ${MAX_TOTAL_CHARACTERS} allowed for samples. Nothing was sent.`] };
   }
 
+  // Every check that doesn't cost anything happens before the first paid call.
   if (!opts.env) loadLocalEnvFile(path.join(opts.projectRoot, ".env"));
   const config = readConfig(opts.env ?? process.env);
   const apiKey = config.values.ELEVENLABS_API_KEY;
   const modelId = config.values.ELEVENLABS_MODEL;
   const missing = new Set<string>();
+  const badFormat = new Set<string>();
   if (!apiKey) missing.add("ELEVENLABS_API_KEY");
   if (!modelId) missing.add("ELEVENLABS_MODEL");
-  for (const item of plan) if (!voiceIdFor(item.preset.preset, config)) missing.add(VOICE_ID_ENV_BY_PRESET[item.preset.preset]);
-  if (missing.size > 0 || !apiKey || !modelId) {
-    return { ok: false, lines: [...header, `REFUSED: set ${[...missing].join(", ")} in .env first. Nothing was sent.`] };
+  for (const item of plan) {
+    const variable = VOICE_ID_ENV_BY_PRESET[item.preset.preset];
+    const id = voiceIdFor(item.preset.preset, config);
+    if (!id) missing.add(variable);
+    else if (!VOICE_ID_FORMAT.test(id)) badFormat.add(variable);
   }
+  if (missing.size > 0 || badFormat.size > 0 || !apiKey || !modelId) {
+    const problems = [
+      ...(missing.size > 0 ? [`set ${[...missing].join(", ")} in .env first`] : []),
+      ...(badFormat.size > 0 ? [`${[...badFormat].join(", ")} must be letters and digits only (an ElevenLabs voice ID)`] : []),
+    ];
+    return { ok: false, lines: [...header, `REFUSED: ${problems.join("; ")}. Nothing was sent.`] };
+  }
+  try {
+    await (opts.checkProbe ?? checkFfprobe)();
+  } catch (error) {
+    return { ok: false, lines: [...header, `REFUSED: ffprobe (used to check each recording) doesn't run: ${error instanceof Error ? error.message : String(error)}. Nothing was sent.`] };
+  }
+  const voiceIds = plan.map((item) => voiceIdFor(item.preset.preset, config)!);
+  const safe = (text: string) => hideVoiceIds(text, voiceIds);
 
   opts.print(header);
   const usage = opts.usage ?? defaultUsage;
@@ -98,6 +152,22 @@ export async function runVoiceSamplesCommand(opts: VoiceSamplesOptions): Promise
   const lines: string[] = [];
   let charged = 0;
   let made = 0;
+
+  /** Stop at the first problem: say what happened, what may have been charged, and the account after. */
+  const stop = async (message: string, extra: string[] = []) => {
+    const after = await usage(apiKey);
+    return {
+      ok: false,
+      lines: [
+        ...lines,
+        safe(message),
+        ...extra,
+        `Stopped here so nothing more is spent. ${made} file(s) were made this run; run the command again to record the rest (existing files are skipped).`,
+        chargedLine(charged, made),
+        ...(after ? [`ElevenLabs account after: ${after}`] : []),
+      ],
+    };
+  };
 
   for (const item of plan) {
     const name = item.preset.preset;
@@ -122,30 +192,31 @@ export async function runVoiceSamplesCommand(opts: VoiceSamplesOptions): Promise
       audio = response.audio;
       cost = response.characterCost;
     } catch (error) {
-      lines.push(
-        `FAILED ${name}: ${error instanceof Error ? error.message : String(error)}`,
-        `Stopped here so nothing more is spent. ${made} file(s) were made this run; run the command again to record the rest (existing files are skipped).`,
-      );
-      return { ok: false, lines: [...lines, chargedLine(charged, made)] };
+      const maybe = mayHaveBeenCharged(error);
+      return stop(`FAILED ${name}: ${error instanceof Error ? error.message : String(error)}`, maybe ? [`This call may have been charged: ${item.characters} characters.`] : []);
     }
     charged += cost ?? item.characters;
-    if (audio.byteLength === 0) {
-      lines.push(`FAILED ${name}: ElevenLabs returned an empty file. Stopped.`);
-      return { ok: false, lines: [...lines, chargedLine(charged, made)] };
-    }
+    if (audio.byteLength === 0) return stop(`FAILED ${name}: ElevenLabs returned an empty file.`);
 
     // Write to a temporary name first, so a half-written file is never taken as done.
     const temp = `${file}.part`;
-    await writeFile(temp, audio);
     let probed: AudioProbe;
     try {
-      probed = await probe(temp);
-    } catch (error) {
+      await writeFile(temp, audio);
+      try {
+        probed = await probe(temp);
+      } catch (error) {
+        // Keep the paid audio: it may be fine, only the check failed. It is not used until renamed.
+        const unverified = `${file}.unverified`;
+        await rename(temp, unverified);
+        return stop(`FAILED ${name}: the recording could not be checked (${error instanceof Error ? error.message : String(error)}).`, [
+          `The audio is kept as ${path.relative(opts.projectRoot, unverified)}: listen to it, and if it is fine rename it to ${name}.mp3.`,
+        ]);
+      }
+      await rename(temp, file);
+    } finally {
       await rm(temp, { force: true });
-      lines.push(`FAILED ${name}: the audio could not be read (${error instanceof Error ? error.message : String(error)}). Stopped.`);
-      return { ok: false, lines: [...lines, chargedLine(charged, made)] };
     }
-    await rename(temp, file);
     made++;
     const seconds = probed.decodedSeconds;
     const note = seconds < 2 || seconds > 10 ? "  (please listen: unusual length)" : "";
@@ -158,6 +229,11 @@ export async function runVoiceSamplesCommand(opts: VoiceSamplesOptions): Promise
 
 function chargedLine(charged: number, made: number): string {
   return `Characters used this run: about ${charged} (${made} file(s) saved).`;
+}
+
+/** ffprobe -version through Remotion's bundled binary (the same one probeAudioFile uses). */
+async function checkFfprobe(): Promise<void> {
+  await RenderInternals.callFf({ bin: "ffprobe", args: ["-version"], indent: false, logLevel: "error", binariesDirectory: null, cancelSignal: undefined });
 }
 
 async function defaultUsage(apiKey: string): Promise<string | null> {
