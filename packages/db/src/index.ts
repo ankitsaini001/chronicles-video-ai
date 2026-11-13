@@ -4,6 +4,7 @@ export { DEFAULT_DB_NAME, passwordsIn, readDbConfig, redactConnectionString, typ
 export { explainDbError, IndexConflictError, type ExplainedDbError } from "./errors";
 export { ping } from "./health";
 export {
+  API_RATE_LIMITS,
   AUTH_RATE_LIMITS,
   hashRateLimitSubject,
   hitRateLimit,
@@ -23,6 +24,7 @@ export {
   type LoginGuardUser,
   type LoginLock,
 } from "./login-guard";
+export { DEFAULT_TIMEZONE, isValidTimezone, USAGE_LIMITS, usagePeriods, type UsagePeriods } from "./usage";
 export { ensureIndexes, INDEX_FEATURES, INDEXES, indexesForFeatures, type IndexDefinition } from "./indexes";
 export {
   addInvite,

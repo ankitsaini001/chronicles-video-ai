@@ -31,6 +31,12 @@ export const AUTH_RATE_LIMITS = {
   getSessionPerIp: { name: "session-ip", limit: 120, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
+/** The /api/v1 limits from API.md §10.3, per signed-in user. More arrive with each endpoint. */
+export const API_RATE_LIMITS = {
+  /** "Other reads (GET)": 300 requests per minute per user, shared by all plain GET endpoints. */
+  readsPerUser: { name: "v1-read-user", limit: 300, windowSeconds: 60 },
+} as const satisfies Record<string, RateLimitRule>;
+
 export interface RateLimitDocument {
   /** `<rule>:sha256:<hash of the subject>:<window start, ISO>` */
   _id: string;
