@@ -37,6 +37,8 @@ export const API_RATE_LIMITS = {
   readsPerUser: { name: "v1-read-user", limit: 300, windowSeconds: 60 },
   /** C2 create project: 10 per hour per user (plus the 5 projects/day quota). */
   createProjectPerUser: { name: "create-project", limit: 10, windowSeconds: 60 * 60 },
+  /** C7 brainstorm: 10 per hour per user (plus 30 per day, USAGE_LIMITS.brainstormsPerDay; F14). */
+  brainstormPerUser: { name: "brainstorm", limit: 10, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

@@ -3,12 +3,12 @@ import { usagePeriods } from "./usage";
 
 // Daily / monthly counts behind the product limits (docs/DATABASE.md §4.14 `usageCounters`,
 // docs/API.md §10.1). One document per user, kind and period (the day or month in the user's
-// timezone). F12 counts and enforces `projects` (5 per day); videos and voice characters follow
-// with generation (F23/F27).
+// timezone). F12 counts and enforces `projects` (5 per day); F14 `brainstorms` (30 per day, outside
+// a transaction: brainstorm.ts); videos and voice characters follow with generation (F23/F27).
 
 export const USAGE_COUNTERS_COLLECTION = "usageCounters";
 
-export type UsageKind = "videos" | "projects" | "voiceChars";
+export type UsageKind = "videos" | "projects" | "voiceChars" | "brainstorms";
 
 export interface UsageCounterDocument {
   _id: ObjectId;

@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./brainstorm": "./src/brainstorm.ts",
     "./config": "./src/config.ts",
     "./idea-text": "./src/idea-text.ts",
     "./voices": "./src/voices.ts"

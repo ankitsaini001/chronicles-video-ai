@@ -11,6 +11,8 @@ export const USAGE_LIMITS = {
   projectsPerDay: 5,
   /** ElevenLabs narration characters per user per calendar month. */
   voiceCharactersPerMonth: 3000,
+  /** C7 "Brainstorm with AI" requests per user per day (plus 10 per hour, API_RATE_LIMITS; F14). */
+  brainstormsPerDay: 30,
 } as const;
 
 /** Every user starts in this timezone (API.md §2); also the fallback for an unknown zone. */

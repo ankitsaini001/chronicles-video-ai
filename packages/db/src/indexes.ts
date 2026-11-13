@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08" | "F12";
+  feature: "F07" | "F08" | "F12" | "F14";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -36,6 +36,9 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "idempotencyKeys", name: "createdAt_ttl", keys: { createdAt: 1 }, options: { expireAfterSeconds: 86400 }, feature: "F12", why: "Forget clicks after a day" },
   { collection: "usageCounters", name: "ownerId_kind_period_unique", keys: { ownerId: 1, kind: 1, period: 1 }, options: { unique: true }, feature: "F12", why: "One counter per user, kind and day/month" },
   { collection: "usageCounters", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F12", why: "Old counters delete themselves" },
+  { collection: "providerUsage", name: "at", keys: { at: -1 }, options: {}, feature: "F14", why: "AI spend totals by time" },
+  { collection: "providerUsage", name: "ownerId_at", keys: { ownerId: 1, at: -1 }, options: {}, feature: "F14", why: "One user's AI usage" },
+  { collection: "providerUsage", name: "provider_at", keys: { provider: 1, at: -1 }, options: {}, feature: "F14", why: "AI spend per service" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */
