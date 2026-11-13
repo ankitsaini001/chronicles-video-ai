@@ -647,10 +647,16 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `fingerprint` | string | `sha256` of method + path + body: proves the repeat is the same request | Yes |
 | `status` | `in_progress` \| `done` | `in_progress` while the first request is still running | Yes |
 | `lockedUntil` | date? | Only while `in_progress`: now + **~60 s**. If the first request crashed, the marker would block the key forever; after `lockedUntil` the marker counts as **abandoned** and the next request with the key may run it again | No |
+| `lockId` | string? | Only while `in_progress`: a new random value for **every** check-in, also for a takeover of an abandoned marker. Saving the answer and releasing the record both require it, so a slow first request can neither overwrite nor delete the record of the request that took over (F12 review) | Auto |
 | `responseStatus`, `responseBody` | int, object | The saved answer, once `done` | When done |
 | `createdAt` | date | When the key was first seen | Auto |
 
-**Rules:** scoped per user. A key reused with a different request body → `IDEMPOTENCY_KEY_REUSED`. A repeat while `in_progress` (and before `lockedUntil`) → `IDEMPOTENCY_IN_PROGRESS`. Server errors (5xx) are not saved (the record is removed), so the client can retry. Running a request twice after an abandoned lock is still safe, because the domain keys (`jobs.idempotencyKey`, `posts.publishKey`, unique approvals) stop duplicates (API.md §6 "Second layer").
+**Rules:** scoped per user. A key reused with a different request body → `IDEMPOTENCY_KEY_REUSED`. A repeat while `in_progress` (and before `lockedUntil`) → `IDEMPOTENCY_IN_PROGRESS`. Server errors (5xx) are not saved (the record is removed, only by the request that owns it), so the client can retry.
+
+**Abandoned lock (corrected in the F12 review).** After `lockedUntil` a repeat may take the marker over, while the first request may in fact still be running (e.g. a slow transaction). Two runs of the same click must then not both take effect:
+- Actions that write in a transaction (C2 create project; later D5, D8, F4, H2 …) save their answer on the record **inside that transaction**, filtered on their own `lockId`. If nothing matches, another request owns the click now: the action throws and the **whole transaction rolls back** (no project, no counted quota). C2 then answers `409 IDEMPOTENCY_IN_PROGRESS`; a retry gets the winner's saved answer.
+- The domain keys (`jobs.idempotencyKey`, `posts.publishKey`, unique approvals, API.md §6 "Second layer") stay as a further guard for jobs and posts. They would **not** stop a second project, which is why C2 relies on the in-transaction check above.
+- Code: `packages/db/src/idempotency.ts`.
 
 **Indexes:** unique `{ ownerId: 1, key: 1 }`; TTL on `createdAt` with `expireAfterSeconds: 86400` (24 hours).
 

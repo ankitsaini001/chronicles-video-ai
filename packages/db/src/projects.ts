@@ -1,6 +1,6 @@
 import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
-import { finishIdempotency } from "./idempotency";
+import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
 
@@ -202,11 +202,12 @@ export class ProjectQuotaExceededError extends Error {
  * (only while within 5), insert the project, and, when the request carried an Idempotency-Key,
  * save the answer on its record. So a crash can never leave a counted project that doesn't exist,
  * a project that wasn't counted, or a saved project whose click would run again on retry.
- * Throws ProjectQuotaExceededError (nothing saved) when the limit is reached.
+ * Throws ProjectQuotaExceededError (nothing saved) when the limit is reached, and
+ * IdempotencyLockLostError (nothing saved) when a repeat of the same click took the record over.
  */
 export async function createProject(
   db: Db,
-  input: { ownerId: string; timezone: string; body: CreateProjectBody; idempotencyRecordId?: string | null; now?: Date },
+  input: { ownerId: string; timezone: string; body: CreateProjectBody; idempotencyLock?: IdempotencyLock | null; now?: Date },
 ): Promise<CreateProjectResponse> {
   const now = input.now ?? new Date();
   const doc: ProjectDocument = {
@@ -243,7 +244,9 @@ export async function createProject(
       });
       if (!counted.ok) throw new ProjectQuotaExceededError(counted.limit, counted.used, counted.resetsAt);
       await db.collection<ProjectDocument>(PROJECTS_COLLECTION).insertOne(doc, { session });
-      if (input.idempotencyRecordId) await finishIdempotency(db, input.idempotencyRecordId, CREATE_PROJECT_STATUS, response, session);
+      // Last write: if another request took this click over meanwhile, this throws and nothing
+      // (counter, project) is kept.
+      if (input.idempotencyLock) await finishIdempotencyInTransaction(db, input.idempotencyLock, CREATE_PROJECT_STATUS, response, session);
     });
   } finally {
     await session.endSession();

@@ -10,6 +10,7 @@ import {
   type ApiDeps,
   type ApiEndpoint,
   type IdempotencyBegin,
+  type IdempotencyLock,
   type IdempotencyStore,
 } from "../apps/web/lib/api/v1";
 import type { SessionUser } from "../apps/web/lib/auth/session";
@@ -35,7 +36,7 @@ const VALID = { inputType: "topic", text: "How UPI payments work", language: "en
 
 /** An in-memory idempotency store with the same rules as packages/db/src/idempotency.ts. */
 function memoryStore() {
-  const records = new Map<string, { id: string; fingerprint: string; done: boolean; status?: number; body?: unknown }>();
+  const records = new Map<string, { id: string; lockId: string; fingerprint: string; done: boolean; status?: number; body?: unknown }>();
   let n = 0;
   const store: IdempotencyStore & { records: typeof records } = {
     records,
@@ -44,18 +45,18 @@ function memoryStore() {
       const existing = records.get(k);
       if (!existing) {
         const id = `rec${++n}`;
-        records.set(k, { id, fingerprint, done: false });
-        return { kind: "new", recordId: id };
+        records.set(k, { id, lockId: `lock${n}`, fingerprint, done: false });
+        return { kind: "new", recordId: id, lockId: `lock${n}` };
       }
       if (existing.fingerprint !== fingerprint) return { kind: "reused" };
       if (!existing.done) return { kind: "in_progress" };
       return { kind: "replay", status: existing.status!, body: existing.body };
     }),
-    finish: vi.fn(async (id: string, status: number, body: unknown) => {
-      for (const r of records.values()) if (r.id === id && !r.done) Object.assign(r, { done: true, status, body });
+    finish: vi.fn(async (lock: IdempotencyLock, status: number, body: unknown) => {
+      for (const r of records.values()) if (r.id === lock.recordId && r.lockId === lock.lockId && !r.done) Object.assign(r, { done: true, status, body });
     }),
-    release: vi.fn(async (id: string) => {
-      for (const [k, r] of records) if (r.id === id && !r.done) records.delete(k);
+    release: vi.fn(async (lock: IdempotencyLock) => {
+      for (const [k, r] of records) if (r.id === lock.recordId && r.lockId === lock.lockId && !r.done) records.delete(k);
     }),
   };
   return store;
@@ -275,18 +276,36 @@ describe("Idempotency-Key (API.md §6)", () => {
     expect(second.headers.get("idempotent-replayed")).toBeNull();
   });
 
-  it("the handler gets the record id (to save the answer inside its own transaction)", async () => {
+  it("the handler gets its lock (record id + this check-in's lockId) to save the answer in its own transaction", async () => {
     const store = memoryStore();
-    const seen: (string | null)[] = [];
+    const seen: (IdempotencyLock | null)[] = [];
     await handleApiRequest(
       postJson(JSON.stringify(VALID)),
-      endpoint(async ({ idempotencyRecordId }) => {
-        seen.push(idempotencyRecordId);
+      endpoint(async ({ idempotencyLock }) => {
+        seen.push(idempotencyLock);
         return new ApiResult(201, {});
       }),
       deps({ idempotency: store }),
     );
-    expect(seen).toEqual(["rec1"]);
+    expect(seen).toEqual([{ recordId: "rec1", lockId: "lock1" }]);
+  });
+
+  it("a handler's own 5xx ApiProblem releases the key (API.md §6), so the same click can be retried", async () => {
+    const store = memoryStore();
+    let fail = true;
+    const handle = vi.fn(async () => {
+      if (fail) throw new ApiProblem(503, "INTERNAL", "Paused for a moment.");
+      return new ApiResult(201, { ok: true });
+    });
+    const first = await handleApiRequest(postJson(JSON.stringify(VALID)), endpoint(handle), deps({ idempotency: store }));
+    expect(first.status).toBe(503);
+    expect(store.release).toHaveBeenCalledWith({ recordId: "rec1", lockId: "lock1" });
+    expect(store.finish).not.toHaveBeenCalled();
+    fail = false;
+    const second = await handleApiRequest(postJson(JSON.stringify(VALID)), endpoint(handle), deps({ idempotency: store }));
+    expect(second.status).toBe(201);
+    expect(second.headers.get("idempotent-replayed")).toBeNull();
+    expect(handle).toHaveBeenCalledTimes(2);
   });
 });
 

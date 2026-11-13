@@ -31,8 +31,8 @@ export function apiRoute<B = undefined>(
         hitRateLimit: (rule, userId) => hitRateLimit(database, rule, userId),
         idempotency: {
           begin: (userId, key, fingerprint) => beginIdempotency(database, userId, key, fingerprint),
-          finish: (recordId, status, body) => finishIdempotency(database, recordId, status, body),
-          release: (recordId) => releaseIdempotency(database, recordId),
+          finish: (lock, status, body) => finishIdempotency(database, lock, status, body),
+          release: (lock) => releaseIdempotency(database, lock),
         },
       },
     );

@@ -1,6 +1,6 @@
-import { API_RATE_LIMITS, CREATE_PROJECT_STATUS, createProject, CreateProjectBodySchema, ProjectQuotaExceededError } from "@bytereel/db";
+import { API_RATE_LIMITS, CREATE_PROJECT_STATUS, createProject, CreateProjectBodySchema, IdempotencyLockLostError, ProjectQuotaExceededError } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
-import { ApiProblem, ApiResult } from "@/lib/api/v1";
+import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
 
 // C2 POST /api/v1/projects (docs/API.md §14.3): ① "Create storyboard".
 // F12 (no AI yet): saves the project in state `draft` and answers 201 { project, job: null }.
@@ -13,9 +13,9 @@ export const POST = apiRoute({
   rateLimit: API_RATE_LIMITS.createProjectPerUser,
   body: CreateProjectBodySchema,
   idempotent: true,
-  handle: async ({ db, user, body, idempotencyRecordId }) => {
+  handle: async ({ db, user, body, idempotencyLock }) => {
     try {
-      const created = await createProject(db, { ownerId: user.id, timezone: user.timezone, body, idempotencyRecordId });
+      const created = await createProject(db, { ownerId: user.id, timezone: user.timezone, body, idempotencyLock });
       return new ApiResult(CREATE_PROJECT_STATUS, created);
     } catch (error) {
       if (error instanceof ProjectQuotaExceededError) {
@@ -25,6 +25,11 @@ export const POST = apiRoute({
           used: error.used,
           resetsAt: error.resetsAt.toISOString(),
         });
+      }
+      if (error instanceof IdempotencyLockLostError) {
+        // This request was so slow that a repeat of the same click took over; nothing was saved
+        // here. The repeat's answer is what counts: the client tries again and gets it replayed.
+        throw new ApiProblem(409, "IDEMPOTENCY_IN_PROGRESS", API_MESSAGES.IDEMPOTENCY_IN_PROGRESS);
       }
       throw error;
     }

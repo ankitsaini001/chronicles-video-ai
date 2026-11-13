@@ -41,11 +41,14 @@ export {
 export {
   beginIdempotency,
   finishIdempotency,
+  finishIdempotencyInTransaction,
   IDEMPOTENCY_COLLECTION,
   IDEMPOTENCY_LOCK_MS,
+  IdempotencyLockLostError,
   releaseIdempotency,
   type IdempotencyBeginResult,
   type IdempotencyDocument,
+  type IdempotencyLock,
 } from "./idempotency";
 export {
   addUsageWithinLimit,

@@ -60,9 +60,12 @@ export interface BodySchema<T> {
 }
 type SchemaIssue = { path: readonly PropertyKey[]; message: string; code?: string; keys?: readonly string[] };
 
+/** Proof that this request owns its idempotency record (DATABASE.md §4.13: id + this check-in's lockId). */
+export type IdempotencyLock = { recordId: string; lockId: string };
+
 /** What happened when an Idempotency-Key was checked in (DATABASE.md §4.13). */
 export type IdempotencyBegin =
-  | { kind: "new"; recordId: string }
+  | ({ kind: "new" } & IdempotencyLock)
   | { kind: "replay"; status: number; body: unknown }
   | { kind: "reused" }
   | { kind: "in_progress" };
@@ -71,10 +74,13 @@ export type IdempotencyBegin =
 export interface IdempotencyStore {
   /** Check a key in. `fingerprint` proves a repeat is the same request. */
   begin(userId: string, key: string, fingerprint: string): Promise<IdempotencyBegin>;
-  /** Save the answer, so a repeat gets it again. Does nothing if the record was already saved. */
-  finish(recordId: string, status: number, body: unknown): Promise<void>;
-  /** Forget the key (after a 5xx), so the client may try again with it. */
-  release(recordId: string): Promise<void>;
+  /**
+   * Save the answer, so a repeat gets it again. Does nothing if the record was already saved or
+   * another request took it over (it no longer has this lockId).
+   */
+  finish(lock: IdempotencyLock, status: number, body: unknown): Promise<unknown>;
+  /** Forget the key (after a 5xx), so the client may try again with it. Only while it is still ours. */
+  release(lock: IdempotencyLock): Promise<void>;
 }
 
 export interface ApiDeps {
@@ -99,11 +105,11 @@ export interface ApiContext<B = undefined> {
   /** The validated body (only for endpoints with a `body` schema). */
   body: B;
   /**
-   * The `idempotencyKeys` record of this request (only for `idempotent` endpoints). A handler that
-   * writes in a transaction should save its answer to this record inside the same transaction, so
-   * a crash right after the commit can never let a retry do the work twice.
+   * This request's hold on its `idempotencyKeys` record (only for `idempotent` endpoints). A
+   * handler that writes in a transaction must save its answer with this lock inside the same
+   * transaction, and roll back if the lock was lost, so the same click can never do the work twice.
    */
-  idempotencyRecordId: string | null;
+  idempotencyLock: IdempotencyLock | null;
 }
 
 export interface ApiEndpoint<B = undefined> {
@@ -152,7 +158,7 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 export async function handleApiRequest<B>(request: Request, endpoint: ApiEndpoint<B>, deps: ApiDeps): Promise<Response> {
   const requestId = requestIdFor(request.headers, deps.newRequestId ?? newRequestId);
   const logError = deps.logError ?? defaultLogError;
-  let recordId: string | null = null;
+  let lock: IdempotencyLock | null = null;
   try {
     if (MUTATING.has(request.method) && !isSameOrigin(request.headers, deps.appOrigins)) {
       return apiError(403, "FORBIDDEN", API_MESSAGES.FORBIDDEN_ORIGIN, requestId, { details: { reason: "origin_mismatch" } });
@@ -209,15 +215,15 @@ export async function handleApiRequest<B>(request: Request, endpoint: ApiEndpoin
         const replayBody = saved && typeof saved === "object" && saved.error ? { error: { ...saved.error, requestId } } : begin.body;
         return Response.json(replayBody, { status: begin.status, headers: { ...commonHeaders(requestId), "Idempotent-Replayed": "true" } });
       }
-      recordId = begin.recordId;
+      lock = { recordId: begin.recordId, lockId: begin.lockId };
     }
 
     let status: number;
     let payload: unknown;
     try {
-      const result = await endpoint.handle({ request, user, requestId, body, idempotencyRecordId: recordId });
+      const result = await endpoint.handle({ request, user, requestId, body, idempotencyLock: lock });
       if (result instanceof Response) {
-        if (recordId !== null) throw new Error("Idempotent endpoints must return a value, not a Response.");
+        if (lock !== null) throw new Error("Idempotent endpoints must return a value, not a Response.");
         // A copy: some Responses (e.g. Response.redirect) have read-only headers.
         const response = new Response(result.body, result);
         response.headers.set("X-Request-Id", requestId);
@@ -227,23 +233,28 @@ export async function handleApiRequest<B>(request: Request, endpoint: ApiEndpoin
       [status, payload] = result instanceof ApiResult ? [result.status, result.body] : [200, result];
     } catch (error) {
       if (!(error instanceof ApiProblem)) throw error;
-      if (recordId !== null && error.status < 500) {
-        // The saved answer has no requestId of its own: a replay is a new request.
-        await deps.idempotency!.finish(recordId, error.status, errorBody(error.code, error.message, null, error.details));
-        recordId = null;
+      if (lock !== null) {
+        if (error.status < 500) {
+          // The saved answer has no requestId of its own: a replay is a new request.
+          await deps.idempotency!.finish(lock, error.status, errorBody(error.code, error.message, null, error.details));
+        } else {
+          // API.md §6: 5xx answers are not saved; the same click may be retried.
+          await deps.idempotency!.release(lock).catch(() => undefined);
+        }
+        lock = null;
       }
       return problemResponse(error, requestId);
     }
 
-    if (recordId !== null) {
-      await deps.idempotency!.finish(recordId, status, payload);
-      recordId = null;
+    if (lock !== null) {
+      await deps.idempotency!.finish(lock, status, payload);
+      lock = null;
     }
     return apiJson(payload, requestId, status);
   } catch (error) {
     logError(`API ${request.method} ${new URL(request.url).pathname} failed (request ${requestId}).`, error);
     // API.md §6: 5xx answers are not saved, so the client may retry with the same key.
-    if (recordId !== null) await deps.idempotency?.release(recordId).catch(() => undefined);
+    if (lock !== null) await deps.idempotency?.release(lock).catch(() => undefined);
     return apiError(500, "INTERNAL", API_MESSAGES.INTERNAL, requestId);
   }
 }
