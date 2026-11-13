@@ -415,7 +415,7 @@ paths:
     get:
       operationId: listVoices
       summary: Voice presets with preview samples
-      description: B4. Pre-recorded static MP3 samples (decision D7). Voice IDs are never exposed.
+      description: B4. Pre-recorded static MP3 samples (decision D7). Voice IDs are never exposed. Order English, Hindi, Hinglish, female first. `enabled` is always true until admin settings (I12). An empty or repeated `language` is 400 INVALID_INPUT.
       tags: [Account]
       security:
         - sessionCookie: []

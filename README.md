@@ -44,6 +44,7 @@ npm run pipeline -- resume --run <owner/project/version>         # continue afte
 npm run pipeline -- fixture --file fixtures/water-cycle.plan.json # validate a fixture plan and create its run folder
 npm run pipeline -- render-fixture --file fixtures/water-cycle.plan.json  # P1: compile -> render -> validate (about 5 min)
 npm run pipeline -- render-fixture --file fixtures/water-cycle.plan.json --force  # render again
+npm run voices:samples  # F13: record the ▶ voice preview MP3s ONCE (LIVE ElevenLabs, ~312 characters); skips existing files, --force re-records
 npm run studio                                                    # Remotion Studio preview in the browser
 npm test                                                          # all tests
 npm run typecheck                                                 # strict TypeScript check

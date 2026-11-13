@@ -664,7 +664,7 @@ Types use TypeScript notation; `| null` fields are always present. Full JSON Sch
 |---|---|---|
 | `Language` | `en` \| `hi` \| `hinglish` | `LANGUAGES` (common.ts) |
 | `VoiceGender` | `female` \| `male` | ARCHITECTURE §8.3 |
-| `VoicePreset` | `indian-english-male` \| `indian-english-female` \| `hindi-male` \| `hindi-female` \| `hinglish-male` \| `hinglish-female` | `VOICE_PRESETS` (common.ts). Mapping: `en`→`indian-english-*`, `hi`→`hindi-*`, `hinglish`→`hinglish-*` |
+| `VoicePreset` | `indian-english-male` \| `indian-english-female` \| `hindi-male` \| `hindi-female` \| `hinglish-male` \| `hinglish-female` | `VOICE_PRESETS` (common.ts); with labels and samples: `VOICE_PRESET_LIST` (packages/db/src/voices.ts). Mapping: `en`→`indian-english-*`, `hi`→`hindi-*`, `hinglish`→`hinglish-*` |
 | `SceneType` | `title-hook` \| `labeled-diagram` \| `process-flow` \| `comparison` \| `timeline` \| `chart` \| `step-sequence` \| `takeaway` | `SCENE_TYPES` |
 | `ObjectKind` | `headline`, `subtitle`, `icon`, `diagram`, `part`, `arrow`, `node`, `particles`, `column`, `point`, `axis`, `milestone`, `bar`, `line-point`, `pie-slice`, `counter`, `step`, `bullet` (allowed per pattern: `COMPONENT_CATALOG`) | component-catalog.ts |
 | `EventAction` | `appear`, `highlight`, `pulse`, `point-to`, `flow`, `rise`, `fall`, `speed-up`, `gather`, `check`, `cross`, `advance`, `grow`, `count-up`, `complete` (allowed per pattern: `COMPONENT_CATALOG`) | component-catalog.ts |
@@ -933,7 +933,8 @@ Errors: `400 INVALID_INPUT` (wrong `confirm`) · `403 FORBIDDEN` (`details.reaso
 #### B4. `GET /api/v1/voices` — Voice presets and preview samples
 Purpose: the ① Idea voice chips with ▶ preview (pre-recorded static MP3s in `public/voices/`, decision D7; no ElevenLabs cost). Auth: creator. Query: `language` optional `Language` filter.
 Success `200` → `{ items: [{ preset, language, gender, label, sampleUrl, sampleText, enabled }] }`. Voice IDs are never exposed. `enabled = false` when an admin disabled the preset (I12).
-Errors: `400 INVALID_INPUT` (unknown language).
+Errors: `400 INVALID_INPUT` (unknown language; also an empty or repeated `language`).
+**Built in F13:** the list (presets, labels, sample URLs and sentences) lives in one place, `VOICE_PRESET_LIST` in `packages/db/src/voices.ts` (the web app doesn't depend on the pipeline package; a test keeps it equal to `VOICE_PRESETS` in common.ts). Order: English, Hindi, Hinglish, female first. Labels: `Female voice` / `Male voice` (English and Hinglish), the Hindi labels below for Hindi. Hinglish uses the Hindi voices (PRD decision #18) with its own sentence, `"Hello doston! Aaj hum samjhenge ki rainbow kaise banta hai."` (sent to text-to-speech with the Hindi words in Devanagari, the pipeline's Hinglish `speech` rule). Rate: the shared 300/min read limit (§10.3). **Until I12** every preset is `enabled: true`. The ① Idea screen reads the same list directly (it doesn't call B4); the MP3s are recorded once with `npm run voices:samples` and committed.
 ```http
 GET /api/v1/voices?language=hi
 ```
