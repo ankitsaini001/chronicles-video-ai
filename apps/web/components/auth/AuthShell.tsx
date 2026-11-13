@@ -13,9 +13,11 @@ type AuthShellProps = {
   children: ReactNode;
   /** Shown under the card (e.g. "Already have an account? Log in"). */
   below?: ReactNode;
+  /** Optional picture between the logo and the heading (e.g. the Access pending envelope). */
+  icon?: ReactNode;
 };
 
-export function AuthShell({ title, subtitle, children, below }: AuthShellProps) {
+export function AuthShell({ title, subtitle, children, below, icon }: AuthShellProps) {
   return (
     <div className="relative flex min-h-dvh flex-col items-center overflow-x-hidden">
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_40%,#f5a5241f,transparent_60%)]" />
@@ -23,6 +25,7 @@ export function AuthShell({ title, subtitle, children, below }: AuthShellProps) 
         <Card className="w-full max-w-[440px] p-8 md:p-10">
           <div className="mb-8 flex flex-col items-center text-center">
             <Logo href="/" className="mb-6" />
+            {icon && <div className="mb-6 flex justify-center">{icon}</div>}
             <h1 className="text-[28px] font-bold leading-tight tracking-tight">{title}</h1>
             {subtitle && <p className="mt-2 max-w-[340px] text-sm leading-relaxed text-muted">{subtitle}</p>}
           </div>
