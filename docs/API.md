@@ -388,7 +388,7 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 | `APPROVAL_STALE` **§12.4** | 409 | The approval doesn't match current data: `planVersionId` not current / `planHash` differs; or publish `renderId` not current / `mp4Sha256` differs / connection changed | D8, H2, H6 |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | Same `Idempotency-Key` with a different request body/path | idempotent endpoints |
 | `IDEMPOTENCY_IN_PROGRESS` | 409 | The first request with this key is still being processed; retry in a moment | idempotent endpoints |
-| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions) | C2, D5, D8, F4 |
+| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions). Caption fixes (F4) never return it (decision #24a) | C2, D5, D8 |
 | `RATE_LIMITED` | 429 | Too many requests in a short window; `Retry-After` header + `details.retryAfterSeconds` | all |
 | `SPEND_CEILING` **§12.4** | 503 | A global provider spend ceiling was reached; new generations are paused, existing videos stay available | C2, D5, D8, F4, C7, H1 |
 | `MAINTENANCE` | 503 | Admin turned on maintenance mode; reads still work | all mutations except admin |
@@ -1478,16 +1478,16 @@ GET /api/v1/projects/67330d5e9f1e4b2a7c0d2a10/renders/current/media?kind=downloa
 ```
 
 #### F4. `POST /api/v1/projects/{projectId}/renders/{renderId}/caption-overrides` — Caption correction
-Purpose: fix caption text (e.g. a technical term) **without changing the narration audio** (PRD §6.3). Saves a new immutable caption-override set and starts a `caption` job (re-compile captions + re-render, no speech; PIPELINE_DESIGN §9). Auth: creator. Rate: 10/hour; counts toward **3 videos/day**. **Idempotency-Key required.**
+Purpose: fix caption text (e.g. a technical term) **without changing the narration audio** (PRD §6.3). Saves a new immutable caption-override set and starts a `caption` job (re-compile captions + re-render, no speech; PIPELINE_DESIGN §9). Auth: creator. Rate: 10/hour; does **not** count toward the 3 videos/day quota (decision #24a: only `generate` jobs count). **Idempotency-Key required.**
 
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `edits` | array 1–50 of `{ sceneId: SafeId, phraseIndex: int ≥ 0, text: string 1–200 }` | ✓ | Each `(sceneId, phraseIndex)` must exist in this render's captions; unique pairs. Hindi text must be Devanagari, Hinglish Roman (same script rule as the plan) |
 | `expectedStateVersion` | int | ✓ | |
 
-`renderId` must be the project's current render (`current` allowed). Allowed states: `video_ready`, `scheduled`, `publish_failed`; no active job. Effect (transaction): `captionOverrides` (new set = previous set's overrides + these edits), `jobs` (`caption`), project `generating`, `activeJobId`, `usageCounters.videos +1`, a `scheduled` post → `approval_invalidated`; Inngest `video.recaption.requested`. The UI shows the PRD note "Narration audio is unchanged" and offers "regenerate narration too" (= a D3 narration edit instead).
+`renderId` must be the project's current render (`current` allowed). Allowed states: `video_ready`, `scheduled`, `publish_failed`; no active job. Effect (transaction): `captionOverrides` (new set = previous set's overrides + these edits), `jobs` (`caption`), project `generating`, `activeJobId` (no quota counter changes), a `scheduled` post → `approval_invalidated`; Inngest `video.recaption.requested`. The UI shows the PRD note "Narration audio is unchanged" and offers "regenerate narration too" (= a D3 narration edit instead).
 Success `202` → `{ captionOverrideSetId, job: Job, project: Project }`.
-Errors: `400 INVALID_INPUT` (unknown phrase, script) · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` (not the current render / wrong state) · `409 JOB_ALREADY_RUNNING` · `429 QUOTA_EXCEEDED` · `503 SPEND_CEILING`.
+Errors: `400 INVALID_INPUT` (unknown phrase, script) · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` (not the current render / wrong state) · `409 JOB_ALREADY_RUNNING` · `503 SPEND_CEILING`.
 ```json
 { "edits": [ { "sceneId": "scene-flow", "phraseIndex": 1, "text": "to NPCI — the national switch" } ], "expectedStateVersion": 7 }
 ```

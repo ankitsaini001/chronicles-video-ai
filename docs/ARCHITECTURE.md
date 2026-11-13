@@ -773,7 +773,7 @@ No credits are shown to users in V1 (PRD). Internal limits are configured in `se
 
 | Limit | Default (confirmed: 3 videos/day; others tuned during the beta) |
 |---|---|
-| **Videos generated (renders) per user per day** | **3** (decision D8) |
+| **Videos generated per user per day** | **3** (decision D8). Counts accepted `generate` jobs only; caption re-renders (caption fixes) and retries don't count (PRD decision #24a) |
 | Projects created per user per day | 5 |
 | Plan + revision requests per project | 20 |
 | ElevenLabs characters per user per month | 3,000 |

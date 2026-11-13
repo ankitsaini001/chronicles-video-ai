@@ -1484,8 +1484,8 @@ paths:
       description: |
         F4. Saves a new caption-override set and starts a `caption` job (compile + render + validate).
         renderId must be the current render. **Idempotency-Key and expectedStateVersion required.**
-        Does NOT count toward 3 videos/day (decision #24). 409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING. 503 SPEND_CEILING.
-        Rate limit 10/hour.
+        Does NOT count toward 3 videos/day and never returns QUOTA_EXCEEDED (decision #24a: only generate jobs count).
+        409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING. 503 SPEND_CEILING. Rate limit 10/hour (429 RATE_LIMITED).
       tags: [Video]
       security:
         - sessionCookie: []
@@ -1531,7 +1531,7 @@ paths:
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
         '503':
