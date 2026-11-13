@@ -7,8 +7,12 @@ info:
     Machine-readable mirror of `docs/API.md` (version 1.0, 2026-11-12, status: **Draft for founder review**).
     `docs/API.md` is the source of truth for behaviour, flows and user-facing messages.
 
-    - All application endpoints are REST JSON route handlers under `/api/v1` (PRD decisions log #21).
+    - All application endpoints are REST JSON route handlers under `/api/v1` (PRD decisions log #22).
     - Better Auth is mounted at `/api/auth/*`; its errors use Better Auth's own body `{ code, message }`.
+      Only the 6 auth operations listed here are exposed; every other Better Auth default endpoint
+      (update-user, delete-user, list/revoke sessions, change-email, request/forget password, …) is disabled
+      and answers 404. Server-owned user fields (role, status, failedLoginCount, lockedUntil, lastLoginAt,
+      timezone and defaults) are declared `input: false`, so no auth request can set them.
       All `/api/v1` errors use the envelope `{ error: { code, message, details?, requestId } }`.
     - CSRF: SameSite=Lax session cookie + an `Origin` check on every mutating request
       (`POST`, `PUT`, `PATCH`, `DELETE`) to `/api/v1/*` and `/api/auth/*`. Meta callbacks are exempt
@@ -63,6 +67,8 @@ paths:
       description: |
         A1. Creates an account and signs in. The email must be on the allow-list (`NOT_ALLOWLISTED` otherwise).
         Password 8–128 chars. Rate limit 5 / 15 min per IP. Origin check. Errors use Better Auth's `{ code, message }`.
+        Conscious private-beta choice: sign-up reveals whether an email is not invited (NOT_ALLOWLISTED) or
+        already registered (USER_ALREADY_EXISTS), for clear messages to invited people; protected by the rate limit.
       tags: [Auth]
       security: []
       requestBody:
@@ -84,7 +90,7 @@ paths:
                 $ref: '#/components/schemas/AuthTokenResponse'
               example:
                 token: Qm9yZWVsU2Vzc2lvbl9leGFtcGxl
-                user: { id: 67330c1a9f1e4b2a7c0d1e01, name: Ananya Iyer, email: ananya.iyer@example.in, emailVerified: false, image: null, role: creator, status: active, timezone: Asia/Kolkata, defaultLanguage: en, defaultVoiceGender: female, createdAt: '2026-11-12T04:30:00.000Z', updatedAt: '2026-11-12T04:30:00.000Z' }
+                user: { id: 67330c1a9f1e4b2a7c0d1e01, name: Ananya Iyer, email: ananya.iyer@example.in, emailVerified: false, role: creator, status: active, timezone: Asia/Kolkata, defaultLanguage: en, defaultVoiceGender: female, createdAt: '2026-11-12T04:30:00.000Z', updatedAt: '2026-11-12T04:30:00.000Z' }
         '400':
           $ref: '#/components/responses/BetterAuthBadRequest'
         '403':
@@ -134,6 +140,8 @@ paths:
                 redirect: false
                 token: Qm9yZWVsU2Vzc2lvbl9leGFtcGxl
                 user: { id: 67330c1a9f1e4b2a7c0d1e01, name: Ananya Iyer, email: ananya.iyer@example.in, role: creator, status: active }
+        '400':
+          $ref: '#/components/responses/BetterAuthBadRequest'
         '401':
           description: INVALID_EMAIL_OR_PASSWORD (generic message, no enumeration).
           content:
@@ -142,7 +150,7 @@ paths:
                 $ref: '#/components/schemas/BetterAuthError'
               example: { code: INVALID_EMAIL_OR_PASSWORD, message: Email or password is incorrect }
         '403':
-          description: ACCOUNT_SUSPENDED (after a correct password) or FORBIDDEN_ORIGIN.
+          description: ACCOUNT_SUSPENDED (after a correct password; status suspended or deleting) or FORBIDDEN_ORIGIN.
           content:
             application/json:
               schema:
@@ -154,7 +162,7 @@ paths:
     post:
       operationId: signOut
       summary: Log out
-      description: A3. Deletes the current session and clears the cookie. Origin check.
+      description: A3. Deletes the current session and clears the cookie. Origin check. Answers 200 also without a session (Better Auth 1.7.14).
       tags: [Auth]
       security:
         - sessionCookie: []
@@ -177,8 +185,6 @@ paths:
                   success:
                     type: boolean
               example: { success: true }
-        '401':
-          $ref: '#/components/responses/BetterAuthUnauthorized'
         '403':
           $ref: '#/components/responses/BetterAuthForbiddenOrigin'
   /api/auth/get-session:
@@ -342,6 +348,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -353,7 +361,7 @@ paths:
       summary: Delete account (asynchronous cascade)
       description: |
         B3. Re-authenticates with the password and `confirm: "DELETE"`. Marks the user `deleting`, revokes all
-        sessions, cancels scheduled posts, then the `delete-account` Inngest function deletes R2 data, the
+        sessions, cancels scheduled and publish_failed posts, then the `delete-account` Inngest function deletes R2 data, the
         Instagram token and all owner-scoped records. **Idempotency-Key required.** Rate limit 3/hour.
         409 INVALID_STATE while a post is publishing.
       tags: [Account]
@@ -378,7 +386,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeletionAccepted'
-              example: { deletionRequestId: 673312aa9f1e4b2a7c0d9c01, status: pending, requestedAt: '2026-11-12T10:00:00.000Z' }
+              example: { deletionRequestId: 673312aa9f1e4b2a7c0d9c01, status: pending, requestedAt: '2026-11-12T10:00:00.000Z', eraseAfter: '2026-12-12T10:00:00.000Z' }
         '400':
           $ref: '#/components/responses/InvalidInput'
         '401':
@@ -393,12 +401,16 @@ paths:
                 error: { code: FORBIDDEN, message: Your password is incorrect., details: { reason: wrong_password }, requestId: req_01JCXM0G5H6J }
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/voices:
     get:
       operationId: listVoices
@@ -504,10 +516,14 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
 
   # =============================== Projects ===============================
   /api/v1/projects:
@@ -653,8 +669,15 @@ paths:
           $ref: '#/components/responses/Internal'
     patch:
       operationId: renameProject
-      summary: Rename a project
-      description: C4. **expectedStateVersion required.** Allowed in every state except archived. Rate limit 60/min.
+      summary: Rename a project, or edit its idea after the storyboard failed
+      description: |
+        C4. **expectedStateVersion required.** Rate limit 60/min. At least one of `title`, `text`.
+        Rename (`title`): allowed in every state except archived. Edit idea (`text`, optional `title`): only in
+        plan_failed with no active job; replaces `input.text` (same length rules as create for the project's
+        inputType), sets the title (sent title or first 120 chars of the text), keeps the project plan_failed.
+        Then retry the failed plan job (POST /api/v1/jobs/{jobId}/retry), which plans from the edited idea.
+        Does not count toward the 5 projects/day quota. 409 INVALID_STATE (archived, or text outside
+        plan_failed), STALE_VERSION, JOB_ALREADY_RUNNING.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -664,10 +687,16 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RenameProjectRequest'
-            example: { title: UPI in 2 seconds, expectedStateVersion: 4 }
+            examples:
+              rename:
+                summary: Rename
+                value: { title: UPI in 2 seconds, expectedStateVersion: 4 }
+              editIdea:
+                summary: Edit the idea after the storyboard failed (plan_failed only)
+                value: { text: "How a UPI payment travels from your phone to the shop's bank in two seconds", expectedStateVersion: 3 }
       responses:
         '200':
-          description: The renamed project (stateVersion + 1).
+          description: The updated project (stateVersion + 1).
           content:
             application/json:
               schema:
@@ -685,14 +714,18 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
     delete:
       operationId: archiveProject
       summary: Archive a project (soft delete)
-      description: C5. **If-Match required.** Blocked while a post is publishing (409 INVALID_STATE). Cancels the active job and a scheduled post. Nothing is deleted from R2.
+      description: C5. **If-Match required.** Blocked while a post is publishing or outcome_unknown (409 INVALID_STATE). Cancels the active job and a scheduled or publish_failed post (so it can never be published or retried). Nothing is deleted from R2.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -722,10 +755,14 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: This video is being published right now. You can archive it in a few minutes., details: { state: publishing }, requestId: req_01JCXM1N0P1Q }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/status:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -812,6 +849,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           description: PROVIDER_REJECTED (unsafe subject).
           content:
@@ -915,7 +954,8 @@ paths:
       description: |
         D3. Inline narration edit → new `user_edit` plan version (re-validated, re-hashed); the approval is
         reset. Saved even if validation fails (validation.valid = false). **expectedStateVersion required.**
-        Allowed in storyboard_ready, generate_failed, video_ready with no active job. Rate limit 60/min.
+        Allowed in storyboard_ready, generate_failed, video_ready, scheduled, publish_failed with no active job. A scheduled
+        or publish_failed post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
       tags: [Storyboard]
       security:
@@ -950,17 +990,21 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/voice:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
     post:
       operationId: changeVoice
       summary: Switch the narrator voice (new user_edit version)
-      description: D4. Male ↔ Female; only voicePreset changes. **expectedStateVersion required.** Same states as D3. 400 when the gender is unchanged. Rate limit 60/min.
+      description: D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled or publish_failed; that post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1000,10 +1044,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/revisions:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -1013,6 +1061,8 @@ paths:
       description: |
         D5. Starts a `revise` job; on success a new `ai_revision` version becomes current and the project
         returns to storyboard_ready (approve again). Ambiguous requests end `rejected` with an assistantReply.
+        A scheduled or publish_failed post's approval is cancelled immediately when the revision is requested (approval_invalidated
+        + notification), not when the revise job succeeds (PRD §7).
         **Idempotency-Key and expectedStateVersion required.** Rate limit 20/hour; quota 20 plan+revision
         requests per project (429, resetsAt null); 503 SPEND_CEILING.
       tags: [Storyboard]
@@ -1050,6 +1100,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -1107,7 +1159,7 @@ paths:
     post:
       operationId: restorePlanVersion
       summary: Undo / restore an earlier plan version
-      description: D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. **expectedStateVersion required.** 409 INVALID_STATE when already current.
+      description: D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1138,10 +1190,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/storyboard-approval:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -1154,6 +1210,9 @@ paths:
         **Idempotency-Key and expectedStateVersion required.** Quota 3 videos/day (429 QUOTA_EXCEEDED).
         409: STALE_VERSION, APPROVAL_STALE, INVALID_STATE, JOB_ALREADY_RUNNING. 422 PLAN_INVALID.
         503 SPEND_CEILING. Rate limit 10/hour.
+        Re-approval: if a generate job for this exact plan version already succeeded (e.g. after undo), no new
+        job is started and no quota is used; the answer is 200 with that job, and the project moves to
+        video_ready with currentRenderId = the newest ready render of that version.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1167,6 +1226,15 @@ paths:
               $ref: '#/components/schemas/ApproveStoryboardRequest'
             example: { planVersionId: 67330e019f1e4b2a7c0d2b02, planHash: 'sha256:5d7a0c9e1f3b4a6d8c2e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c', expectedStateVersion: 5 }
       responses:
+        '200':
+          description: Re-approval of a plan version whose generate job already succeeded; the existing render is reused (no new job, no quota use, project video_ready).
+          headers:
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResult'
         '202':
           description: Approved; generate job queued.
           headers:
@@ -1199,6 +1267,8 @@ paths:
                   $ref: '#/components/examples/ErrApprovalStale'
                 staleVersion:
                   $ref: '#/components/examples/ErrStaleVersion'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           description: PLAN_INVALID (details.issues are ValidationIssues) or IDEMPOTENCY_KEY_REUSED.
           content:
@@ -1254,8 +1324,11 @@ paths:
       operationId: retryJob
       summary: Retry / resume a failed job
       description: |
-        E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable and
-        cancelled plan/caption jobs (not publish jobs: use the post retry). **Idempotency-Key required.**
+        E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable,
+        cancelled plan/caption jobs, and failed plan jobs whose idea was edited (PATCH project `text`) after the
+        failure; plan retries use the current idea and never count toward projects/day, but a retry that plans
+        from an edited idea counts 1 toward the 20 plan + revision requests per project (429 QUOTA_EXCEEDED
+        plan_requests_per_project at the limit). Not for publish jobs: use the post retry. **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
       tags: [Jobs]
       security:
@@ -1282,6 +1355,8 @@ paths:
               examples:
                 requeued:
                   $ref: '#/components/examples/JobPlanQueued'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -1296,10 +1371,12 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: "This step can't be retried. Please edit your idea or storyboard instead.", details: { jobState: failed, retryable: false }, requestId: req_01JCXM3G1H2J }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
-          $ref: '#/components/responses/RateLimited'
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/Internal'
         '503':
@@ -1345,10 +1422,14 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: This job has already finished., details: { jobState: succeeded }, requestId: req_01JCXM3K3L4M }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
 
   # =============================== Video ===============================
   /api/v1/projects/{projectId}/renders:
@@ -1484,8 +1565,9 @@ paths:
       description: |
         F4. Saves a new caption-override set and starts a `caption` job (compile + render + validate).
         renderId must be the current render. **Idempotency-Key and expectedStateVersion required.**
-        Does NOT count toward 3 videos/day (decision #24). 409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING. 503 SPEND_CEILING.
-        Rate limit 10/hour.
+        Does NOT count toward 3 videos/day and never returns QUOTA_EXCEEDED (decision #24a: only generate jobs count).
+        A scheduled or publish_failed post's approval is cancelled immediately (approval_invalidated + notification).
+        409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING. 503 SPEND_CEILING. Rate limit 10/hour (429 RATE_LIMITED).
       tags: [Video]
       security:
         - sessionCookie: []
@@ -1528,10 +1610,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
         '503':
@@ -1565,7 +1649,7 @@ paths:
     delete:
       operationId: disconnectInstagram
       summary: Disconnect Instagram
-      description: G4. Removes the encrypted token, marks the connection revoked and invalidates scheduled posts. 409 INVALID_STATE while a post is publishing.
+      description: G4. Removes the encrypted token, marks the connection revoked and invalidates scheduled and publish_failed posts. 409 INVALID_STATE while a post is publishing.
       tags: [Instagram]
       security:
         - sessionCookie: []
@@ -1592,10 +1676,14 @@ paths:
                 error: { code: NOT_FOUND, message: No Instagram account is connected., requestId: req_01JCXM4G7H8J }
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/instagram/connect:
     get:
       operationId: startInstagramConnect
@@ -1632,8 +1720,13 @@ paths:
       summary: Instagram OAuth callback
       description: |
         G3. Verifies `state` (signature, expiry, current session), exchanges the code for a long-lived token,
-        requires a BUSINESS or MEDIA_CREATOR account, encrypts and stores the token. Always answers with a 302
-        back to the returnTo page: `?instagram=connected` or `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` /
+        requires a BUSINESS or MEDIA_CREATOR account, rejects an Instagram account that already has an active
+        connection owned by a different ByteReel user (INSTAGRAM_ACCOUNT_IN_USE, "This Instagram account is already
+        connected to another ByteReel account."; unique partial index on igUserId where status = active), then
+        encrypts and stores the token. Connecting a different account invalidates scheduled and publish_failed posts
+        (one transaction with the connection upsert). Always answers with a 302 back to the returnTo page: `?instagram=connected`
+        or one error format `?instagram_error=<CODE>[&reason=<reason>]`:
+        `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` / `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` /
         `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`.
       tags: [Instagram]
       security:
@@ -1712,6 +1805,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           description: PROVIDER_REJECTED.
           content:
@@ -1747,6 +1842,8 @@ paths:
         **Idempotency-Key and expectedStateVersion required.** Rate limit 10/hour.
         409: STALE_VERSION, APPROVAL_STALE (render_not_current, mp4_hash_mismatch, connection_changed),
         INSTAGRAM_NOT_CONNECTED, INSTAGRAM_TOKEN_EXPIRED, INVALID_STATE, JOB_ALREADY_RUNNING.
+        Each approval gets a new approval.id; publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}
+        (unique), so a re-approval makes a new post while the same approval can never publish twice.
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -1776,7 +1873,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PostResult'
               example:
-                post: { id: 673310209f1e4b2a7c0d8b01, state: scheduled, mode: scheduled, scheduledAt: '2026-11-13T13:30:00.000Z', permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics", jobId: 673310209f1e4b2a7c0d3c05, approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }, igMediaId: null, attempts: 0, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z' }
+                post: { id: 673310209f1e4b2a7c0d8b01, state: scheduled, mode: scheduled, scheduledAt: '2026-11-13T13:30:00.000Z', permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics", jobId: 673310209f1e4b2a7c0d3c05, approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }, igMediaId: null, attempts: 0, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z' }
                 job: { id: 673310209f1e4b2a7c0d3c05, projectId: 67330d5e9f1e4b2a7c0d2a10, type: publish, state: queued, attempt: 1, stages: [ { name: approve, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: create_container, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: poll, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: publish, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null } ], progress: { stage: approve, percent: 0, message: 'Scheduled for 13 Nov, 7:00 pm' }, error: null, needsInput: null, result: { postId: 673310209f1e4b2a7c0d8b01 }, cancelRequestedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: null }
                 project: { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work, language: en, voiceGender: female, state: scheduled, currentStep: publish, thumbnailUrl: null, latestPost: { id: 673310209f1e4b2a7c0d8b01, state: scheduled, mode: scheduled, scheduledAt: '2026-11-13T13:30:00.000Z', permalink: null }, activeJobType: null, input: { type: topic, text: How UPI payments work — from scanning the QR code to money reaching the shop, brainstormChoice: null }, stateVersion: 10, currentPlanVersionId: 67330e019f1e4b2a7c0d2b02, approvedPlanVersionId: 67330e019f1e4b2a7c0d2b02, currentRenderId: 67330fa09f1e4b2a7c0d6f02, activeJobId: null, activeJob: null, lastError: null, allowedActions: [rename, download, cancel_post, request_revision, edit_captions], archivedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z' }
         '400':
@@ -1808,6 +1905,8 @@ paths:
                   summary: Render changed
                   value:
                     error: { code: APPROVAL_STALE, message: The video changed after you approved it. Please review and approve again., details: { reason: render_not_current }, requestId: req_01JCXM5D1E2F }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -1915,17 +2014,21 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: "This post is being published right now and can't be cancelled.", details: { postState: publishing }, requestId: req_01JCXM5A9B0C }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/posts/{postId}/retry:
     parameters:
       - $ref: '#/components/parameters/PostId'
     post:
       operationId: retryPost
       summary: Retry a failed publish
-      description: H6. Only publish_failed. Re-checks the publish approval (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED.
+      description: H6. Only publish_failed. Re-checks the publish approval, including project not archived, user active, and the project's current render and current/approved plan still the approved ones (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED.
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -1949,8 +2052,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/PostRetryResult'
               example:
-                post: { id: 673310209f1e4b2a7c0d8b01, state: publishing, mode: now, scheduledAt: null, permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Here's the journey of a UPI payment 👇 #UPI", jobId: 673310209f1e4b2a7c0d3c05, approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: null }, igMediaId: null, attempts: 2, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z' }
+                post: { id: 673310209f1e4b2a7c0d8b01, state: publishing, mode: now, scheduledAt: null, permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Here's the journey of a UPI payment 👇 #UPI", jobId: 673310209f1e4b2a7c0d3c05, approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: null }, igMediaId: null, attempts: 2, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z' }
                 job: { id: 673310209f1e4b2a7c0d3c05, projectId: 67330d5e9f1e4b2a7c0d2a10, type: publish, state: queued, attempt: 2, stages: [ { name: approve, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: create_container, status: skipped, startedAt: null, endedAt: null, attempts: 1, error: null }, { name: poll, status: pending, startedAt: null, endedAt: null, attempts: 1, error: null }, { name: publish, status: pending, startedAt: null, endedAt: null, attempts: 1, error: null } ], progress: { stage: approve, percent: 0, message: Publishing again… }, error: null, needsInput: null, result: { postId: 673310209f1e4b2a7c0d8b01 }, cancelRequestedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: 2000 }
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -1965,12 +2070,16 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: APPROVAL_STALE, message: The video changed after you approved it. Please review and approve again., details: { reason: render_not_current }, requestId: req_01JCXM5D1E2F }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
 
   # =============================== Admin ===============================
   /api/v1/admin/allowlist:
@@ -2047,6 +2156,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: ALREADY_EXISTS, message: This email is already on the allow-list., requestId: req_01JCXM5K5L6M }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2079,6 +2190,8 @@ paths:
           $ref: '#/components/responses/AdminOnly'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2157,7 +2270,7 @@ paths:
     patch:
       operationId: adminUpdateUserStatus
       summary: Suspend or reactivate a user
-      description: I6. Suspending deletes all sessions, cancels active jobs and invalidates scheduled posts; reason required. Not allowed on yourself or a deleting user (409 INVALID_STATE).
+      description: I6. Suspending deletes all sessions, cancels active jobs and invalidates scheduled and publish_failed posts; reason required. Not allowed on yourself or a deleting user (409 INVALID_STATE).
       tags: [Admin]
       security:
         - adminSession: []
@@ -2194,6 +2307,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: "You can't suspend your own account.", details: { reason: self }, requestId: req_01JCXM5Z3A4B }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2231,6 +2346,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2305,7 +2422,7 @@ paths:
     post:
       operationId: adminRetryJob
       summary: Retry any user's job
-      description: I9. Same rules as the creator retry (approval re-checked), also for failed publish jobs. **Idempotency-Key required.** 409 INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED, APPROVAL_STALE.
+      description: I9. Same rules as the creator retry (approval re-checked), also for failed publish jobs (same full re-check as the post retry, including project not archived and user active). **Idempotency-Key required.** 409 INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED, APPROVAL_STALE.
       tags: [Admin]
       security:
         - adminSession: []
@@ -2331,6 +2448,8 @@ paths:
               examples:
                 failedJob:
                   $ref: '#/components/examples/AdminJobFailed'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -2345,6 +2464,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: JOB_ALREADY_RUNNING, message: This project already has a running job., details: { activeJobId: 67330f109f1e4b2a7c0d3c03 }, requestId: req_01JCXM6G9H0J }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -2487,6 +2608,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: STALE_VERSION, message: Settings were changed by someone else. Reload and try again., details: { expectedVersion: 3, currentVersion: 4 }, requestId: req_01JCXM6R5S6T }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2499,7 +2622,8 @@ paths:
       summary: Meta deauthorize callback
       description: |
         J1. Called by Meta with a form-encoded `signed_request` (HMAC-SHA256 with the app secret, verified in
-        constant time). Marks matching connections revoked, deletes the token, invalidates scheduled posts.
+        constant time). Marks matching connections revoked, deletes the token, invalidates scheduled and publish_failed
+        posts (one transaction).
         Exempt from the Origin check. Rate limit 60/min per IP.
       tags: [Meta]
       security: []
@@ -2530,6 +2654,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_SIGNATURE, message: Invalid signed_request., requestId: req_01JCXM6V7W8X }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2567,6 +2693,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_SIGNATURE, message: Invalid signed_request., requestId: req_01JCXM6Z9A0B }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2714,7 +2842,7 @@ components:
       enum: [active, expired, revoked, error]
     AllowedAction:
       type: string
-      enum: [rename, archive, edit_storyboard, request_revision, approve_storyboard, cancel_job, retry_job, edit_captions, download, publish, cancel_post, retry_post]
+      enum: [rename, edit_idea, archive, edit_storyboard, request_revision, approve_storyboard, cancel_job, retry_job, edit_captions, download, publish, cancel_post, retry_post]
     NotificationType:
       type: string
       enum: [storyboard_ready, video_ready, needs_input, generate_failed, post_published, post_failed, approval_invalidated, instagram_reconnect]
@@ -2754,6 +2882,7 @@ components:
         - INSTAGRAM_NOT_CONNECTED
         - INSTAGRAM_TOKEN_EXPIRED
         - INSTAGRAM_ACCOUNT_INELIGIBLE
+        - INSTAGRAM_ACCOUNT_IN_USE
         - INSTAGRAM_OAUTH_FAILED
         - PUBLISH_LIMIT_REACHED
         - PUBLISH_FAILED
@@ -2785,7 +2914,7 @@ components:
       properties:
         code:
           type: string
-          enum: [NOT_ALLOWLISTED, USER_ALREADY_EXISTS, PASSWORD_TOO_SHORT, PASSWORD_TOO_LONG, INVALID_EMAIL, INVALID_EMAIL_OR_PASSWORD, TOO_MANY_ATTEMPTS, ACCOUNT_SUSPENDED, INVALID_PASSWORD, INVALID_TOKEN, FORBIDDEN_ORIGIN, UNAUTHORIZED]
+          enum: [NOT_ALLOWLISTED, USER_ALREADY_EXISTS, PASSWORD_TOO_SHORT, PASSWORD_TOO_LONG, INVALID_EMAIL, INVALID_INPUT, PAYLOAD_TOO_LARGE, NOT_FOUND, INVALID_EMAIL_OR_PASSWORD, TOO_MANY_ATTEMPTS, ACCOUNT_SUSPENDED, INVALID_PASSWORD, INVALID_TOKEN, FORBIDDEN_ORIGIN, UNAUTHORIZED]
         message:
           type: string
     LastError:
@@ -3625,8 +3754,11 @@ components:
           $ref: '#/components/schemas/Timestamp'
     PostApproval:
       type: object
-      required: [renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt]
+      description: Snapshot of publish approval 2. `id` is a new approval id for every approval; the post's unique publishKey is pub:{projectId}:{renderId}:{connectionId}:{approvalId}.
+      required: [id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt]
       properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
         renderId:
           $ref: '#/components/schemas/ObjectId'
         mp4Sha256:
@@ -4040,7 +4172,7 @@ components:
           maxLength: 128
         rememberMe:
           type: boolean
-          description: Ignored; sessions are always 30 days.
+          description: Accepted but dropped before Better Auth; sessions are always 30 days.
     ChangePasswordRequest:
       type: object
       additionalProperties: false
@@ -4134,13 +4266,22 @@ components:
           $ref: '#/components/schemas/BrainstormChoice'
     RenameProjectRequest:
       type: object
+      description: Rename (title) and/or edit the idea (text, only while plan_failed). At least one of title, text.
       additionalProperties: false
-      required: [title, expectedStateVersion]
+      required: [expectedStateVersion]
+      anyOf:
+        - required: [title]
+        - required: [text]
       properties:
         title:
           type: string
           minLength: 1
           maxLength: 120
+        text:
+          type: string
+          description: New idea text; only accepted while the project is plan_failed. Length rules as in CreateProjectRequest for the project's inputType (topic/brainstorm 3–300, notes 20–5,000).
+          minLength: 3
+          maxLength: 5000
         expectedStateVersion:
           type: integer
           minimum: 1
@@ -4432,7 +4573,8 @@ components:
             $ref: '#/components/schemas/BrainstormIdea'
     DeletionAccepted:
       type: object
-      required: [deletionRequestId, status, requestedAt]
+      required: [deletionRequestId, status, requestedAt, eraseAfter]
+      description: The account is hidden and logged out now; personal data is erased at eraseAfter (30-day grace period, an admin can restore it until then).
       properties:
         deletionRequestId:
           $ref: '#/components/schemas/ObjectId'
@@ -4440,6 +4582,8 @@ components:
           type: string
           const: pending
         requestedAt:
+          $ref: '#/components/schemas/Timestamp'
+        eraseAfter:
           $ref: '#/components/schemas/Timestamp'
     MetaDataDeletionResponse:
       type: object
@@ -4800,6 +4944,15 @@ components:
               $ref: '#/components/examples/ErrMaintenance'
             spendCeiling:
               $ref: '#/components/examples/ErrSpendCeiling'
+    Maintenance:
+      description: Admin turned on maintenance mode (MAINTENANCE); reads still work. Returned by every creator write operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            maintenance:
+              $ref: '#/components/examples/ErrMaintenance'
     Internal:
       description: Unexpected error (INTERNAL).
       content:
@@ -5035,7 +5188,7 @@ components:
               narration:
                 - { id: line-hook, text: 'You scan a QR code, type your PIN, and the chaiwala gets paid in two seconds. How does the money travel so fast?', speech: null, display: null }
               objects:
-                - { id: hook-title, kind: headline, label: How does UPI move money?, icon: question, value: null }
+                - { id: hook-title, kind: headline, label: 'How does UPI move money?', icon: question, value: null }
                 - { id: hook-sub, kind: subtitle, label: "From QR code to the shop's bank in 2 seconds", value: null }
               events:
                 - { id: ev-hook-title, anchor: { narrationId: line-hook, phrase: How does the money travel }, action: appear, target: hook-title }
@@ -5105,7 +5258,7 @@ components:
         connectionId: 6733101a9f1e4b2a7c0d7a01
         caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics"
         jobId: 673310209f1e4b2a7c0d3c05
-        approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
+        approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
         destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }
         igMediaId: null
         attempts: 0
@@ -5127,7 +5280,7 @@ components:
         connectionId: 6733101a9f1e4b2a7c0d7a01
         caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics"
         jobId: 673310209f1e4b2a7c0d3c05
-        approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
+        approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
         destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }
         igMediaId: '17900000000000001'
         attempts: 1

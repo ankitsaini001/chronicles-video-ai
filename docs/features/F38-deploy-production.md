@@ -18,6 +18,8 @@ The live ByteReel website.
 ## In scope
 - Domain (still to decide)
 - Vercel production setup
+- **Production database:** a second Atlas project with its own free M0 cluster (no cost), so beta users' data never mixes with test data (DATABASE.md Q1)
+- **Same region pair as F05:** Atlas region next to the Vercel function region (recommended Atlas Mumbai `ap-south-1` + Vercel `bom1`, DATABASE.md §2.1)
 - Paid-tier switches if needed
 - Submit Meta App Review
 - Invite beta users

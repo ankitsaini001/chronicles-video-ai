@@ -113,9 +113,9 @@ const EXAMPLES = [
     image: "/examples/savings-vs-fd-v2.jpg",
   },
   {
-    title: "Opportunity cost kya hai?",
+    title: "What is opportunity cost?",
     topic: "Economics",
-    language: "Hinglish",
+    language: "English",
     seconds: 68,
     voice: "Female voice",
     image: "/examples/opportunity-cost-v2.jpg",
@@ -191,6 +191,8 @@ export function Examples() {
 
 /* ---------- Languages ---------- */
 
+// Hinglish is supported in the app but not advertised on the home page (founder, 2026-11-13).
+
 const LANGUAGES = [
   {
     chip: "English",
@@ -208,13 +210,6 @@ const LANGUAGES = [
     sampleLabel: "नमूना स्क्रिप्ट (Sample)",
     sample: "“पौधों में प्रकाश संश्लेषण (Photosynthesis) कैसे होता है? आसान भाषा में समझें।”",
   },
-  {
-    chip: "Hinglish",
-    note: "Bilingual rhythm",
-    title: "Natural conversational flow",
-    sampleLabel: "Sample narration script",
-    sample: "“Opportunity cost ko ek simple example se samjho.”",
-  },
 ] as const;
 
 export function Languages() {
@@ -224,7 +219,7 @@ export function Languages() {
         <Eyebrow>Voice &amp; languages</Eyebrow>
         <Heading>Speak to your learners in their own language</Heading>
       </div>
-      <ul className="grid gap-8 md:grid-cols-3">
+      <ul className="grid gap-8 md:grid-cols-2">
         {LANGUAGES.map((l) => {
           const lang = "lang" in l ? l.lang : undefined;
           return (
@@ -333,7 +328,7 @@ const FAQ: { q: string; a: ReactNode }[] = [
     q: "Which languages are supported?",
     a: (
       <>
-        English, Hindi (<span lang="hi">हिंदी</span>) and Hinglish. For every video you choose a female or male voice.
+        English and Hindi (<span lang="hi">हिंदी</span>). For every video you choose a female or male voice.
       </>
     ),
   },

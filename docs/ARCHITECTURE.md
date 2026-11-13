@@ -87,8 +87,8 @@ ByteReel is a web application where an educational creator turns a topic or note
                          ┌──────────────────────────────────────────────────────────────┐
   Creator's browser      │                    Vercel (Next.js app)                      │
  ┌──────────────────┐    │  ┌───────────────────────┐   ┌────────────────────────────┐  │
- │ Next.js React UI │◄──►│  │ App Router pages (RSC)│   │ Route handlers / Server    │  │
- │ (4-step flow)    │    │  │ + Server Actions      │   │ Actions (auth'd API)       │  │
+ │ Next.js React UI │◄──►│  │ App Router pages (RSC)│   │ REST API route handlers    │  │
+ │ (4-step flow)    │    │  │                       │   │ /api/v1 (auth'd)           │  │
  └──────────────────┘    │  └───────────┬───────────┘   └─────────────┬──────────────┘  │
           │              │              │      Domain services (packages/core)          │
           │ signed URLs  │              └──────────────┬────────────────┘               │
@@ -139,7 +139,7 @@ ByteReel is a web application where an educational creator turns a topic or note
 | Layer | Choice | Notes |
 |---|---|---|
 | Language | TypeScript (strict), Node.js 24 LTS | Same as the prototype |
-| Web framework | **Next.js** (App Router, React Server Components, Server Actions) | Pinned at setup |
+| Web framework | **Next.js** (App Router, React Server Components, REST route handlers under `/api/v1`) | Pinned at setup |
 | UI | **Tailwind CSS + shadcn/ui** | Simple, accessible components; mobile-first |
 | Client data | **TanStack Query** | Polling and status refresh |
 | Validation | **Zod** | Shared with the pipeline contracts |
@@ -248,16 +248,18 @@ draft ──approve+schedule──► scheduled ──time──► publishing �
 
 ## 8. Data Model (MongoDB)
 
-Conventions: `_id` is an ObjectId unless stated; all timestamps are UTC `Date`; every owner-scoped document has `ownerId`; documents carry `schemaVersion`. **Versioned documents are insert-only.**
+Conventions: `_id` is an ObjectId unless stated; all timestamps are UTC `Date`; every owner-scoped document has `ownerId`; documents carry `schemaVersion`. **Versioned documents are insert-only.** The full field lists, examples, indexes and transactions are in **[DATABASE.md](DATABASE.md)** (kept in sync with this section).
 
 ### 8.1 Better Auth collections
-`user`, `session`, `account` (holds the password hash for the email/password credential), `verification` (used for admin-issued password-reset tokens): managed by Better Auth (MongoDB adapter). Extra fields on `user`: `name`, `timezone` (default `Asia/Kolkata`), `defaultLanguage`, `defaultVoiceGender`, `role` (`creator` | `admin`), `status` (`active` | `suspended`), `failedLoginCount`, `lockedUntil?`.
+`user`, `session`, `account` (holds the password hash for the email/password credential), `verification` (used for admin-issued password-reset tokens): managed by Better Auth (MongoDB adapter). Extra fields on `user`: `name`, `timezone` (default `Asia/Kolkata`), `defaultLanguage`, `defaultVoiceGender`, `role` (`creator` | `admin`), `status` (`active` | `suspended` | `deleting`), `failedLoginCount`, `lockedUntil?`, `lastLoginAt?`. Core Better Auth fields (e.g. `session.token`, `session.ipAddress`/`userAgent`, `account.accountId`/`providerId`/`password`, `verification.identifier`/`value`/`expiresAt`) follow Better Auth's core schema (DATABASE.md §4.1–4.4, confirmed in F08). **Indexes (created by our setup script, the adapter may not create them):** unique `user.email`, unique `session.token`, `session.userId`, `account { userId, providerId }`, `verification.identifier`, and TTL (`expireAfterSeconds: 0`) on `session.expiresAt` and `verification.expiresAt`.
 
 ### 8.2 `allowlist`
 | Field | Type | Notes |
 |---|---|---|
 | `email` | string (lowercased) | **unique** |
-| `invitedBy`, `createdAt`, `note` | | |
+| `invitedBy` | ObjectId? | Admin who added it; `null` when added by the setup command (F07) |
+| `createdAt`, `note` | | |
+| `signedUpUserId?` | ObjectId | Set when the person signs up |
 Sign-up is rejected unless the email is here (§10.2).
 
 ### 8.3 `projects`
@@ -274,10 +276,12 @@ Sign-up is rejected unless the email is here (§10.2).
 | `currentRenderId` | ObjectId? | Latest successful render |
 | `activeJobId` | ObjectId? | At most one active pipeline job per project |
 | `stateVersion` | int | Optimistic concurrency (§20.4) |
+| `planRequestCount` | int | Plan + revision requests used (limit 20, §23); +1 in the same transaction only if below the limit |
 | `lastError` | `{ code, message, at }`? | User-facing |
 | `createdAt`, `updatedAt`, `archivedAt?` | | |
+| `stateBeforeArchive?` | enum | State before archiving (API C5) |
 
-**Indexes:** `{ ownerId: 1, updatedAt: -1 }` (library), `{ ownerId: 1, state: 1 }`, `{ activeJobId: 1 }` (sparse).
+**Indexes:** `{ ownerId: 1, updatedAt: -1 }` (library), `{ ownerId: 1, state: 1 }`. (No `activeJobId` index: a job stores its `projectId`.)
 
 ### 8.4 `planVersions` (immutable)
 | Field | Type | Notes |
@@ -289,7 +293,7 @@ Sign-up is rejected unless the email is here (§10.2).
 | `plan` | object | Full plan contract (PIPELINE_DESIGN §5) |
 | `planHash` | string | Canonical hash (`sha256:…`) |
 | `validation` | `{ valid, issues[], warnings[] }` | |
-| `stats` | `{ scenes, words, estimatedSeconds }` | |
+| `stats` | `{ sceneCount, wordCount, estimatedSeconds }` | Code names (`PlanStats`) |
 | `plannerUsage` | `{ model, promptTokens, outputTokens, thinkingTokens, attempts }` | |
 | `createdAt` | | |
 
@@ -303,6 +307,7 @@ Sign-up is rejected unless the email is here (§10.2).
 | `basePlanVersionId`, `resultPlanVersionId?` | |
 | `status` | `pending` \| `succeeded` \| `failed` \| `rejected` (unsafe/unclear) |
 | `diff` | `{ changedSceneIds[], addedSceneIds[], removedSceneIds[], narrationChanged: bool }` |
+| `assistantReply?`, `jobId`, `createdAt`, `updatedAt` | |
 **Index:** `{ projectId: 1, createdAt: -1 }`.
 
 ### 8.6 `storyboardApprovals` (immutable)
@@ -337,6 +342,8 @@ Sign-up is rejected unless the email is here (§10.2).
 | `qa` | Machine checks (resolution, fps, duration, audio track, frames) |
 | `status` | `pending` \| `rendering` \| `validating` \| `ready` \| `failed` |
 | `metrics` | `{ renderMs, sandboxMs, bytes, durationMs, frames }` |
+| `mp4Sha256` | Fingerprint of the finished MP4 (bound to the publish approval) |
+| `error?`, `createdAt`, `readyAt?` | |
 **Indexes:** unique `(projectId, renderNumber)`; `{ ownerId: 1, projectId: 1 }`; `{ ownerId: 1, renderInputHash: 1 }`.
 
 ### 8.9 `jobs` (replaces the prototype `manifest.json`)
@@ -347,13 +354,15 @@ Sign-up is rejected unless the email is here (§10.2).
 | `state` | §7.3 |
 | `stages` | `[{ name, status, startedAt, endedAt, attempts, error? }]` |
 | `progress` | `{ stage, percent, message }` (shown in the UI) |
-| `idempotencyKey` | unique; prevents duplicate jobs from double-clicks |
+| `idempotencyKey` | **required**, unique; prevents duplicate jobs from double-clicks: `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}` |
+| `attempt`, `error?`, `needsInput?`, `result?` | Retry count; failure; creator input needed; what the job produced (API.md §8.2) |
 | `inngestRunId` | For tracing |
 | `cancelRequestedAt?` | |
+| `createdAt`, `updatedAt`, `startedAt?`, `finishedAt?` | |
 **Indexes:** unique `idempotencyKey`; `{ projectId: 1, createdAt: -1 }`; `{ state: 1, updatedAt: 1 }` (stuck-job sweeper).
 
 ### 8.10 `captionOverrides`
-`ownerId`, `projectId`, `basePlanVersionId`, `overrides: [{ sceneId, phraseIndex, text }]`. Preserved across visual-only revisions (PIPELINE_DESIGN §5).
+`ownerId`, `projectId`, `basePlanVersionId`, `overrides: [{ sceneId, phraseIndex, text }]`, `createdAt`. Preserved across visual-only revisions (PIPELINE_DESIGN §5).
 
 ### 8.11 `instagramConnections`
 | Field | Notes |
@@ -362,9 +371,10 @@ Sign-up is rejected unless the email is here (§10.2).
 | `igUserId`, `username`, `accountType`, `profilePictureUrl?` | |
 | `accessToken` | **Encrypted** `{ ciphertext, iv, tag, keyVersion }` (§21.4) |
 | `tokenExpiresAt`, `lastRefreshedAt` | |
+| `connectedAt`, `revokedAt?` | |
 | `scopes[]` | |
 | `status` | `active` \| `expired` \| `revoked` \| `error` |
-**Indexes:** unique `ownerId`; `{ status: 1, tokenExpiresAt: 1 }` (refresh job).
+**Indexes:** unique `ownerId` (one connection per user); **unique partial index on `igUserId` where `status = "active"`** (one ByteReel user per Instagram account, PRD decision #24d; the OAuth callback rejects an account already actively connected to a different user with `INSTAGRAM_ACCOUNT_IN_USE`); `{ status: 1, tokenExpiresAt: 1 }` (refresh job).
 
 ### 8.12 `posts`
 | Field | Notes |
@@ -373,25 +383,36 @@ Sign-up is rejected unless the email is here (§10.2).
 | `caption` | Instagram caption + hashtags (≤ 2,200 chars) |
 | `mode` | `now` \| `scheduled` |
 | `scheduledAt?` | UTC; displayed in the user's timezone |
-| `approval` | `{ renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` |
+| `approval` | `{ id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` (`id` = approval id, new for every approval) |
 | `state` | §7.4 |
 | `igContainerId?`, `igMediaId?`, `permalink?` | |
-| `attempts`, `lastError?` | |
-| `publishKey` | unique idempotency key for the publish operation |
-**Indexes:** unique `publishKey`; `{ ownerId: 1, createdAt: -1 }`; `{ state: 1, scheduledAt: 1 }`; partial unique on `(projectId)` where `state ∈ {scheduled, publishing}` (one live post per project).
+| `jobId?`, `attempts`, `nextAttemptAt?`, `lastError?` | |
+| `publishedAt?`, `createdAt`, `updatedAt` | |
+| `publishKey` | unique idempotency key for the publish operation: `pub:{projectId}:{renderId}:{connectionId}:{approvalId}` |
+**Indexes:** unique `publishKey`; `{ ownerId: 1, createdAt: -1 }`; `{ state: 1, scheduledAt: 1 }`; partial unique on `(projectId)` where `state ∈ {scheduled, publishing, outcome_unknown}` (one live post per project; `outcome_unknown` included so reconciliation can't race a new post).
 
 ### 8.13 `publishAttempts`
-`postId`, `ownerId`, `step` (`create_container` \| `poll` \| `publish` \| `reconcile`), `request` (redacted), `response` (redacted), `outcome`, `at`. Audit trail for every publish attempt (PRD §7).
+`postId`, `ownerId`, `step` (`create_container` \| `poll` \| `publish` \| `reconcile`), `request` (redacted), `response` (redacted), `outcome`, `at`. Audit trail for every publish attempt (PRD §7). **Index:** `{ postId: 1 }`.
 
 ### 8.14 `providerUsage`
-`ownerId`, `projectId`, `jobId`, `provider` (`gemini` \| `elevenlabs` \| `vercel-sandbox` \| `meta`), `operation`, `model`, `units` (`{ promptTokens, outputTokens, characters, renderSeconds }`), `estCostInr`, `at`.
+`ownerId`, `projectId`, `jobId`, `provider` (`gemini` \| `elevenlabs` \| `vercel-sandbox` \| `meta`), `operation`, `model`, `units` (`{ promptTokens, outputTokens, characters, renderSeconds }`), `estCostInr`, `status` (`reserved` | `final` | `failed`), `at`.
 **Indexes:** `{ at: -1 }`, `{ ownerId: 1, at: -1 }`, `{ provider: 1, at: -1 }`. Feeds quotas and spend ceilings (§23).
 
 ### 8.15 `auditLogs`
 `actorId`, `action` (e.g. `storyboard.approved`, `post.published`, `instagram.connected`, `account.deleted`), `subject` `{ type, id }`, `data` (redacted), `at`. TTL: none in V1.
 
 ### 8.16 `settings` (singleton, admin)
-Global spend ceilings, per-user limits, allowed models and voices, a maintenance flag. Cached for 60 s in memory.
+One document with `_id: "global"`: `version`, `maintenance { active, message }`, `limits { videosPerUserPerDay, projectsPerUserPerDay, planRequestsPerProject, voiceCharactersPerUserPerMonth }`, `ceilings { elevenLabsCharactersPerMonth, geminiRequestsPerDay, sandboxRenderMinutesPerDay, spendInrPerDay }`, `models { planner, speech }`, `voices { enabledPresets[] }`, `updatedAt`, `updatedBy`. Cached for 60 s in memory.
+
+### 8.17 Helper collections (named in API.md; shapes in DATABASE.md)
+| Collection | Fields | Indexes |
+|---|---|---|
+| `rateLimits` | `_id = "<rule>:<sha256(ip, email or userId)>:<windowStart>"`, `count`, `expiresAt` (no raw IP/email) | TTL `expiresAt` |
+| `idempotencyKeys` | `ownerId`, `key`, `fingerprint`, `status` (`in_progress` \| `done`), `lockedUntil?` (~60 s; after it the marker counts as abandoned), `responseStatus`, `responseBody`, `createdAt` | unique `{ ownerId, key }`; TTL 24 h on `createdAt` |
+| `usageCounters` | `ownerId`, `kind` (`videos` \| `projects` \| `voiceChars`), `period` (`YYYY-MM-DD` or `YYYY-MM` in the user's timezone), `count`, `expiresAt` | unique `{ ownerId, kind, period }`; TTL `expiresAt` |
+| `notifications` | `ownerId`, `schemaVersion`, `type`, `projectId?`, `postId?`, `title`, `message`, `readAt?`, `createdAt` | `{ ownerId: 1, createdAt: -1 }` |
+| `deletionRequests` | `kind` (`account` \| `meta_data`), `status` (`pending`\|`completed`\|`failed`\|`cancelled`), `requestedAt`, `eraseAfter?` (account: +30 days), `completedAt?`, `confirmationCode?` (Meta), `ownerId?`/`igUserId?` (removed when completed), `error?` | partial unique `confirmationCode` where it is a string |
+| `deletionLog` | random string `_id` (`acct_…`), `signedUpMonth`, `deletionRequestedMonth`, `erasedMonth`, `reason`, counts, `languagesUsed`, `aiCostRange`, `schemaVersion`: anonymous, kept forever (DATABASE.md 4.26) | none |
 
 ---
 
@@ -430,8 +451,10 @@ users/{ownerId}/projects/{projectId}/renders/{renderId}/qa.json
   - **no email verification:** the private-beta allow-list (§10.2) controls who can sign up instead;
   - **no self-service "forgot password":** the login page says *"Forgot your password? Contact the ByteReel team."* An admin creates a **one-time reset link** (valid 1 hour) in the admin page and shares it with the user directly (§24.3).
 - **Brute-force protection:** login and sign-up are rate-limited per IP and per email (e.g. 5 attempts per 15 min). After 10 failed logins, the account is locked for 15 min.
-- **No account enumeration:** login failures always show *"Email or password is incorrect"*.
+- **No account enumeration:** login failures always show *"Email or password is incorrect"*. Conscious private-beta exception: sign-up tells the person whether their email is not invited or already has an account (clear messages for invited people), protected by the sign-up rate limit (5 per 15 min per IP). Revisit when sign-up opens to the public.
 - **Logout** on every page (user menu). Changing the password revokes the user's other sessions.
+- **Better Auth lockdown:** only the 6 auth endpoints documented in API.md §3.2 are exposed (sign-up, sign-in, sign-out, get-session, change-password, reset-password with an admin-issued token). Every other Better Auth default endpoint (update-user, delete-user, list/revoke sessions, change-email, request/forget password, email verification, account linking, …) is disabled with `disabledPaths` and also blocked by the `/api/auth/[...all]` route handler, which forwards only that allow-list and answers 404 otherwise. Our own `/api/v1` endpoints cover profile changes, account deletion and password resets.
+- **Server-owned user fields:** every additional user field is declared with `input: false` (`role`, `status`, `failedLoginCount`, `lockedUntil`, `lastLoginAt`, and the defaults `timezone`, `defaultLanguage`, `defaultVoiceGender`, which change only through `PATCH /api/v1/me`). A user can never set them through sign-up or any auth endpoint.
 
 ### 10.2 Private beta allow-list
 - Better Auth `databaseHooks.user.create.before` rejects sign-up unless the email is in `allowlist`.
@@ -444,7 +467,8 @@ users/{ownerId}/projects/{projectId}/renders/{renderId}/qa.json
   1. a typed repository API (`projects.get(ownerId, projectId)`),
   2. a lint rule / code-review checklist item forbidding raw collection access outside `packages/db`,
   3. integration tests asserting user A can't read or modify user B's data (every route).
-- **Server actions** call `requireUser()` first; IDs from the client are treated as untrusted and always re-checked with the owner.
+- **Another user's resource is answered with `404 NOT_FOUND`, never `403`**, so a caller can't even learn that the id exists (`403 FORBIDDEN` is only for "not an admin" and the Origin check). The repository's owner-scoped lookups make this automatic: a foreign id simply isn't found.
+- **REST route handlers under `/api/v1`** (PRD decision #22; API.md) call `requireUser()` first; IDs from the client are treated as untrusted and always re-checked with the owner.
 - **Inngest functions** receive `{ ownerId, projectId, jobId }` in the event, and re-load and verify ownership before acting.
 - **Presigned URLs** are generated only after an ownership check, and expire quickly.
 
@@ -478,47 +502,9 @@ The planner model **cannot** set ownership, approve plans, choose storage paths 
 
 ## 12. API Design
 
-Mutations are **Server Actions** (typed, CSRF-protected by Next.js); reads are RSC data fetching plus a few JSON **route handlers** for polling, OAuth callbacks and webhooks. Every endpoint: auth → Zod input validation → owner check → service call → typed result `{ ok: true, data } | { ok: false, error: { code, message } }`.
+**Superseded by decision #22 (REST API).** The API is a versioned REST API under `/api/v1`, plus Better Auth at `/api/auth/*` (locked down to the six documented endpoints). Every endpoint, with its auth, owner check, input, errors and examples, is specified in **[docs/API.md](API.md)** and **[docs/openapi.yaml](openapi.yaml)**. Those two files are the source of truth. This section used to list Server Actions and `/api/instagram/*` routes; that design is no longer used.
 
-### 12.0 Authentication
-Better Auth mounts its handler at `/api/auth/*` (sign-up, sign-in, sign-out, session, change password, reset password with a token). The UI calls it through the Better Auth client. Our extra rules: the allow-list hook on sign-up, rate limits and the lockout (§10.1), and the admin-only action `createPasswordResetLink({ userId })` (§24.3).
-
-### 12.1 Projects and planning
-| Operation | Type | Input | Effect |
-|---|---|---|---|
-| `brainstormIdeas` | action | `{ subject, language }` | Synchronous Gemini call (short), returns 5–8 ideas; rate-limited |
-| `createProject` | action | `{ inputType, text, language, voiceGender }` | Creates a project (`draft→planning`), a job, an Inngest `plan.requested` event |
-| `getProject` | RSC / `GET /api/projects/[id]` | — | Project + current plan version + job progress |
-| `listProjects` | RSC | `{ tab, cursor }` | Paginated library |
-| `editNarration` | action | `{ projectId, planVersionId, sceneId, narrationId, text }` | New `user_edit` plan version (validated); approval required again |
-| `requestRevision` | action | `{ projectId, stage, scope, sceneId?, message }` | Revision record + `revision.requested` event |
-| `undoToVersion` | action | `{ projectId, planVersionId }` | Sets `currentPlanVersionId` to an earlier version (no data deleted) |
-| `retryJob` | action | `{ projectId, jobId }` | Re-emits the event for a failed job (resume) |
-| `cancelJob` | action | `{ projectId, jobId }` | Sets `cancelRequestedAt`; functions check it between steps |
-| `archiveProject` | action | `{ projectId }` | Soft delete (blocked while publishing) |
-
-### 12.2 Approval and generation
-| Operation | Type | Input | Effect |
-|---|---|---|---|
-| `approveStoryboard` | action | `{ projectId, planVersionId, planHash }` | Verifies the hash equals the stored version hash **and** it's the current version; writes `storyboardApprovals`; emits `video.generate.requested` with idempotency key `gen:{planVersionId}` |
-| `editCaption` | action | `{ projectId, renderId, sceneId, phraseIndex, text }` | Saves an override; emits `video.recaption.requested` (re-render, no speech) |
-| `getMediaUrl` | `GET /api/projects/[id]/media?kind=mp4\|thumb` | — | Ownership check → presigned URL redirect |
-
-### 12.3 Instagram and publishing
-| Operation | Type | Input | Effect |
-|---|---|---|---|
-| `startInstagramConnect` | `GET /api/instagram/connect` | — | Creates an OAuth `state` (signed, bound to the session), redirects to Meta |
-| OAuth callback | `GET /api/instagram/callback` | `code, state` | Verify state → exchange code → long-lived token → fetch profile → store encrypted |
-| `disconnectInstagram` | action | — | Deletes the token, marks the connection revoked, invalidates scheduled posts' approvals |
-| `generateCaption` | action | `{ projectId, renderId }` | Gemini caption + hashtags (short call) |
-| `publishNow` | action | `{ projectId, renderId, connectionId, caption, mp4Sha256 }` | Creates a post with an approval snapshot; emits `post.publish.requested` |
-| `schedulePost` | action | `{ …same, scheduledAt }` | Validates `scheduledAt ≥ now + 10 min` and within 75 days; creates a `scheduled` post; emits `post.publish.requested` with a `ts` |
-| `cancelScheduledPost` | action | `{ postId }` | `scheduled → cancelled` (conditional update) |
-| Meta deauthorize callback | `POST /api/instagram/deauthorize` | signed request | Marks the connection revoked |
-| Meta data-deletion callback | `POST /api/instagram/data-deletion` | signed request | Deletes Meta-derived data, returns a confirmation code + status URL (required by Meta) |
-
-### 12.4 Error codes (user-facing messages mapped in the UI)
-`UNAUTHENTICATED`, `NOT_FOUND` (also used for other owners' resources), `INVALID_INPUT`, `STALE_VERSION`, `APPROVAL_REQUIRED`, `APPROVAL_STALE`, `QUOTA_EXCEEDED`, `SPEND_CEILING`, `JOB_ALREADY_RUNNING`, `PROVIDER_BUSY`, `PROVIDER_REJECTED`, `NEEDS_INPUT`, `INSTAGRAM_NOT_CONNECTED`, `INSTAGRAM_TOKEN_EXPIRED`, `INSTAGRAM_ACCOUNT_INELIGIBLE`, `PUBLISH_LIMIT_REACHED`, `INTERNAL`.
+Every endpoint still follows the same order: auth → input validation (Zod) → owner check (another user's item answers 404, see §10.3) → service call → typed result.
 
 ---
 
@@ -536,7 +522,7 @@ Better Auth mounts its handler at `/api/auth/*` (sign-up, sign-in, sign-out, ses
 | `publish-post` | `post.publish.requested` (optional `ts` for scheduling) | key `connectionId` limit 1 | `step.sleepUntil(scheduledAt)` → **re-check approval** (§18) → check the publishing limit → create container → poll status (`step.sleep` 15 s, up to 10 min) → publish → save permalink |
 | `reconcile-publish` | `post.publish.unknown` | key `postId` | list recent media → match by container/caption/time → `published` or safe retry |
 | `refresh-instagram-tokens` | cron daily 03:00 IST | — | refresh tokens expiring in < 10 days (and older than 24 h) |
-| `sweep-stuck-jobs` | cron every 15 min | — | jobs `running` with no update for > 30 min → mark failed with a retry option |
+| `sweep-stuck-jobs` | cron every 15 min | — | jobs `running` with no update for > 30 min → mark failed with a retry option (one short transaction that also clears `activeJobId`); jobs still `queued` after ~2 min → **re-send their event** (event id = the job key, so Inngest drops a duplicate) |
 | `spend-rollup` | cron hourly | — | aggregate `providerUsage` → ceilings cache |
 
 ### 13.2 Rules
@@ -624,24 +610,25 @@ User notes and topics are passed as **data** inside clearly delimited sections. 
 ### 17.1 Setup
 - **Meta developer app** with the **Instagram API with Instagram Login** product.
 - Permissions: `instagram_business_basic`, `instagram_business_content_publish`.
-- Redirect URI: `https://<domain>/api/instagram/callback`; deauthorize and data-deletion callback URLs configured.
+- Redirect URI: `https://<domain>/api/v1/instagram/callback`; deauthorize and data-deletion callback URLs configured.
 - **App Review** with a screencast of the connect + publish flow is needed before non-tester users can connect. Until then, testers are added in the app dashboard.
 
 ### 17.2 Connect flow
 ```
-User → /api/instagram/connect → (state = signed{sessionId, nonce, exp})
+User → /api/v1/instagram/connect → (state = signed{sessionId, nonce, exp})
      → www.instagram.com/oauth/authorize?client_id&redirect_uri&scope&response_type=code&state
-Meta → /api/instagram/callback?code&state
+Meta → /api/v1/instagram/callback?code&state
      → verify state → POST api.instagram.com/oauth/access_token (short-lived token, user_id)
      → GET graph.instagram.com/access_token?grant_type=ig_exchange_token (long-lived, ~60 days)
      → GET graph.instagram.com/me?fields=user_id,username,account_type,profile_picture_url
      → account_type must be BUSINESS or MEDIA_CREATOR, else INSTAGRAM_ACCOUNT_INELIGIBLE
+     → user_id must not have an active connection owned by another user, else INSTAGRAM_ACCOUNT_IN_USE
      → encrypt + store token → redirect to /settings or back to the publish step
 ```
 *(Exact endpoints and versions are verified against Meta's current docs during implementation.)*
 
 ### 17.3 Publishing flow (`publish-post`)
-1. **Approval re-check** (§18), then the connection is `active` and the token isn't expired.
+1. **Approval re-check** (§18): the post is still `scheduled` (or the expected state), the project is not archived, the owner is `active`, the project's current render and current/approved plan are still the approved ones, and the connection is the approved one, `active`, with an unexpired token and the same `igUserId`.
 2. **Limit check:** `GET /{ig-user-id}/content_publishing_limit`. If exhausted → `PUBLISH_LIMIT_REACHED`, post delayed with a notice (never dropped).
 3. **Create container:** `POST /{ig-user-id}/media` with `media_type=REELS`, `video_url=<presigned R2 URL>`, `caption`, `share_to_feed=true` → `igContainerId` (saved **before** moving on).
 4. **Poll:** `GET /{container-id}?fields=status_code` every 15 s (via `step.sleep`) until `FINISHED` (max ~10 min). `ERROR`/`EXPIRED` → `publish_failed` with a reason.
@@ -655,9 +642,10 @@ If `media_publish` times out or the network fails, the outcome is **unknown**: w
 | Race | Handling |
 |---|---|
 | Video re-rendered or caption changed after scheduling | The approval snapshot no longer matches → `approval_invalidated`; the creator is notified to re-approve; the job won't publish |
+| Revision, narration edit, voice switch, undo or caption fix requested while a post is `scheduled` or `publish_failed` | The request itself moves the post to `approval_invalidated` in the same transaction (before any job runs) and notifies the creator; the post never waits for the job's result |
 | Instagram disconnected/reconnected to another account | `igUserId` mismatch → invalidated |
 | User cancels while the job sleeps | `cancelOn` + state check → no publish |
-| Double-click "Publish now" | Unique `publishKey` → one post |
+| Double-click "Publish now" | The `Idempotency-Key` replays the first answer; a separate second approval is blocked by the one-live-post index; the unique `publishKey` (per approval) means one approval can publish at most once |
 | Token expires before the slot | Refresh cron; if it fails → post `publish_failed` (reason: reconnect) + banner |
 | Two scheduled posts for the same project | Partial unique index (one live post per project) |
 
@@ -671,11 +659,11 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Approval | Bound to | Created by | Checked at | Invalidated by |
 |---|---|---|---|---|
 | **Storyboard** | `planVersionId` + `planHash` | `approveStoryboard` (the creator only) | start of `generate-video` | Any new plan version (edit, revision, undo) |
-| **Publish** | `renderId` + `mp4Sha256` + `connectionId` + `igUserId` + `captionHash` | `publishNow` / `schedulePost` (the creator only) | **immediately before** container creation **and** before `media_publish` | Re-render, caption change, disconnect/reconnect, account change |
+| **Publish** | `renderId` + `mp4Sha256` + `connectionId` + `igUserId` + `captionHash` | `publishNow` / `schedulePost` (the creator only) | **immediately before** container creation **and** before `media_publish`, and on every publish retry (H6, admin I9). The re-check also requires: project not archived, owner `status = active`, and the project's current render and current/approved plan still the approved ones | Re-render, caption change, disconnect/reconnect, account change, suspension, archive, and **any change requested on the project** (revision, narration edit, voice switch, undo, caption fix): cancelled immediately when the change is requested, not when its job finishes (PRD §7). A `scheduled` **or `publish_failed`** post becomes `approval_invalidated` (archive and account deletion: `cancelled`) |
 
 **Implementation guarantees**
 - Approvals are separate immutable documents/snapshots; the model and background jobs can never create them.
-- Publish state transitions use **conditional updates** (`updateOne({ _id, state: 'scheduled', 'approval.renderId': X }, …)`), so a concurrent edit can't slip through.
+- Publish state transitions use **conditional updates** (`updateOne({ _id, state: 'scheduled' }, …)`), so a concurrent edit can't slip through: every change moves the post out of `scheduled`/`publish_failed` in the same transaction, so the `state` filter is the real guard (the approval snapshot itself never changes).
 - The UI shows exactly what will be published (video thumbnail, duration, caption, destination `@username`) next to the approve button.
 
 ---
@@ -698,7 +686,7 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Generate | `gen:{planVersionId}` |
 | Speech per scene | `speechArtifacts (ownerId, cacheKey)` unique |
 | Render | `renderInputHash` (reuse) + `render:{jobId}` |
-| Publish | `posts.publishKey = pub:{projectId}:{renderId}:{connectionId}:{scheduledAt or 'now'}` |
+| Publish | `posts.publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (a re-approval after a failure or suspend/reactivate gets a new key; the same approval never publishes twice) |
 | Inngest events | event `id` = the idempotency key (Inngest dedupes) |
 
 ### 20.2 Retry matrix
@@ -717,14 +705,16 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Instagram unknown outcome | reconcile | "Checking whether your post went live…" |
 
 ### 20.3 Stuck jobs
-`sweep-stuck-jobs` marks jobs with no progress for 30 min as failed (retryable), and clears `projects.activeJobId`.
+`sweep-stuck-jobs` marks jobs with no progress for 30 min as failed (retryable), and clears `projects.activeJobId`. It also re-sends the event for jobs still `queued` after ~2 min (the event is sent after the database commit, so a failed send would otherwise leave the job waiting forever; the event id is the job key, so a duplicate is dropped).
 
 ### 20.4 Concurrency
 - One active pipeline job per project (`activeJobId`, set with a conditional update).
 - Project updates use `stateVersion` optimistic concurrency. A stale tab gets `STALE_VERSION` → "This project changed in another tab, refresh".
 
 ### 20.5 Backups
-**Not in V1** (decision D6; the PRD also excludes a backup system). The MongoDB Atlas free tier has no automated backups. This is accepted for the private beta, and backups are planned for a later version (e.g. the Atlas paid tier or a scheduled `mongodump` to R2).
+**Not in V1** (decision D6; the PRD also excludes a backup system). This is accepted for the private beta, and backups are planned for a later version (e.g. the Atlas paid tier or a scheduled `mongodump` to R2).
+
+**Update (2026-11-13, F05):** Atlas now offers a **free daily snapshot for free clusters** (up to 4 kept, no cost; DATABASE.md §10). Switching it on isn't building a backup system, so D6 still holds for anything that costs money or needs code.
 
 ---
 
@@ -738,13 +728,13 @@ Cross-user data access, Instagram token theft, publishing without consent, provi
 |---|---|
 | AuthN | Better Auth email/password; scrypt-hashed passwords; httpOnly + Secure + SameSite=Lax cookies; login rate limits + temporary lockout; generic login errors; admin-issued one-time reset links (1 h) |
 | AuthZ | Owner-scoped repositories; `NOT_FOUND` for other owners' resources; tests per route |
-| CSRF | Server Actions (origin checks) + signed OAuth `state` |
+| CSRF | SameSite=Lax session cookie + `Origin` check on every mutating request (API.md §3.6) + signed OAuth `state` |
 | Input | Zod on every action and route; length limits (topic 300, notes 5,000, revision 500, caption 2,200) |
 | Output/XSS | React escaping; **no `dangerouslySetInnerHTML`** for model/user text; the review HTML is generated server-side with escaping (already in the prototype) |
 | Secrets | Vercel environment variables only; never sent to the client; redaction in logs (prototype masking reused) |
 | Instagram tokens | AES-256-GCM encryption at rest (§21.4); never logged; scopes minimal |
 | Sandbox | Only presigned, input-scoped URLs; no provider or DB credentials inside |
-| Rate limiting | Per user + per IP on brainstorm, create, revise, approve, publish (Mongo-backed token bucket) |
+| Rate limiting | Per user + per IP on login, sign-up, brainstorm, create, revise, approve, publish: our own `rateLimits` collection with **fixed windows** (API.md §3.7, §10.3). Better Auth's built-in limiter is off (it counts in memory, which doesn't work on serverless) |
 | Headers | CSP (self + R2 + Instagram CDN for avatars), HSTS, X-Frame-Options DENY, Referrer-Policy strict-origin |
 | Dependencies | Pinned versions, `npm audit` in CI, Dependabot |
 | Admin | `role=admin` checked server-side; admin actions audit-logged |
@@ -762,7 +752,7 @@ Meta deauthorize and data-deletion callbacks verify the `signed_request` HMAC wi
 - **India DPDP Act:** privacy policy + terms before the beta; clear purpose (generating and publishing the user's videos); consent at sign-up; **account deletion** removes MongoDB records, the R2 prefix and Instagram tokens (and audit logs are anonymized).
 - **Provider data use:** while on **Gemini's free tier**, only test content may be used. **Switch to Gemini's paid tier before real beta users' content** (so it isn't used for training). The ElevenLabs commercial plan is required before publishing real users' videos (the free plan is non-commercial/attribution).
 - **Meta Platform Terms:** data-deletion callback, a deauthorize handler, only the needed scopes, Meta data never used for other purposes.
-- **Retention (V1):** keep user content until deletion; provider usage logs 12 months.
+- **Retention (V1):** keep user content until deletion. **Account deletion = 30-day soft delete** (hidden, restorable by an admin; Instagram data deleted right away), then personal data and files are erased and one anonymous `deletionLog` entry is kept forever (founder decision 2026-11-13, DATABASE.md §6.7). Provider usage rows are anonymized at erase (kept for spend totals).
 - **Content safety:** Gemini safety settings + refusal handling; the creator approval step; a terms clause that the creator is responsible for published content.
 
 ---
@@ -773,7 +763,7 @@ No credits are shown to users in V1 (PRD). Internal limits are configured in `se
 
 | Limit | Default (confirmed: 3 videos/day; others tuned during the beta) |
 |---|---|
-| **Videos generated (renders) per user per day** | **3** (decision D8) |
+| **Videos generated per user per day** | **3** (decision D8). Counts accepted `generate` jobs only; caption re-renders (caption fixes) and retries don't count (PRD decision #24a) |
 | Projects created per user per day | 5 |
 | Plan + revision requests per project | 20 |
 | ElevenLabs characters per user per month | 3,000 |
@@ -833,9 +823,9 @@ Gemini tokens (~11–14k per plan) + ElevenLabs (~1,000 characters) + Sandbox re
 ### 26.1 Environments
 | Env | Purpose | Data |
 |---|---|---|
-| **local** | Development; fixture mode works without keys | Local MongoDB (Docker) or an Atlas dev DB; the local or a dev R2 bucket; Inngest Dev Server |
+| **local** | Development; fixture mode works without keys | The **Atlas dev database** (`bytereel` on the free M0) through `MONGODB_URI`; no local MongoDB (a standalone `mongod` can't run transactions); the dev R2 bucket; Inngest Dev Server |
 | **preview** | Vercel preview per branch | Dev Atlas DB, dev bucket, Inngest branch environment |
-| **production** | Beta users | Prod Atlas DB, prod bucket, Inngest prod |
+| **production** | Beta users | Prod Atlas DB (a second Atlas project with its own free M0, set up in F38), prod bucket, Inngest prod. Atlas region and Vercel function region chosen together (recommended: Mumbai `ap-south-1` + `bom1`) |
 
 ### 26.2 Environment variables
 ```

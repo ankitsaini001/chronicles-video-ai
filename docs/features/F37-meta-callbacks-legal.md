@@ -18,7 +18,8 @@ Privacy, Terms and data-deletion status pages.
 ## In scope
 - Deauthorize callback
 - Data-deletion callback + status page
-- Privacy + Terms pages
+- Privacy + Terms pages. The privacy policy must state the account-deletion rule in plain words (30 days, then erased; anonymous usage statistics kept; DATABASE.md §6.7)
+- Before the public launch: a short review of the privacy policy and the deletion rule by someone who knows Indian privacy law (DPDP Act)
 
 ## Not in this feature
 - —

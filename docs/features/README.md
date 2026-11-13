@@ -42,20 +42,20 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F04 | [Database design document (doc only)](F04-database-design-doc.md) | — | ⬜ Not started |
-| F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ⬜ Not started |
-| F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ⬜ Not started |
-| F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ⬜ Not started |
-| F08 | [Sign up](F08-sign-up.md) | F07 | ⬜ Not started |
-| F09 | [Log in and log out](F09-log-in-out.md) | F08 | ⬜ Not started |
-| F10 | [Access pending page](F10-access-pending.md) | F08 | ⬜ Not started |
-| F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ⬜ Not started |
+| F04 | [Database design document (doc only)](F04-database-design-doc.md) | — | ✅ Done |
+| F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ✅ Done |
+| F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ✅ Done |
+| F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ✅ Done |
+| F08 | [Sign up](F08-sign-up.md) | F07 | ✅ Done |
+| F09 | [Log in and log out](F09-log-in-out.md) | F08 | ✅ Done |
+| F10 | [Access pending page](F10-access-pending.md) | F08 | ✅ Done |
+| F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ✅ Done |
 
 ### A3 · Idea → Storyboard
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | ⬜ Not started |
+| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | 🔨 In progress |
 | F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ⬜ Not started |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ⬜ Not started |
 | F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ⬜ Not started |
@@ -98,4 +98,11 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F04 (database explained in plain words). Phase A1 (F01–F03) is done and merged to `main`.
+**Next up:** F12 is in progress (Step 1 Idea: create a project). Phases A1 and A2 done (F01–F11).
+
+## Future ideas (not planned yet, nothing built)
+Discussed with the founder on 2026-11-13. To be turned into features when the time comes.
+- **Waitlist instead of a closed invite list:** people who aren't invited can request access from the Access pending page; the founder approves them (command first, admin page later).
+- **Email verification + self-service "Forgot password":** needs an email sending service and the domain (decided before F28/F38). Recommended before opening sign-up to everyone.
+- **Public launch sign-up:** email verification + per-account limits + spend ceilings + a bot check (captcha), then drop the approval step. Also (F09 review): move the login lock to a counter keyed by hashed email so unknown emails lock too, and remove the A1 exception (API.md §3.1 Enumeration).
+- **First admin account:** a one-time command (e.g. `npm run db -- make-admin <email>`) after the founder signs up; decide before F34.

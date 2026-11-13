@@ -9,8 +9,10 @@ type LogoProps = {
   /** Show the endorsement line (SITE.endorsement) under the wordmark. */
   endorsement?: boolean;
   size?: "md" | "sm";
-  /** Wrap in a link to the home page. */
+  /** Wrap in a link (e.g. "/" on public pages, "/dashboard" inside the app). */
   href?: string;
+  /** Accessible name of the link (default: "<product name> home"). */
+  label?: string;
   className?: string;
 };
 
@@ -30,7 +32,7 @@ export function LogoMark({ size = "md" }: { size?: "md" | "sm" }) {
   );
 }
 
-export function Logo({ endorsement = false, size = "md", href, className }: LogoProps) {
+export function Logo({ endorsement = false, size = "md", href, label = `${SITE.name} home`, className }: LogoProps) {
   const content = (
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <LogoMark size={size} />
@@ -47,7 +49,7 @@ export function Logo({ endorsement = false, size = "md", href, className }: Logo
   );
   if (!href) return content;
   return (
-    <Link href={href} aria-label={`${SITE.name} home`} className="rounded-lg">
+    <Link href={href} aria-label={label} className="rounded-lg">
       {content}
     </Link>
   );

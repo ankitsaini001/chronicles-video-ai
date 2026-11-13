@@ -19,7 +19,7 @@ Connect your Instagram Creator/Business account through Instagram's own login pa
 - Meta developer app setup (together, step by step)
 - Instagram Login flow
 - Token stored encrypted, never shown
-- One Instagram account per ByteReel user
+- One Instagram account per ByteReel user, both ways (one connection per user; an Instagram account actively connected to one user is refused for any other user with "This Instagram account is already connected to another ByteReel account.")
 - Personal account → clear message
 
 ## Not in this feature

@@ -20,6 +20,7 @@ The 'ByteReel — My videos' screen.
 - Tabs Drafts/Ready/Scheduled/Published
 - ⋯ menu: Rename, Archive
 - Only YOUR projects are visible
+- **Revisit with the founder (from F11, 2026-11-13):** the founder found the first-visit My videos page too empty. No sidebar (only 2 destinations; phones need the width). Idea to decide here: on the empty page, a "How it works" strip (Idea → Storyboard → Video → Post) and three small cards (Today: videos/projects, This month: voice characters, Instagram status) from `getMe()` / B1; hidden once videos exist
 
 ## Not in this feature
 - —

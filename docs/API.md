@@ -4,11 +4,11 @@
 |---|---|
 | **Version** | 1.0 · 2026-11-12 |
 | **Status** | Draft for founder review |
-| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #21) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts` |
+| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #25) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts` |
 | **Machine-readable spec** | [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1): same endpoints, schemas and examples |
 | **Companion** | [`DATABASE.md`](DATABASE.md): collections, validators, indexes, transactions |
 
-> **Decision applied (PRD decisions log #21, 2026-11-12):** all application mutations and reads are **REST JSON route handlers under `/api/v1`** (not Next.js Server Actions), so the API is described by OpenAPI and can be tested with any HTTP client. **Better Auth** stays mounted at **`/api/auth/*`**. CSRF protection = **SameSite=Lax session cookie + an `Origin` check on every mutating request** (§3.6).
+> **Decision applied (PRD decisions log #22, 2026-11-12):** all application mutations and reads are **REST JSON route handlers under `/api/v1`** (not Next.js Server Actions), so the API is described by OpenAPI and can be tested with any HTTP client. **Better Auth** stays mounted at **`/api/auth/*`**. CSRF protection = **SameSite=Lax session cookie + an `Origin` check on every mutating request** (§3.6).
 
 ---
 
@@ -83,10 +83,12 @@
 | Session lifetime | **30 days**, rolling: when a request arrives and the session is older than **1 day** since its last refresh (`updateAge`), `expiresAt` is pushed to now + 30 days |
 | Session check cache | Better Auth cookie cache **off** in V1 (every request reads the `session` collection), so revocation (password change, suspension, account deletion) is immediate |
 | Roles | `creator` (default) and `admin` (`user.role`). Admin endpoints check `role = admin` server side |
-| Status | `active`, `suspended`, `deleting`. Only `active` users get a session; suspension and deletion revoke all sessions |
+| Status | `active`, `suspended`, `deleting`. Only `active` users get a session; suspension and deletion revoke all sessions. **Every server-side session read also requires `status = active`** (F09: `apps/web/lib/auth/session.ts` treats any other status as signed out), so a session left over from before a status change is never honoured. The `/api/v1` pipeline does the same (F11: `apps/web/lib/api/v1.ts` + `server.ts` read the session through the same `toSessionUser`, so a non-active user gets `401 UNAUTHENTICATED`) |
 | Password rules | **8–128 characters**, any characters (Unicode allowed; no composition rules), hashed with **scrypt** by Better Auth, never logged or returned. "Confirm password" is checked by the form only (the API receives one `password`) |
 | Brute-force | Rate limits per IP and per email (§3.7); **10 consecutive failed logins → account locked for 15 minutes** |
-| Enumeration | Login failures always answer *"Email or password is incorrect"*; lockout and rate-limit answers use one message that doesn't reveal whether the email exists |
+| Enumeration | Login failures always answer *"Email or password is incorrect"*; lockout and rate-limit answers use one message that doesn't reveal whether the email exists. **Conscious exception (private beta): sign-up (A1) does tell the caller whether an email is not invited (`NOT_ALLOWLISTED`) or already registered (`USER_ALREADY_EXISTS`)**, so invited people get clear messages ("request access" / "log in instead"). This leaks only allow-list/account membership, never a password, and is protected by the sign-up rate limit (5 / 15 min per IP, §3.7). **The A2 account lock falls under the same exception (F09 review):** the lock lives on `user`, so an email without an account never locks; someone spreading attempts over several 15-minute windows sees `429` on the 11th attempt for a registered email but keeps getting `401` for an unknown one. Accepted for the private beta because sign-up already reveals registered emails more cheaply. Revisit when sign-up opens to the public: then the lock moves to a counter keyed by the hashed email (unknown emails lock too) and the A1 exception is removed |
+| Exposed auth endpoints | **Only the 6 endpoints A1–A6** (§3.2) are reachable under `/api/auth/*`. Every other Better Auth default endpoint is **disabled** (Better Auth `disabledPaths`) **and** blocked by our route handler, which forwards only an allow-list of these 6 method + path pairs and answers `404` to anything else. Blocked examples: `update-user`, `delete-user`, `list-sessions`, `revoke-session(s)`, `revoke-other-sessions`, `change-email`, `request-password-reset` / `forget-password`, `send-verification-email`, `verify-email`, `link-social`, `list-accounts`, `unlink-account`. Our own `/api/v1` endpoints cover those needs (B2 profile/defaults, B3 delete account, I7 admin reset link) |
+| Server-owned user fields | Every Better Auth `user.additionalFields` entry is declared with **`input: false`**: `role`, `status`, `failedLoginCount`, `lockedUntil`, `lastLoginAt`, and also `timezone`, `defaultLanguage`, `defaultVoiceGender` (defaults set by the server at sign-up, changed only through B2). A caller can therefore never set them through sign-up or any auth endpoint; a sign-up body that includes any of them is rejected with `400`, and the user is always created as `role: creator`, `status: active` |
 
 ### 3.2 Auth endpoints at a glance
 
@@ -111,11 +113,14 @@
 | `INVALID_EMAIL` | 400 | Malformed email | "Enter a valid email address." |
 | `INVALID_EMAIL_OR_PASSWORD` | 401 | Wrong email or password (or unknown email) | **"Email or password is incorrect"** |
 | `TOO_MANY_ATTEMPTS` | 429 | IP/email rate limit hit **or** account locked; `Retry-After` header set | "Too many attempts. Please wait 15 minutes and try again." |
-| `ACCOUNT_SUSPENDED` | 403 | Correct password but `status = suspended` (checked after the password) | "Your account is paused. Contact the ByteReel team." |
+| `ACCOUNT_SUSPENDED` | 403 | Correct password but `status` is `suspended` or `deleting` (checked after the password, in Better Auth's `databaseHooks.session.create.before`, so no session is ever created for a non-active user) | "Your account is paused. Contact the ByteReel team." |
 | `INVALID_PASSWORD` | 400 | Change password: current password wrong | "Your current password is incorrect." |
 | `INVALID_TOKEN` | 400 | Reset token unknown, used or expired | "This reset link is invalid or has expired. Ask the ByteReel team for a new one." |
 | `FORBIDDEN_ORIGIN` | 403 | Origin check failed (§3.6) | "Please reload the page and try again." |
-| `UNAUTHORIZED` | 401 | No/expired session on A3/A5 | redirect to `/login` |
+| `INVALID_INPUT` | 400 | Body isn't JSON, or a sign-up body has a field other than `name`, `email`, `password` (e.g. `role`, `status`, `image`, `callbackURL`, `rememberMe`), or the name is empty / over 80 characters, or a sign-in body has a field other than `email`, `password`, `rememberMe` (boolean), or its password is empty / over 128 characters | "Something in the form isn't right. Please check it and try again." |
+| `PAYLOAD_TOO_LARGE` | 413 | Body over 64 KB | same as `INVALID_INPUT` |
+| `NOT_FOUND` | 404 | Any `/api/auth/*` method + path that isn't one of A1–A6 (lockdown, §3.1) | — |
+| `UNAUTHORIZED` | 401 | No/expired session on A5 (A3 sign-out answers `200` even without a session, F09) | redirect to `/login` |
 
 ### 3.3 Sign-up and login flows
 
@@ -132,7 +137,7 @@ Login    /login form (email, password)  ["Forgot your password? Contact the Byte
       fail: failedLoginCount += 1 (10th failure sets lockedUntil = now + 15 min) → 401 generic message
       ok:   failedLoginCount = 0, lockedUntil = null, lastLoginAt = now; session; Set-Cookie → /dashboard
 
-Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie cleared → /login
+Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie cleared → home page / (F09, founder's choice)
 ```
 
 #### A1. `POST /api/auth/sign-up/email` — Create account
@@ -140,9 +145,10 @@ Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie c
 |---|---|
 | Auth | anonymous (must pass the Origin check) |
 | Rate limit | 5 requests / 15 min per IP |
-| Body | `name` string 1–80 (required) · `email` string, valid email, ≤ 254, lowercased (required) · `password` string 8–128 (required). `callbackURL`, `image`, `rememberMe` are **not accepted** |
+| Body | `name` string 1–80 (required) · `email` string, valid email, ≤ 254, lowercased (required) · `password` string 8–128 (required). `callbackURL`, `image`, `rememberMe` and the server-owned fields (`role`, `status`, …, §3.1) are **not accepted** |
 | Success | `200` `{ token, user }` + `Set-Cookie` (session). `user` = Better Auth user incl. our additional fields |
-| Errors | `NOT_ALLOWLISTED` 403 · `USER_ALREADY_EXISTS` 422 · `PASSWORD_TOO_SHORT`/`PASSWORD_TOO_LONG`/`INVALID_EMAIL` 400 · `TOO_MANY_ATTEMPTS` 429 · `FORBIDDEN_ORIGIN` 403 |
+| Errors | `NOT_ALLOWLISTED` 403 · `USER_ALREADY_EXISTS` 422 · `PASSWORD_TOO_SHORT`/`PASSWORD_TOO_LONG`/`INVALID_EMAIL`/`INVALID_INPUT` 400 · `PAYLOAD_TOO_LARGE` 413 · `TOO_MANY_ATTEMPTS` 429 · `FORBIDDEN_ORIGIN` 403 |
+| Order of checks (F08) | 404 if not A1–A6 → Origin → JSON content type → rate limit → body check → Better Auth (allow-list hook). Our route handler (`apps/web/lib/auth/handler.ts`) runs everything before Better Auth and passes it only the cleaned `name` (trimmed), `email` (trimmed, lowercased) and `password`. Better Auth's own duplicate-email code (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`) is renamed to `USER_ALREADY_EXISTS` |
 
 ```http
 POST /api/auth/sign-up/email
@@ -159,7 +165,6 @@ Content-Type: application/json
     "name": "Ananya Iyer",
     "email": "ananya.iyer@example.in",
     "emailVerified": false,
-    "image": null,
     "role": "creator",
     "status": "active",
     "timezone": "Asia/Kolkata",
@@ -183,9 +188,10 @@ Error (email not on the allow-list):
 |---|---|
 | Auth | anonymous (Origin check) |
 | Rate limit | 5 attempts / 15 min **per IP** and 5 / 15 min **per email**; lockout after **10 consecutive failures** for 15 min |
-| Body | `email` string (required) · `password` string 1–128 (required). `rememberMe` is ignored (sessions are always 30 days) |
-| Success | `200` `{ redirect: false, token, user }` + `Set-Cookie` |
-| Errors | `INVALID_EMAIL_OR_PASSWORD` 401 · `TOO_MANY_ATTEMPTS` 429 (+ `Retry-After: 900`) · `ACCOUNT_SUSPENDED` 403 · `FORBIDDEN_ORIGIN` 403 |
+| Body | `email` string (required) · `password` string 1–128 (required) · `rememberMe` boolean (optional; accepted but dropped before Better Auth, sessions are always 30 days). Anything else (`callbackURL`, `role`, …) → `400 INVALID_INPUT` |
+| Success | `200` `{ redirect: false, token, user }` + `Set-Cookie`. Sets `failedLoginCount = 0`, `lockedUntil = null`, `lastLoginAt = now` |
+| Errors | `INVALID_EMAIL_OR_PASSWORD` 401 · `TOO_MANY_ATTEMPTS` 429 (+ `Retry-After`: seconds left in the window, or on the lock) · `ACCOUNT_SUSPENDED` 403 · `FORBIDDEN_ORIGIN` 403 · `INVALID_EMAIL` / `INVALID_INPUT` 400 · `PAYLOAD_TOO_LARGE` 413 |
+| Order of checks (F09) | 404 if not A1–A6 → Origin → JSON content type → IP limit → body (≤ 64 KB, strict) → email limit → account lock → Better Auth (password, then status). All in `apps/web/lib/auth/handler.ts` except the status check (`create-auth.ts`, session hook). Better Auth's 401 is answered with our message and counted on the account (`recordFailedLogin`, one atomic update; an unknown email stores nothing) |
 
 ```http
 POST /api/auth/sign-in/email
@@ -218,7 +224,7 @@ Retry-After: 900
 | Auth | session · Origin check |
 | Body | none (`{}` accepted) |
 | Success | `200` `{ "success": true }`; the session row is deleted and the cookie is cleared (`Max-Age=0`) |
-| Errors | `UNAUTHORIZED` 401 (no session: the UI just goes to `/login`) · `FORBIDDEN_ORIGIN` 403 |
+| Errors | `FORBIDDEN_ORIGIN` 403. Without a session Better Auth 1.7.14 still answers `200 { success: true }` and clears the cookie (confirmed in F09). The UI goes to the home page `/` afterwards |
 
 ```json
 { "success": true }
@@ -307,7 +313,7 @@ The UI shell uses A4 for "am I logged in?" and **`GET /api/v1/me` (B1)** for eve
 | Rule | Detail |
 |---|---|
 | Cookie | Session cookie is **SameSite=Lax**: browsers don't send it on cross-site `POST/PUT/PATCH/DELETE` sub-requests |
-| Origin check | Every **mutating** request (`POST`, `PUT`, `PATCH`, `DELETE`) to `/api/v1/*` **and** `/api/auth/*` must carry an `Origin` header equal to the app origin (`NEXT_PUBLIC_APP_URL`, plus `http://localhost:3000` in development and the Vercel preview URL in preview). If `Origin` is missing, `Sec-Fetch-Site: same-origin` is accepted instead; otherwise the request is rejected **before** any work: `/api/v1` → `403 FORBIDDEN` with `details.reason = "origin_mismatch"`; `/api/auth` → `403 FORBIDDEN_ORIGIN` (Better Auth `trustedOrigins`) |
+| Origin check | Every **mutating** request (`POST`, `PUT`, `PATCH`, `DELETE`) to `/api/v1/*` **and** `/api/auth/*` must carry an `Origin` header equal to the app origin: the origin of `BETTER_AUTH_URL` (`http://localhost:3000` on your computer, the real domain in production; preview URLs are set in F38. `NEXT_PUBLIC_APP_URL`, once added, must hold the same value). If `Origin` is missing, `Sec-Fetch-Site: same-origin` is accepted instead; otherwise the request is rejected **before** any work: `/api/v1` → `403 FORBIDDEN` with `details.reason = "origin_mismatch"`; `/api/auth` → `403 FORBIDDEN_ORIGIN`, checked by our route handler (F08). Better Auth's `trustedOrigins` is set to the same origin as a second layer, but on its own it checks the Origin only when a cookie or fetch-metadata header is present, so it would let a cookie-less cross-site sign-up through |
 | Content type | JSON endpoints require `Content-Type: application/json` (`415`-style rejection reported as `400 INVALID_INPUT`), so a plain HTML form can't post to them |
 | Exempt | The Meta callbacks (`/api/v1/meta/*`, verified by HMAC `signed_request`) and the internal Inngest endpoint (`/api/inngest`, verified by the Inngest signing key) |
 | GET never mutates | Except the Instagram OAuth pair: `GET /instagram/connect` only creates a **signed, session-bound `state`** (nothing stored) and `GET /instagram/callback` only acts when that `state` matches the current session (this is the OAuth CSRF protection) |
@@ -322,12 +328,16 @@ The UI shell uses A4 for "am I logged in?" and **`GET /api/v1/me` (B1)** for eve
 |---|---|---|---|
 | A1 sign-up | 5 / 15 min | IP | `429 TOO_MANY_ATTEMPTS` + `Retry-After` |
 | A2 sign-in | 5 / 15 min | IP **and** lowercased email (both checked) | same |
-| A2 lockout | 10 consecutive failures → `lockedUntil = now + 15 min` | user | same `429 TOO_MANY_ATTEMPTS` (same message as the rate limit, so it doesn't reveal that the email exists) |
+| A2 lockout | 10 consecutive failures → `lockedUntil = now + 15 min` (F09: every 10th failure in a row, i.e. 10, 20, …; the count resets only on a successful login) | user | same `429 TOO_MANY_ATTEMPTS` (same message as the rate limit, so it doesn't reveal that the email exists) |
 | A5 change password | 5 / 15 min | user | same |
 | A6 reset password | 5 / 15 min | IP | same |
 | A4 get-session | 120 / min | IP | same |
 
-Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `failedLoginCount` / `lockedUntil` live on `user`.
+Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `failedLoginCount` / `lockedUntil` live on `user`. **IP** = the address Vercel writes in `X-Forwarded-For`; outside Vercel that header can be faked, so all requests share one counter (DATABASE.md §4.6). F08 enforces the A1 limit, F09 the A2 limits, the lockout and the A4 limit; the A5/A6 limits come with F33 (settings) and F35 (reset link). Off Vercel, everyone shares one IP counter, so on your computer 5 log-in attempts per 15 minutes is the total for all users.
+
+**Known trade-offs (accepted for the invite-only beta, F09 review):**
+- The lock is stored on `user`, so it can tell a registered email from an unknown one across windows (see §3.1 Enumeration, same exception as A1). When sign-up opens to the public, the lock moves to a counter keyed by the hashed email.
+- The per-email limit (5 / 15 min) lets anyone who knows an email keep that user out for 15 minutes at a time (and 10 wrong passwords lock the account for 15 minutes). Required by this table; acceptable while the user list is small and invited.
 
 ### 3.8 Unauthenticated / unauthorized on `/api/v1`
 
@@ -370,7 +380,7 @@ Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `fail
 
 ### 4.2 Error code → HTTP status
 
-Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for the REST API.
+Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §12.4; the others were added for the REST API. That ARCHITECTURE list was removed (ARCHITECTURE §12 now points here), so **this table is the only error list**. The marker only records where a code came from.
 
 | Code | HTTP | Meaning | Typical endpoints |
 |---|---|---|---|
@@ -388,7 +398,7 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 | `APPROVAL_STALE` **§12.4** | 409 | The approval doesn't match current data: `planVersionId` not current / `planHash` differs; or publish `renderId` not current / `mp4Sha256` differs / connection changed | D8, H2, H6 |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | Same `Idempotency-Key` with a different request body/path | idempotent endpoints |
 | `IDEMPOTENCY_IN_PROGRESS` | 409 | The first request with this key is still being processed; retry in a moment | idempotent endpoints |
-| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions) | C2, D5, D8, F4 |
+| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions). Caption fixes (F4) never return it (decision #24a) | C2, D5, D8 |
 | `RATE_LIMITED` | 429 | Too many requests in a short window; `Retry-After` header + `details.retryAfterSeconds` | all |
 | `SPEND_CEILING` **§12.4** | 503 | A global provider spend ceiling was reached; new generations are paused, existing videos stay available | C2, D5, D8, F4, C7, H1 |
 | `MAINTENANCE` | 503 | Admin turned on maintenance mode; reads still work | all mutations except admin |
@@ -401,6 +411,7 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 | `INSTAGRAM_NOT_CONNECTED` **§12.4** | 409 | No active Instagram connection (or `connectionId` isn't yours/active) | H2, H6 |
 | `INSTAGRAM_TOKEN_EXPIRED` **§12.4** | 409 | Connection `expired`/`revoked`: reconnect needed | H2, H6; publish job |
 | `INSTAGRAM_ACCOUNT_INELIGIBLE` **§12.4** | 422 | Account isn't Business/Creator. Delivered as a redirect query on the OAuth callback | G3 |
+| `INSTAGRAM_ACCOUNT_IN_USE` | — (redirect only) | The Instagram account (`igUserId`) already has an **active** connection owned by a **different** ByteReel user (one Instagram account per ByteReel user, both ways; PRD decision #24d). Delivered as a redirect query on the OAuth callback | G3 |
 | `INSTAGRAM_OAUTH_FAILED` | — (redirect only) | OAuth denied, bad `state`, or code exchange failed | G3 |
 | `PUBLISH_LIMIT_REACHED` **§12.4** | — (post/job only) | Instagram's 24 h publishing limit; the post is **delayed**, never dropped | publish job |
 | `PUBLISH_FAILED` | — (post/job only) | Container `ERROR`/`EXPIRED` or Meta error; `message` carries Meta's reason in plain words | publish job |
@@ -413,9 +424,9 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 |---|---|---|
 | `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for C7/H1) |
 | `PROVIDER_BUSY` (ElevenLabs) | "Voice service busy. Please try again in a few minutes." | Retry |
-| `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea |
+| `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea (C4 with `text`, then E2) |
 | `PROVIDER_UNAVAILABLE` | "Voice service unavailable right now. We've been notified." | — |
-| `PLAN_INVALID` (job) | "Couldn't build a good storyboard, try rephrasing." | Edit idea / Try again |
+| `PLAN_INVALID` (job) | "Couldn't build a good storyboard, try rephrasing." | Edit idea (C4 with `text`, then E2) / Try again (E2) |
 | `PLAN_INVALID` (approve) | "Some scenes need fixing before you can approve." + issues per scene | — |
 | `NEEDS_INPUT` (duration) | "Your script is about 98 seconds; videos must be 60–90 s. Try 'make it shorter'." | Revise |
 | `NEEDS_INPUT` (alignment) | "Please adjust the wording in scene 3." | Edit scene |
@@ -427,6 +438,7 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 | `APPROVAL_STALE` | "Something changed since you reviewed it. Please review again." | Reload |
 | `INSTAGRAM_TOKEN_EXPIRED` | "Instagram needs reconnecting. Your scheduled posts are paused, nothing is lost." | Reconnect |
 | `INSTAGRAM_ACCOUNT_INELIGIBLE` | "This Instagram account is personal. Switch it to a Creator or Business account in Instagram settings, then connect again. Download still works." | Connect again |
+| `INSTAGRAM_ACCOUNT_IN_USE` | "This Instagram account is already connected to another ByteReel account." | Connect again |
 | `PUBLISH_LIMIT_REACHED` | "Instagram's daily posting limit was reached. We'll publish automatically when it resets." | — |
 | Unknown publish outcome | "Checking whether your post went live…" | — |
 | `INTERNAL` | "Something went wrong on our side. Please try again." | Retry |
@@ -466,7 +478,7 @@ Response shape: `{ "items": [ … ], "nextCursor": "eyJ1IjoiMjAyNi0xMS0xMlQwOToz
 | Replay | Same key + same fingerprint after completion → the **original status code and body** are returned again, with header `Idempotent-Replayed: true`. No second job, no second post |
 | Concurrent duplicate | While the first request is still running → `409 IDEMPOTENCY_IN_PROGRESS` (retry after ~1 s) |
 | Failures | Responses with status ≥ 500 are **not** stored (the client may retry with the same key). 4xx responses are stored and replayed |
-| Second layer | Domain keys make duplicates impossible even without the header: `plan:{projectId}:{inputHash}`, `gen:{planVersionId}`, `posts.publishKey`, unique `storyboardApprovals.planVersionId` (ARCHITECTURE §20.1) |
+| Second layer | Domain keys make duplicates impossible even without the header: job keys `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`, `posts.publishKey` (`pub:{projectId}:{renderId}:{connectionId}:{approvalId}`), unique `storyboardApprovals.planVersionId` (ARCHITECTURE §20.1) |
 
 ```http
 HTTP/1.1 202 Accepted
@@ -481,7 +493,7 @@ Idempotent-Replayed: true
 |---|---|
 | Version field | `project.stateVersion` (integer, starts at 1, +1 on every project change) |
 | How to send | Body field **`expectedStateVersion`** on project mutations, **or** header **`If-Match: "<stateVersion>"`** (needed for body-less calls such as `DELETE /projects/{id}`). If both are sent they must be equal |
-| Required on | C4 rename, C5 archive, D3 narration edit, D4 voice, D5 revision, D7 restore, D8 approve, F4 caption overrides, H2 publish/schedule |
+| Required on | C4 rename / edit idea, C5 archive, D3 narration edit, D4 voice, D5 revision, D7 restore, D8 approve, F4 caption overrides, H2 publish/schedule |
 | ETag | `GET /projects/{id}` and `GET /projects/{id}/status` return `ETag: "<stateVersion>"` |
 | Mismatch | `409 STALE_VERSION` with `details.currentStateVersion`; nothing is changed. UI: "This project changed in another tab, refresh." |
 | Admin settings | Same pattern with `settings.version` (`expectedVersion` in I12) |
@@ -591,10 +603,10 @@ Idempotent-Replayed: true
 | Approval | Client sends | Server checks (all in one transaction) | Stored as | Invalidated by |
 |---|---|---|---|---|
 | **#1 Storyboard** (D8) | `planVersionId`, `planHash` (both from the plan version the user is looking at), `expectedStateVersion` | `planVersionId == project.currentPlanVersionId` · `planHash == planVersions.planHash` (canonical hash, `packages/pipeline/src/planning/plan-hash.ts`) · `validation.valid == true` · state `storyboard_ready`/`generate_failed` · no active job · quota/spend | `storyboardApprovals { planVersionId, planHash, approvedBy, approvedAt }` (immutable, unique per version) | Any new plan version (narration edit, voice change, revision, restore) → the new version has no approval |
-| **#2 Publish** (H2) | `renderId`, `mp4Sha256`, `connectionId`, `caption`, `mode`, `scheduledAt?`, `expectedStateVersion` | `renderId == project.currentRenderId` and render `ready` · `mp4Sha256 == renders.mp4Sha256` · connection is the user's, `active`, token not expired · server computes `captionHash = sha256(NFC(caption))` · copies `igUserId` from the connection | `posts.approval { renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` | New render (re-render, caption edit, revision), caption change, disconnect/reconnect/other account. A `scheduled` post becomes `approval_invalidated` and the creator gets a notification |
+| **#2 Publish** (H2) | `renderId`, `mp4Sha256`, `connectionId`, `caption`, `mode`, `scheduledAt?`, `expectedStateVersion` | `renderId == project.currentRenderId` and render `ready` · `mp4Sha256 == renders.mp4Sha256` · connection is the user's, `active`, token not expired · server computes `captionHash = sha256(NFC(caption))` · copies `igUserId` from the connection | `posts.approval { id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` (`id` = a new approval id for every H2 call) | Any change the creator **requests** on the project: revision (storyboard or video stage, D5), narration edit (D3), voice switch (D4), restore/undo (D7), caption fix (F4); also a caption change, disconnect/reconnect/other account. The approval is cancelled **at the moment the change is requested**, in the same transaction, never later when the change's job finishes (PRD §7 hard rule). A `scheduled` **or `publish_failed`** post becomes `approval_invalidated` ("needs approval"; a failed post could otherwise be retried with H6/I9 on its old approval) and the creator gets an `approval_invalidated` notification |
 
 - Approvals are created **only** by the signed-in creator through these two endpoints. Jobs, admins and the model can never create them (ARCHITECTURE §18).
-- The publish job re-checks the approval **immediately before container creation and before `media_publish`**, with conditional updates (`state: 'publishing', 'approval.renderId': X`).
+- The publish job re-checks the approval **immediately before container creation and before `media_publish`**, with conditional updates on the post's `state` (`scheduled` → `publishing`; the post's `state` is the real guard, because every change above moves it away from `scheduled`/`publish_failed` in the same transaction). The **full re-check** (also used by H6 and I9) is: the post is still in the expected state · `renderId == project.currentRenderId`, render `ready`, same `mp4Sha256` · the project's `currentPlanVersionId` and `approvedPlanVersionId` both still equal that render's `planVersionId` (nothing was edited since) · the project is **not archived** · the owner's `user.status` is **`active`** · the connection is the approved `connectionId`, `active`, token not expired, same `igUserId`. Anything different → no publish (`APPROVAL_STALE`, or `INSTAGRAM_*` for the connection).
 - The UI must show exactly what is approved: thumbnail, duration, caption, `@username` next to the button.
 
 ---
@@ -606,8 +618,8 @@ Idempotent-Replayed: true
 | Quota | Default | Counted when | Resets | Error |
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
-| Projects created per user per day | 5 | C2 accepted | same | `quota: projects_per_day` |
-| Plan + revision requests per project | 20 | C2 (counts 1) and each D5 accepted | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count | same | `quota: projects_per_day` |
+| Plan + revision requests per project | 20 | C2 (counts 1), each D5 accepted, and each plan retry after an Edit idea (C4 → E2); stored in `projects.planRequestCount` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
 Current usage is in `GET /api/v1/me` → `usage`.
@@ -621,10 +633,10 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 |---|---|
 | Auth (A1, A2, A5, A6) | see §3.7 |
 | Polling reads (C6, E1, H4) | 120 / min |
-| Other reads (`GET`) | 300 / min |
+| Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
 | C7 brainstorm, H1 caption suggestions | 10 / hour each |
 | C2 create project | 10 / hour (plus the daily quota) |
-| D3 narration edit, D4 voice, D7 restore, C4 rename | 60 / min |
+| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min |
 | D5 revision | 20 / hour |
 | D8 approve, F4 caption overrides | 10 / hour |
 | H2 publish/schedule, H5, H6 | 10 / hour |
@@ -665,7 +677,7 @@ Types use TypeScript notation; `| null` fields are always present. Full JSON Sch
 | `RenderStatus` | `pending` \| `rendering` \| `validating` \| `ready` \| `failed` | ARCHITECTURE §8.8 |
 | `PostMode` / `PostState` | `now`\|`scheduled` / `draft` (reserved) \| `scheduled` \| `publishing` \| `outcome_unknown` \| `published` \| `publish_failed` \| `approval_invalidated` \| `cancelled` | ARCHITECTURE §7.4, §8.12 |
 | `ConnectionStatus` | `active` \| `expired` \| `revoked` \| `error` | ARCHITECTURE §8.11 |
-| `AllowedAction` | `rename`, `archive`, `edit_storyboard`, `request_revision`, `approve_storyboard`, `cancel_job`, `retry_job`, `edit_captions`, `download`, `publish`, `cancel_post`, `retry_post` | derived server side (principle "the server owns state") |
+| `AllowedAction` | `rename`, `edit_idea` (only in `plan_failed`), `archive`, `edit_storyboard`, `request_revision`, `approve_storyboard`, `cancel_job`, `retry_job`, `edit_captions`, `download`, `publish`, `cancel_post`, `retry_post` | derived server side (principle "the server owns state") |
 | `NotificationType` | `storyboard_ready`, `video_ready`, `needs_input`, `generate_failed`, `post_published`, `post_failed`, `approval_invalidated`, `instagram_reconnect` | §14.2 |
 
 ### 11.2 Plan contract (exact code field names: `packages/pipeline/src/contracts/plan.ts`)
@@ -743,7 +755,7 @@ InstagramConnection = { id; igUserId: string; username: string; accountType: "BU
 
 PostSummary = { id; state: PostState; mode: PostMode; scheduledAt: string | null; permalink: string | null }
 Post = PostSummary & { projectId; renderId; connectionId; caption: string; jobId: string | null;
-       approval: { renderId; mp4Sha256; connectionId; igUserId; captionHash; approvedBy; approvedAt };
+       approval: { id /*approvalId, new for every H2 approval*/; renderId; mp4Sha256; connectionId; igUserId; captionHash; approvedBy; approvedAt };
        destination: { username: string; profilePictureUrl: string | null };
        igMediaId: string | null; attempts: number; nextAttemptAt: string | null;
        lastError: { code; message; at } | null; publishedAt: string | null; createdAt; updatedAt }
@@ -777,7 +789,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | C1 | GET | `/api/v1/projects` | Library (tabs, paginated) | creator | 200 | | |
 | C2 | POST | `/api/v1/projects` | Create project + start storyboard | creator | 202 | ✓ | |
 | C3 | GET | `/api/v1/projects/{projectId}` | Project detail | creator | 200 | | |
-| C4 | PATCH | `/api/v1/projects/{projectId}` | Rename | creator | 200 | | ✓ |
+| C4 | PATCH | `/api/v1/projects/{projectId}` | Rename; edit the idea after the storyboard failed | creator | 200 | | ✓ |
 | C5 | DELETE | `/api/v1/projects/{projectId}` | Archive (soft delete) | creator | 200 | | ✓ |
 | C6 | GET | `/api/v1/projects/{projectId}/status` | Lightweight status for 2 s polling | creator | 200 | | |
 | C7 | POST | `/api/v1/brainstorm` | AI idea suggestions (sync) | creator | 200 | | |
@@ -839,6 +851,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | App shell (every signed-in page) | A4, B1 | A3 logout, B5/B6 notifications bell, toasts from B5 (`unreadOnly=true`) |
 | `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new` |
 | `/projects/new` ① Idea | B1 (defaults), B4 (voices) | C7 brainstorm, C2 create storyboard → poll C6 |
+| ① Idea of an existing project in `plan_failed` (storyboard failed) | C3 (idea text + `lastError`) | **Edit idea** = C4 with `text` (and optional `title`), then **Try again** = E2 on the failed plan job → poll C6 |
 | `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob` |
 | `/projects/[id]/video` ③ | C3, F2 current render, F3 `kind=video` | F3 `kind=download`, F4 caption fixes, D5 revision (`stage: video`), E2 retry, E3 cancel, F1 previous versions, poll C6 |
 | `/projects/[id]/publish` ④ | C3, F2, F3 (`thumbnail`, `video`), G1, H3 | G2 connect, H1 AI caption, H2 publish now / schedule, H5 cancel, H6 retry, F3 download, poll H4 / C6 |
@@ -861,6 +874,7 @@ A1–A6 are specified in §3 with examples.
 Purpose: profile, defaults, quotas, Instagram badge and unread count for the app shell. Auth: creator. Rate: 300/min.
 Success `200` → `Me`.
 Errors: common only.
+**Until the related features exist (F11):** the `usage` counts are `0` (limits and `resetsAt` are real; counting starts in F12 for projects and with video generation for videos and voice characters), `instagram` is `{ "status": "not_connected", "username": null }` (until F28), `unreadNotifications` is `0` (until F32) and `maintenance` is off (until the `settings` document, F27/F36). The limits live in one constant, `USAGE_LIMITS` in `packages/db/src/usage.ts`; the app shell's "Videos today" pill calls the same server function as this endpoint (`apps/web/lib/account/me.ts`).
 ```json
 {
   "id": "67330c1a9f1e4b2a7c0d1e01",
@@ -900,10 +914,10 @@ Success `200` → `Me`. Errors: `400 INVALID_INPUT`.
 ```
 
 #### B3. `DELETE /api/v1/me` — Delete account
-Purpose: permanently delete the account and all data (DPDP; ARCHITECTURE §22). Auth: creator. Rate: 3/hour. **Idempotency-Key required.**
+Purpose: delete the account (DPDP; ARCHITECTURE §22; DATABASE.md §6.7). **30-day soft delete** (founder decision, 2026-11-13): the account is hidden and logged out right away and can be restored by an admin within 30 days; then personal data is erased and one anonymous `deletionLog` entry is kept. Auth: creator. Rate: 3/hour. **Idempotency-Key required.**
 Body: `password` string (required, re-authentication) · `confirm` must equal `"DELETE"`.
-Effect (one transaction, see DATABASE.md §7): user `status = deleting`, all sessions deleted, scheduled posts `cancelled`, active jobs get `cancelRequestedAt`, a `deletionRequests` record; then the `delete-account` Inngest function deletes the R2 prefix `users/{ownerId}/`, the Instagram token and every owner-scoped collection, anonymizes audit logs and finally removes the Better Auth rows.
-Success `202` → `{ deletionRequestId, status: "pending", requestedAt }` and the session cookie is cleared.
+Effect (one transaction, see DATABASE.md §7): user `status = deleting`, all sessions deleted, `scheduled` and `publish_failed` posts `cancelled`, active jobs get `cancelRequestedAt`, a `deletionRequests` record with `eraseAfter` = now + 30 days. Right after the transaction, the Instagram token and connection are deleted (Meta's rule). At `eraseAfter`, the `delete-account` Inngest function writes the anonymous `deletionLog` entry, deletes the R2 prefix `users/{ownerId}/` and every owner-scoped collection, deletes the `allowlist` entry, anonymizes `providerUsage` and audit logs and finally removes the Better Auth rows and the request record (DATABASE.md §6.7).
+Success `202` → `{ deletionRequestId, status: "pending", requestedAt, eraseAfter }` and the session cookie is cleared.
 Errors: `400 INVALID_INPUT` (wrong `confirm`) · `403 FORBIDDEN` (`details.reason: "wrong_password"`) · `409 INVALID_STATE` (a post is `publishing` right now; try again in a few minutes).
 ```json
 { "password": "Monsoon-Maths-Notes-77", "confirm": "DELETE" }
@@ -1005,7 +1019,7 @@ Purpose: ① **Create storyboard**. Auth: creator. Rate: 10/hour + quota 5 proje
 | `voiceGender` | `VoiceGender` | ✓ | → `voicePreset` (e.g. `en` + `female` → `indian-english-female`) |
 | `brainstormChoice` | `{ subject 2–100, title 3–120, hook 3–200 }` | iff `inputType = brainstorm` | Copied from a C7 idea |
 
-Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title` = first 120 chars of the idea until the plan arrives, then `plan.topic`), `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`), `activeJobId`, `usageCounters.projects +1`; then Inngest `plan.requested`. Notes are stored as the plan's single `sources[]` entry (`id: "creator-notes"`).
+Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title` = first 120 chars of the idea until the plan arrives, then `plan.topic`), `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`), `activeJobId`, `planRequestCount: 1`, `usageCounters.projects +1`; then Inngest `plan.requested`. Notes are stored as the plan's single `sources[]` entry (`id: "creator-notes"`).
 Success `202` → `{ project: Project, job: Job }`.
 Errors: `400 INVALID_INPUT` · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503 SPEND_CEILING`.
 ```http
@@ -1061,19 +1075,27 @@ Errors: `404 NOT_FOUND`.
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM1G6H7J" } }
 ```
 
-#### C4. `PATCH /api/v1/projects/{projectId}` — Rename
-Auth: creator. Body: `title` string 1–120 (required) · `expectedStateVersion` int (required). Allowed in every state except `archived`. Doesn't touch plans or approvals.
-Success `200` → `Project`. Errors: `400 INVALID_INPUT` · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived).
+#### C4. `PATCH /api/v1/projects/{projectId}` — Rename, or edit the idea after the storyboard failed
+Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `text` string (the idea; same length rules as C2 for the project's `inputType`) · plus `expectedStateVersion` int (required).
+- **Rename** (`title` only): allowed in every state except `archived`. Doesn't touch plans or approvals.
+- **Edit idea** (`text`, optionally with `title`): allowed **only in `plan_failed`** with no active job (the "Edit idea" button after a failed storyboard, §4.3). Effect (transaction): `project.input.text` replaced (`inputType` and `brainstormChoice` unchanged), `title` = the sent `title`, else the first 120 chars of the new text (as in C2), `stateVersion + 1`; the project stays `plan_failed` with its `lastError`, and `allowedActions` includes `retry_job`. The creator then presses **Try again** (E2 on the failed `plan` job), which plans from the edited idea. Editing the idea and trying again **does not count toward the 5 projects/day quota** (no new project is created), but each retry that plans from an edited idea **counts 1 toward the 20 plan + revision requests per project** (it is a paid AI call; founder, 2026-11-13). At the limit, E2 returns `429 QUOTA_EXCEEDED` (`plan_requests_per_project`). Language and voice are not editable here (language: create a new project, PRD decision #25; voice: D4 once a storyboard exists).
+Success `200` → `Project`. Errors: `400 INVALID_INPUT` (no field, text length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived; `text` sent outside `plan_failed`) · `409 JOB_ALREADY_RUNNING`.
 ```json
 { "title": "UPI in 2 seconds", "expectedStateVersion": 4 }
 ```
 Response: the `Project` with `"title": "UPI in 2 seconds"`, `"stateVersion": 5`.
+
+Edit idea after a failed storyboard:
+```json
+{ "text": "How a UPI payment travels from your phone to the shop's bank in two seconds", "expectedStateVersion": 3 }
+```
+Response: the `Project` with `"state": "plan_failed"`, the new `input.text` and `title`, `"stateVersion": 4`, `"allowedActions": ["rename", "edit_idea", "retry_job", "archive"]`. Next call: `POST /api/v1/jobs/{planJobId}/retry` (E2).
 ```json
 { "error": { "code": "STALE_VERSION", "message": "This project changed in another tab, refresh.", "details": { "expectedStateVersion": 4, "currentStateVersion": 5 }, "requestId": "req_01JCXM1K8L9M" } }
 ```
 
 #### C5. `DELETE /api/v1/projects/{projectId}` — Archive (soft delete)
-Auth: creator. Header `If-Match: "<stateVersion>"` (required). Allowed in any state **except `publishing`/`outcome_unknown` post in flight** (ARCHITECTURE §7.2). Effect (transaction): active pipeline job gets `cancelRequestedAt`; a `scheduled` post → `cancelled`; project `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. Nothing is deleted from R2 (DATABASE.md §8.1).
+Auth: creator. Header `If-Match: "<stateVersion>"` (required). Allowed in any state **except `publishing`/`outcome_unknown` post in flight** (ARCHITECTURE §7.2). Effect (transaction): active pipeline job gets `cancelRequestedAt`; a `scheduled` or `publish_failed` post → `cancelled` (so it can never be published or retried); project `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. Nothing is deleted from R2 (DATABASE.md §6.6).
 Success `200` → `Project` (`state: archived`). Errors: `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (publishing; already archived).
 ```http
 DELETE /api/v1/projects/67330d5e9f1e4b2a7c0d2a10
@@ -1274,7 +1296,7 @@ Purpose: save one inline narration edit as a new **`user_edit`** plan version (A
 | `display` | string \| null | | Optional caption form (1–300); same rules |
 | `expectedStateVersion` | int | ✓ | |
 
-Allowed states: `storyboard_ready`, `generate_failed`, `video_ready` (editing after a video exists makes a new version that must be approved again), no active job. Effect (transaction): insert `planVersions` (version n+1, `parentVersionId` = base, re-validated, re-hashed), `project.currentPlanVersionId`, `approvedPlanVersionId = null`, state → `storyboard_ready`, `stateVersion + 1`; a `scheduled` post → `approval_invalidated`.
+Allowed states: `storyboard_ready`, `generate_failed`, `video_ready`, `scheduled`, `publish_failed` (editing after a video exists makes a new version that must be approved again), no active job. One rule for every change (founder, 2026-11-13): anything can be changed unless a job is running, and any change cancels the publish approval. Effect (transaction): insert `planVersions` (version n+1, `parentVersionId` = base, re-validated, re-hashed), `project.currentPlanVersionId`, `approvedPlanVersionId = null`, state → `storyboard_ready`, `stateVersion + 1`; a `scheduled` or `publish_failed` post → `approval_invalidated` **immediately, in the same transaction** (back to "needs approval"), plus an `approval_invalidated` notification (§9).
 **The version is saved even if validation fails** (e.g. an event anchor phrase no longer exists in the new text): `validation.valid = false` with issues; approval stays blocked until fixed.
 Success `201` → `PlanVersion` (+ `Location` header). Errors: `400 INVALID_INPUT` (unknown scene/narration id, length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING`.
 ```json
@@ -1290,7 +1312,7 @@ Response `201`: a `PlanVersion` with `"versionNumber": 3`, `"source": "user_edit
 
 #### D4. `POST /api/v1/projects/{projectId}/voice` — Switch narrator voice
 Purpose: Male ↔ Female on the storyboard (PRD §9). Creates a `user_edit` version whose only change is `voicePreset`; after a video exists the next generation re-records **all** scenes (PIPELINE_DESIGN §9). Auth: creator. Rate: 60/min.
-Body: `basePlanVersionId` id ✓ · `voiceGender` `VoiceGender` ✓ (must differ from the current one) · `expectedStateVersion` ✓. Same states/effects as D3; also sets `project.voiceGender`.
+Body: `basePlanVersionId` id ✓ · `voiceGender` `VoiceGender` ✓ (must differ from the current one) · `expectedStateVersion` ✓. Same states/effects as D3 (allowed while a post is `scheduled` or `publish_failed`; that post's approval is cancelled immediately); also sets `project.voiceGender`. Only the voice gender can be switched: the project's **language can't be changed** in V1; to get another language the creator creates a new project (C2) (PRD decision #25).
 Success `201` → `PlanVersion`. Errors: `400 INVALID_INPUT` (same gender) · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING`.
 ```json
 { "basePlanVersionId": "67330e019f1e4b2a7c0d2b02", "voiceGender": "male", "expectedStateVersion": 4 }
@@ -1312,7 +1334,7 @@ Purpose: plain-language change to the whole storyboard/video or one scene (PRD �
 | `basePlanVersionId` | id | ✓ | Must be current |
 | `expectedStateVersion` | int | ✓ | |
 
-Allowed states: `storyboard_ready`, `generate_failed`, `video_ready`, `scheduled`, `publish_failed`; no active job. Effect: `revisions` (`pending`), `jobs` (`revise`), `activeJobId`; state unchanged while the job runs; Inngest `revision.requested`. On success: a new `ai_revision` version becomes current, project → `storyboard_ready` (the creator approves again; a video-stage revision regenerates only changed scenes' narration, PIPELINE_DESIGN §9), `scheduled` post → `approval_invalidated`. If the request is ambiguous ("make it better"), the revision ends `rejected` with an `assistantReply` question and no new version (PRD §12).
+Allowed states: `storyboard_ready`, `generate_failed`, `video_ready`, `scheduled`, `publish_failed`; no active job. Effect (one transaction, at request time): `revisions` (`pending`), `jobs` (`revise`, key `rev:{revisionId}`), `activeJobId`, `project.planRequestCount + 1` (only if below the limit); a `scheduled` or `publish_failed` post → `approval_invalidated` **immediately** (PRD §7 hard rule: any revision cancels the publish approval when it is *requested*, not when the revision job succeeds; same as D3, D4 and F4) plus an `approval_invalidated` notification; the project state is otherwise unchanged while the job runs; Inngest `revision.requested`. The post stays `approval_invalidated` even if the revision later fails or is rejected; the creator re-approves with H2 or cancels with H5. On success: a new `ai_revision` version becomes current, project → `storyboard_ready` (the creator approves again; a video-stage revision regenerates only changed scenes' narration, PIPELINE_DESIGN §9). A revision can't change the project's language (the new plan keeps `project.language`, PRD decision #25; a request like "make it in Hindi" ends `rejected` with an `assistantReply` suggesting a new project). If the request is ambiguous ("make it better"), the revision ends `rejected` with an `assistantReply` question and no new version (PRD §12).
 Success `202` → `{ revision: Revision, job: Job }`.
 Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `429 QUOTA_EXCEEDED` (`plan_requests_per_project`, `resetsAt: null`) · `503 SPEND_CEILING`.
 ```json
@@ -1345,7 +1367,7 @@ Success `200` → `{ items: Revision[], nextCursor }`. Errors: `404` · `400 INV
 
 #### D7. `POST /api/v1/projects/{projectId}/plan-versions/{planVersionId}/restore` — Undo / restore
 Purpose: **Undo** returns to the previous version (the UI passes `parentVersionId` of the current one) or any older version from history. No data is deleted; the restored version keeps its id and hash, so an **existing approval of that exact version stays valid** (it's the same plan). Auth: creator.
-Body: `expectedStateVersion` ✓. Same allowed states as D3. Effect: `currentPlanVersionId = planVersionId`; `approvedPlanVersionId` = that id if it has an approval, else null; state `storyboard_ready`; `scheduled` post → `approval_invalidated`.
+Body: `expectedStateVersion` ✓. Same allowed states as D3. Effect: `currentPlanVersionId = planVersionId`; `approvedPlanVersionId` = that id if it has an approval, else null; state `storyboard_ready` (approving it again with D8 reuses its existing video if one was already made, see D8 "Re-approval"); a `scheduled` or `publish_failed` post → `approval_invalidated` (+ notification), in the same transaction.
 Success `200` → `Project`. Errors: `404` · `409 STALE_VERSION` · `409 INVALID_STATE` (already current; active job) · `409 JOB_ALREADY_RUNNING`.
 ```json
 { "expectedStateVersion": 5 }
@@ -1358,7 +1380,10 @@ Success `200` → `Project`. Errors: `404` · `409 STALE_VERSION` · `409 INVALI
 Purpose: the creator approves the **exact** plan version and starts generation. Auth: creator. Rate: 10/hour. **Idempotency-Key required.**
 Body: `planVersionId` id ✓ · `planHash` `sha256:…` ✓ · `expectedStateVersion` ✓.
 Checks (§9) + quota **3 videos/day** + ElevenLabs character budget (estimated from the plan) + spend ceilings. Effect (transaction): `storyboardApprovals` insert, `jobs` (`generate`, key `gen:{planVersionId}`), project `generating`, `approvedPlanVersionId`, `activeJobId`, `usageCounters.videos +1`; Inngest `video.generate.requested` (event id = `gen:{planVersionId}`). If this version was already approved and its generate job is `failed`/`cancelled`, the same job is re-queued (no second approval, no second quota count).
-Success `202` → `{ approval: StoryboardApproval, job: Job, project: Project }`.
+
+**Re-approval of a version that already has a video (e.g. after undo, D7).** If a `generate` job for this **exact** plan version (`gen:{planVersionId}`, same `planHash`) has already **succeeded**, approving returns that existing result instead of starting work: **no new job, no quota use, no ElevenLabs/spend checks, no Inngest event**. Effect (transaction): the existing approval is reused (no second `storyboardApprovals` row), `project.currentRenderId` = the newest `ready` render of that plan version (including caption fixes made on it), state → `video_ready`, `stateVersion + 1`. Answer `200` → `{ approval, job: <the succeeded generate job>, project }` (`project.state = video_ready`); the UI goes straight to ③ Video.
+
+Success `202` → `{ approval: StoryboardApproval, job: Job, project: Project }` (new or re-queued job) · `200` (same shape) when an existing video is reused.
 Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 APPROVAL_STALE` (not the current version / hash differs) · `422 PLAN_INVALID` (`details.issues`) · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `429 QUOTA_EXCEEDED` (`videos_per_day` or `voice_characters_per_month`) · `503 SPEND_CEILING`.
 ```http
 POST /api/v1/projects/67330d5e9f1e4b2a7c0d2a10/storyboard-approval
@@ -1406,8 +1431,8 @@ Example: see §8.2 (running) and §8.3 (`needs_input`). Failed example:
 
 #### E2. `POST /api/v1/jobs/{jobId}/retry` — Retry / resume
 Purpose: **Retry** / **Try again** buttons. Resumes from the last good checkpoint; finished stages and paid artifacts are reused (ARCHITECTURE §13.2). Auth: creator. Rate: 30/hour. **Idempotency-Key required.** Body: `{}`.
-Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job; no other active job on the project. Effect: state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
-Success `202` → `Job`. Errors: `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
+Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; a retry that plans from an edited idea counts 1 toward the per-project plan + revision limit (§10.1). Effect (one transaction): state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared, `project.planRequestCount + 1` when it counts; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
+Success `202` → `Job`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
 ```json
 {}
 ```
@@ -1478,16 +1503,16 @@ GET /api/v1/projects/67330d5e9f1e4b2a7c0d2a10/renders/current/media?kind=downloa
 ```
 
 #### F4. `POST /api/v1/projects/{projectId}/renders/{renderId}/caption-overrides` — Caption correction
-Purpose: fix caption text (e.g. a technical term) **without changing the narration audio** (PRD §6.3). Saves a new immutable caption-override set and starts a `caption` job (re-compile captions + re-render, no speech; PIPELINE_DESIGN §9). Auth: creator. Rate: 10/hour; counts toward **3 videos/day**. **Idempotency-Key required.**
+Purpose: fix caption text (e.g. a technical term) **without changing the narration audio** (PRD §6.3). Saves a new immutable caption-override set and starts a `caption` job (re-compile captions + re-render, no speech; PIPELINE_DESIGN §9). Auth: creator. Rate: 10/hour; does **not** count toward the 3 videos/day quota (decision #24a: only `generate` jobs count). **Idempotency-Key required.**
 
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `edits` | array 1–50 of `{ sceneId: SafeId, phraseIndex: int ≥ 0, text: string 1–200 }` | ✓ | Each `(sceneId, phraseIndex)` must exist in this render's captions; unique pairs. Hindi text must be Devanagari, Hinglish Roman (same script rule as the plan) |
 | `expectedStateVersion` | int | ✓ | |
 
-`renderId` must be the project's current render (`current` allowed). Allowed states: `video_ready`, `scheduled`, `publish_failed`; no active job. Effect (transaction): `captionOverrides` (new set = previous set's overrides + these edits), `jobs` (`caption`), project `generating`, `activeJobId`, `usageCounters.videos +1`, a `scheduled` post → `approval_invalidated`; Inngest `video.recaption.requested`. The UI shows the PRD note "Narration audio is unchanged" and offers "regenerate narration too" (= a D3 narration edit instead).
+`renderId` must be the project's current render (`current` allowed). Allowed states: `video_ready`, `scheduled`, `publish_failed`; no active job. Effect (transaction): `captionOverrides` (new set = previous set's overrides + these edits), `jobs` (`caption`), project `generating`, `activeJobId` (no quota counter changes), a `scheduled` or `publish_failed` post → `approval_invalidated` immediately (+ `approval_invalidated` notification); Inngest `video.recaption.requested`. The UI shows the PRD note "Narration audio is unchanged" and offers "regenerate narration too" (= a D3 narration edit instead).
 Success `202` → `{ captionOverrideSetId, job: Job, project: Project }`.
-Errors: `400 INVALID_INPUT` (unknown phrase, script) · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` (not the current render / wrong state) · `409 JOB_ALREADY_RUNNING` · `429 QUOTA_EXCEEDED` · `503 SPEND_CEILING`.
+Errors: `400 INVALID_INPUT` (unknown phrase, script) · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` (not the current render / wrong state) · `409 JOB_ALREADY_RUNNING` · `503 SPEND_CEILING`.
 ```json
 { "edits": [ { "sceneId": "scene-flow", "phraseIndex": 1, "text": "to NPCI — the national switch" } ], "expectedStateVersion": 7 }
 ```
@@ -1531,9 +1556,9 @@ Location: https://www.instagram.com/oauth/authorize?client_id=1234567890&redirec
 #### G3. `GET /api/v1/instagram/callback` — OAuth callback
 Purpose: Meta redirects here. Auth: the session cookie **and** a valid `state` bound to that session.
 Query: `code`, `state` (success) or `error`, `error_reason`, `error_description`, `state` (user denied).
-Effect: verify `state` (signature, expiry, `sessionId` = current session) → exchange `code` for a short-lived token → long-lived token (~60 days) → `GET /me?fields=user_id,username,account_type,profile_picture_url` → require `BUSINESS` or `MEDIA_CREATOR` → encrypt (AES-256-GCM) and upsert `instagramConnections` (unique `ownerId`). Reconnecting a **different** account invalidates `scheduled` posts (`approval_invalidated`, notification). Audit `instagram.connected`.
+Effect: verify `state` (signature, expiry, `sessionId` = current session) → exchange `code` for a short-lived token → long-lived token (~60 days) → `GET /me?fields=user_id,username,account_type,profile_picture_url` → require `BUSINESS` or `MEDIA_CREATOR` → **reject if this `igUserId` already has an `active` connection owned by a different user** (`INSTAGRAM_ACCOUNT_IN_USE`; nothing is stored and the new token is discarded) → encrypt (AES-256-GCM) and upsert `instagramConnections`. One Instagram account per ByteReel user is enforced both ways (PRD decision #24d): unique `ownerId` (a user has one connection) **and** a unique partial index on `igUserId` where `status = active` (an Instagram account belongs to one user); the index also catches two users finishing OAuth at the same moment (duplicate-key error → `INSTAGRAM_ACCOUNT_IN_USE`). Reconnecting a **different** account invalidates `scheduled` and `publish_failed` posts (`approval_invalidated`, notification). Audit `instagram.connected`. The calls to Meta happen first; the database writes (connection upsert, posts invalidated, notifications, audit) are **one transaction** (DATABASE.md §7).
 Success: `302` to `/settings?instagram=connected` or `/projects/{id}/publish?instagram=connected`.
-Errors (a `302` back to the `returnTo` page): `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` · `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`. No session → `302 /login`. Only a malformed call that can't be tied to any flow (neither `code` nor `error`, or no `state`) gets a JSON `400 INVALID_INPUT`.
+Errors (a `302` back to the `returnTo` page, always in the one format `?instagram_error=<CODE>[&reason=<reason>]`): `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` · `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` · `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`. No session → `302 /login`. Only a malformed call that can't be tied to any flow (neither `code` nor `error`, or no `state`) gets a JSON `400 INVALID_INPUT`.
 ```http
 GET /api/v1/instagram/callback?code=AQBx...#_&state=eyJzIjoi...sig
 
@@ -1546,7 +1571,7 @@ Location: /projects/67330d5e9f1e4b2a7c0d2a10/publish?instagram_error=INSTAGRAM_A
 ```
 
 #### G4. `DELETE /api/v1/instagram/connection` — Disconnect
-Auth: creator. Body: none. Effect (transaction): token ciphertext removed, `status = revoked`, `revokedAt`; every `scheduled` post of the user → `approval_invalidated` (+ notification); audit `instagram.disconnected`. A post that is `publishing` right now → `409 INVALID_STATE` (try again in a few minutes).
+Auth: creator. Body: none. Effect (transaction): token ciphertext removed, `status = revoked`, `revokedAt`; every `scheduled` or `publish_failed` post of the user → `approval_invalidated` (+ notification); audit `instagram.disconnected`. A post that is `publishing` right now → `409 INVALID_STATE` (try again in a few minutes).
 Success `200` → `{ connection: InstagramConnection }` (status `revoked`). Errors: `404 NOT_FOUND` (no connection) · `409 INVALID_STATE`.
 ```json
 { "connection": { "id": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "username": "physics.with.ananya", "accountType": "MEDIA_CREATOR", "profilePictureUrl": null, "status": "revoked", "tokenExpiresAt": "2027-01-11T06:10:00.000Z", "connectedAt": "2026-11-12T06:10:00.000Z", "lastRefreshedAt": "2026-11-12T06:10:00.000Z" } }
@@ -1586,11 +1611,11 @@ Purpose: the creator approves the **exact video + destination + caption** and pu
 | `mp4Sha256` | `sha256:…` | ✓ | Must equal the render's `mp4Sha256` |
 | `connectionId` | id | ✓ | The user's `active` connection |
 | `caption` | string | ✓ | 1–2,200 chars incl. hashtags (Instagram limit; ≤ 30 hashtags) |
-| `scheduledAt` | ISO-8601 with offset | iff `mode = scheduled` | **≥ now + 10 min** and **≤ now + 75 days** (ARCHITECTURE §12.3); stored in UTC |
+| `scheduledAt` | ISO-8601 with offset | iff `mode = scheduled` | **≥ now + 10 min** and **≤ now + 75 days**; stored in UTC |
 | `expectedStateVersion` | int | ✓ | |
 
 Allowed states: `video_ready`, `publish_failed`; or `scheduled` with an `approval_invalidated` post (re-approval). One live post per project (partial unique index on `scheduled`/`publishing`/`outcome_unknown`); a project that is already `published` → `409 INVALID_STATE` (one video per project, V1).
-Effect (transaction): `posts` insert with `approval` snapshot and `publishKey = pub:{projectId}:{renderId}:{connectionId}:{scheduledAt|now}` (unique), `jobs` (`publish`), project → `publishing` (now) or `scheduled`; audit `post.approved`; Inngest `post.publish.requested` (with `ts = scheduledAt` when scheduled).
+Effect (transaction): `posts` insert with `approval` snapshot (with a new `approval.id`) and `publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (unique). Because the key contains the approval id, **every new approval gets its own key**: re-approving after a failure, after an `approval_invalidated` post or after suspend/reactivate makes a new post, while everything that belongs to the **same** approval (a double-click replayed by the `Idempotency-Key`, a re-delivered Inngest event, H6/I9 retries of that post) can never publish twice. A second, separate click that creates another approval is stopped by the one-live-post index (`409 INVALID_STATE`); `jobs` (`publish`), project → `publishing` (now) or `scheduled`; audit `post.approved`; Inngest `post.publish.requested` (with `ts = scheduledAt` when scheduled).
 Success `202` → `{ post: Post, job: Job, project: Project }`.
 Errors: `400 INVALID_INPUT` (time window, caption length, hashtags) · `404` · `409 STALE_VERSION` · `409 APPROVAL_STALE` (`details.reason`: `render_not_current`, `mp4_hash_mismatch`, `connection_changed`) · `409 INSTAGRAM_NOT_CONNECTED` · `409 INSTAGRAM_TOKEN_EXPIRED` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING`.
 ```http
@@ -1616,7 +1641,7 @@ Idempotency-Key: c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c
     "projectId": "67330d5e9f1e4b2a7c0d2a10", "renderId": "67330fa09f1e4b2a7c0d6f02", "connectionId": "6733101a9f1e4b2a7c0d7a01",
     "caption": "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics",
     "jobId": "673310209f1e4b2a7c0d3c05",
-    "approval": { "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
+    "approval": { "id": "673310209f1e4b2a7c0d8e01", "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
     "destination": { "username": "physics.with.ananya", "profilePictureUrl": "https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg" },
     "igMediaId": null, "attempts": 0, "nextAttemptAt": null, "lastError": null, "publishedAt": null,
     "createdAt": "2026-11-12T06:20:00.000Z", "updatedAt": "2026-11-12T06:20:00.000Z"
@@ -1652,7 +1677,7 @@ Purpose: publish progress + success link. Poll every 2 s while `state` is `publi
   "projectId": "67330d5e9f1e4b2a7c0d2a10", "renderId": "67330fa09f1e4b2a7c0d6f02", "connectionId": "6733101a9f1e4b2a7c0d7a01",
   "caption": "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics",
   "jobId": "673310209f1e4b2a7c0d3c05",
-  "approval": { "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
+  "approval": { "id": "673310209f1e4b2a7c0d8e01", "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
   "destination": { "username": "physics.with.ananya", "profilePictureUrl": "https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg" },
   "igMediaId": "17900000000000001", "attempts": 1, "nextAttemptAt": null, "lastError": null, "publishedAt": "2026-11-13T13:31:42.000Z",
   "createdAt": "2026-11-12T06:20:00.000Z", "updatedAt": "2026-11-13T13:31:43.000Z"
@@ -1663,7 +1688,7 @@ Purpose: publish progress + success link. Poll every 2 s while `state` is `publi
 ```
 
 #### H5. `POST /api/v1/posts/{postId}/cancel` — Cancel a scheduled post
-Auth: creator. Rate: 10/hour. Body: `{}`. Allowed: `scheduled` or `approval_invalidated`. Effect: conditional update `state: scheduled → cancelled` (ARCHITECTURE §12.3), job cancelled (`job.cancelled`), project → `video_ready`. Calling it on an already `cancelled` post returns `200` with the post.
+Auth: creator. Rate: 10/hour. Body: `{}`. Allowed: `scheduled` or `approval_invalidated`. Effect: conditional update `state: scheduled → cancelled`, job cancelled (`job.cancelled`), project → `video_ready`. Calling it on an already `cancelled` post returns `200` with the post.
 Success `200` → `Post`. Errors: `404` · `409 INVALID_STATE` (`publishing`, `published`, …).
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This post is being published right now and can't be cancelled.", "details": { "postState": "publishing" }, "requestId": "req_01JCXM5A9B0C" } }
@@ -1671,8 +1696,8 @@ Success `200` → `Post`. Errors: `404` · `409 INVALID_STATE` (`publishing`, `p
 
 #### H6. `POST /api/v1/posts/{postId}/retry` — Retry a failed publish
 Auth: creator. Rate: 10/hour. **Idempotency-Key required.** Body: `{}`.
-Allowed: `publish_failed`. The **approval is re-checked** (render still current, same hash, connection active and same `igUserId`); if anything changed → `409 APPROVAL_STALE` and the creator approves again with H2. Effect: post → `publishing`, `attempts + 1`, publish job re-queued (reusing the container if it's still valid, ARCHITECTURE §17.4).
-Success `202` → `{ post: Post, job: Job }`. Errors: `404` · `409 INVALID_STATE` · `409 APPROVAL_STALE` · `409 INSTAGRAM_TOKEN_EXPIRED` · `409 INSTAGRAM_NOT_CONNECTED`.
+Allowed: `publish_failed`. The **approval is re-checked** with the full re-check of §9 (render still current and the project's current/approved plan still the one it was made from, same hash, project not archived, user `active`, connection active and same `igUserId`); if anything changed → `409 APPROVAL_STALE` and the creator approves again with H2. Effect: post → `publishing`, `attempts + 1`, publish job re-queued (reusing the container if it's still valid, ARCHITECTURE §17.4).
+Success `202` → `{ post: Post, job: Job }`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` · `409 APPROVAL_STALE` · `409 INSTAGRAM_TOKEN_EXPIRED` · `409 INSTAGRAM_NOT_CONNECTED`.
 ```json
 { "error": { "code": "APPROVAL_STALE", "message": "The video changed after you approved it. Please review and approve again.", "details": { "reason": "render_not_current" }, "requestId": "req_01JCXM5D1E2F" } }
 ```
@@ -1731,7 +1756,7 @@ Success `200` → `AdminUser & { usage: { videosToday, projectsToday, voiceChara
 ```
 
 #### I6. `PATCH /api/v1/admin/users/{userId}` — Suspend / reactivate
-Body: `status` `active` \| `suspended` ✓ · `reason` string ≤ 200 (required when suspending). Admins can't change their own status or a `deleting` user. Suspending (transaction): `status = suspended`, all sessions deleted, active jobs `cancelRequestedAt`, scheduled posts → `approval_invalidated`. Reactivating also clears `lockedUntil`/`failedLoginCount`.
+Body: `status` `active` \| `suspended` ✓ · `reason` string ≤ 200 (required when suspending). Admins can't change their own status. A `deleting` user can only be **restored** (`status: active`) before the request's `eraseAfter` (30-day grace period; the `deletionRequests` record becomes `cancelled`, posts stay cancelled, Instagram must be connected again); after that → `409 INVALID_STATE`. Suspending (transaction): `status = suspended`, all sessions deleted, active jobs `cancelRequestedAt`, `scheduled` and `publish_failed` posts → `approval_invalidated`. Reactivating also clears `lockedUntil`/`failedLoginCount`.
 Success `200` → `AdminUser`. Errors: `400 INVALID_INPUT` · `404` · `409 INVALID_STATE` (self / deleting).
 ```json
 { "status": "suspended", "reason": "Repeated attempts to generate unsafe content" }
@@ -1761,8 +1786,8 @@ Success `200` → `{ items: AdminJob[], nextCursor }`, `AdminJob = Job & { owner
 ```
 
 #### I9. `POST /api/v1/admin/jobs/{jobId}/retry` — Retry any user's job
-Same rules as E2 (including the approval re-check) but without the ownership filter, and also allowed for `publish` jobs in `publish_failed` (re-checks the publish approval). **Idempotency-Key required.** Body: `{}`. Audit `admin.job_retried`.
-Success `202` → `AdminJob`. Errors: `404` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` · `409 APPROVAL_STALE`.
+Same rules as E2 (including the approval re-check) but without the ownership filter, and also allowed for `publish` jobs in `publish_failed` (the same full publish re-check as H6/§9: project not archived, user `active`, render and plan still the approved ones, connection unchanged). **Idempotency-Key required.** Body: `{}`. Audit `admin.job_retried`.
+Success `202` → `AdminJob`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` · `409 APPROVAL_STALE`.
 ```json
 { "error": { "code": "JOB_ALREADY_RUNNING", "message": "This project already has a running job.", "details": { "activeJobId": "67330f109f1e4b2a7c0d3c03" }, "requestId": "req_01JCXM6G9H0J" } }
 ```
@@ -1818,12 +1843,12 @@ Success `200` → `Settings` (version + 1). Errors: `400 INVALID_INPUT` · `409 
 { "error": { "code": "STALE_VERSION", "message": "Settings were changed by someone else. Reload and try again.", "details": { "expectedVersion": 3, "currentVersion": 4 }, "requestId": "req_01JCXM6R5S6T" } }
 ```
 
-### 14.10 Meta callbacks (ARCHITECTURE §12.3, §21.3, §22)
+### 14.10 Meta callbacks (ARCHITECTURE §21.3, §22)
 
 Both callbacks receive `application/x-www-form-urlencoded` with one field `signed_request` = `<base64url HMAC-SHA256 signature>.<base64url JSON payload>`. The signature is verified with `META_APP_SECRET` (constant-time compare, `algorithm = HMAC-SHA256`); payload `{ user_id: "<igUserId>", algorithm, issued_at }`. Exempt from the Origin check. Rate: 60/min per IP.
 
 #### J1. `POST /api/v1/meta/deauthorize` — Deauthorize callback
-Effect: find connections with `igUserId = user_id` → `status = revoked`, token ciphertext removed, `scheduled` posts → `approval_invalidated`, notification `instagram_reconnect`, audit `instagram.deauthorized`. Unknown `user_id` is fine (still `200`, nothing to do).
+Effect: find connections with `igUserId = user_id` → `status = revoked`, token ciphertext removed, `scheduled` and `publish_failed` posts → `approval_invalidated`, notification `instagram_reconnect`, audit `instagram.deauthorized`, all in **one transaction** (DATABASE.md §7). Unknown `user_id` is fine (still `200`, nothing to do).
 Success `200` → `{ "received": true }`. Errors: `400 INVALID_SIGNATURE` · `400 INVALID_INPUT` (missing field).
 ```http
 POST /api/v1/meta/deauthorize
@@ -1839,7 +1864,7 @@ signed_request=Zm9vYmFyc2lnbmF0dXJl.eyJ1c2VyX2lkIjoiMTc4NDE0MDAwMDAwMDAwMDEiLCJh
 ```
 
 #### J2. `POST /api/v1/meta/data-deletion` — Data-deletion callback
-Effect: insert `deletionRequests` (`kind: meta_data`, `confirmationCode`), then (Inngest `meta.data_deletion.requested`) delete the connection document (token, username, picture), redact Meta-derived fields on that user's posts (`igContainerId`, `igMediaId`, `permalink`, `approval.igUserId` → hashed), delete matching `publishAttempts` request/response payloads, invalidate scheduled posts. The ByteReel account and videos are **not** deleted (they aren't Meta data).
+Effect: insert `deletionRequests` (`kind: meta_data`, `confirmationCode`), then (Inngest `meta.data_deletion.requested`) delete the connection document (token, username, picture), redact Meta-derived fields on that user's posts (`igContainerId`, `igMediaId`, `permalink`, `approval.igUserId` → hashed), delete matching `publishAttempts` request/response payloads, invalidate `scheduled` and `publish_failed` posts. The ByteReel account and videos are **not** deleted (they aren't Meta data).
 Success `200` → **Meta's required shape (snake_case)**: `{ "url": "https://<domain>/data-deletion/<code>", "confirmation_code": "<code>" }`. Errors: `400 INVALID_SIGNATURE`.
 ```json
 { "url": "https://bytereel.app/data-deletion/DEL-7K3M9Q2X", "confirmation_code": "DEL-7K3M9Q2X" }
@@ -1878,7 +1903,7 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 
 | # | Assumption |
 |---|---|
-| A-1 | Success bodies are the plain resource (`{ items, nextCursor }` for lists); the `{ ok, data }` wrapper from ARCHITECTURE §12 is replaced by HTTP status codes + the error envelope (part of decision #21). |
+| A-1 | Success bodies are the plain resource (`{ items, nextCursor }` for lists); the `{ ok, data }` wrapper from ARCHITECTURE §12 is replaced by HTTP status codes + the error envelope (part of decision #22). |
 | A-2 | Better Auth endpoints keep Better Auth's native error body `{ code, message }`; our hooks add the codes `NOT_ALLOWLISTED`, `TOO_MANY_ATTEMPTS`, `ACCOUNT_SUSPENDED`. Account lockout returns the same `429 TOO_MANY_ATTEMPTS` as the rate limit so it doesn't reveal that an email exists. |
 | A-3 | `user.status` gains a third value **`deleting`** (account deletion in progress). ARCHITECTURE §8.1 lists `active \| suspended` only. |
 | A-4 | Instagram/Meta routes move under `/api/v1` (`/api/v1/instagram/connect`, `/api/v1/instagram/callback`, `/api/v1/meta/deauthorize`, `/api/v1/meta/data-deletion`); the redirect URI configured in the Meta app is `https://<domain>/api/v1/instagram/callback`. ARCHITECTURE §12 and §17 were updated accordingly. |
@@ -1887,14 +1912,14 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 | A-7 | Caption corrections create a `captionOverrides` set and a `caption` job; they **don't** create a plan version, so the plan source `caption_edit` (ARCHITECTURE §8.4) is reserved and unused in V1. |
 | A-8 | ✅ *Decided (#24):* the quota "3 videos per user per day" counts accepted `generate` jobs only; caption fixes don't count. Retries and reused renders don't count. Resets at midnight in the user's timezone. |
 | A-9 | Narration edits that break an event anchor are saved as an **invalid** version (approval blocked with `PLAN_INVALID`) rather than rejected, so no typing is lost. The AI revision chat can fix it ("fix scene 3"). |
-| A-10 | Restoring (undo) an older version that already had an approval keeps that approval valid, because the plan and hash are identical. |
+| A-10 | Restoring (undo) an older version that already had an approval keeps that approval valid, because the plan and hash are identical. Approving that version again when its `generate` job already succeeded reuses the existing render: no new job, no quota use, the project moves to `video_ready` (D8 "Re-approval"). |
 | A-11 | Cancelling a generate job returns the project to `storyboard_ready` with the approval kept; approving the same version again resumes the same job (no new quota count). |
 | A-12 | Notifications (in-app, ARCHITECTURE §19) need a store and two endpoints (B5, B6) plus a `notifications` collection; not listed in ARCHITECTURE §8. |
 | A-13 | One `published` post per project in V1 (one video per project). Re-publishing the same video elsewhere/again is out of scope. |
 | A-14 | The live-post uniqueness covers `scheduled`, `publishing` **and `outcome_unknown`** (ARCHITECTURE §8.12 lists only the first two), so reconciliation can't race a new post. |
 | A-15 | Brainstorm ideas aren't stored; the chosen idea is copied into `project.input.brainstormChoice`. |
 | A-16 | Rate-limit numbers in §10.3 are starting values (ARCHITECTURE §21.2 names the endpoints but not the numbers); they live in code config, not in admin settings. |
-| A-17 | Media URLs are returned as JSON by default (`redirect=true` for a `302`); ARCHITECTURE §12.2 described a redirect only. |
+| A-17 | Media URLs are returned as JSON by default (`redirect=true` for a `302`); the old ARCHITECTURE §12.2 (since replaced by this document) described a redirect only. |
 | A-18 | Plan stats use the code names `sceneCount`, `wordCount`, `estimatedSeconds` (`PlanStats` in `semantic-validation.ts`); ARCHITECTURE §8.4 said `{ scenes, words, estimatedSeconds }` and was aligned. |
 
 **Gaps between PRD.md and ARCHITECTURE.md (ARCHITECTURE wins as the later, approved design; listed for the founder):**
@@ -1920,7 +1945,7 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 1. ✅ Caption fixes do **not** count toward the 3 videos/day quota (A-8 changed: only `generate` jobs count; `caption` jobs are still rate-limited by F4, 10/hour).
 2. ✅ No key-text fallback: the plan job fails with `PLAN_INVALID` ("Couldn't build a good storyboard, try rephrasing.") + Try again (G-5 → ARCHITECTURE wins).
 3. ✅ Voice unavailable: fail clearly with `PROVIDER_UNAVAILABLE`; never substitute a voice (G-4 → ARCHITECTURE wins).
-4. ✅ One Instagram account per ByteReel user: `igUserId` is **unique among active connections**. Connecting an account already connected by another user redirects back with `?instagram=error&reason=account_in_use` and the message "This Instagram account is already connected to another ByteReel account."
+4. ✅ One Instagram account per ByteReel user: `igUserId` is **unique among active connections**. Connecting an account already connected by another user redirects back with `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` (same format as every other callback error, G3) and the message "This Instagram account is already connected to another ByteReel account."
 
 **Still open:**
 5. Confirm the domain for the Meta redirect URI and the data-deletion status page (examples use `bytereel.app`, domain check pending per PRD §22).
