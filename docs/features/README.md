@@ -48,7 +48,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ✅ Done |
 | F08 | [Sign up](F08-sign-up.md) | F07 | ✅ Done |
 | F09 | [Log in and log out](F09-log-in-out.md) | F08 | 🧪 Testing |
-| F10 | [Access pending page](F10-access-pending.md) | F08 | ⬜ Not started |
+| F10 | [Access pending page](F10-access-pending.md) | F08 | 🔨 In progress |
 | F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ⬜ Not started |
 
 ### A3 · Idea → Storyboard
