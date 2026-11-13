@@ -5,8 +5,10 @@ import {
   ensureIndexes,
   explainDbError,
   getDb,
+  INDEX_FEATURES,
   INDEXES,
   indexesForFeatures,
+  passwordsIn,
   ping,
   readDbConfig,
   redactConnectionString,
@@ -28,20 +30,46 @@ const USAGE = `Usage:
   npm run db -- check
   npm run db -- ping
   npm run db -- cleanup
-  npm run db -- indexes [--feature F07|F08 ...] [--apply]`;
+  npm run db -- indexes [--feature ${INDEX_FEATURES.join("|")} ...] [--apply]`;
 
+const COMMANDS = ["check", "ping", "cleanup", "indexes"] as const;
+type Command = (typeof COMMANDS)[number];
 type Print = (lines: string[]) => void;
 
-export async function runDbCommand(argv: string[], print: Print, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+interface Parsed {
+  command: Command;
+  features: string[];
+  apply: boolean;
+}
+
+/** Read and check the command line before anything connects. Returns an error text on bad input. */
+function parseCommand(argv: string[]): Parsed | string {
   const [command, ...rest] = argv;
-  if (!command || !["check", "ping", "cleanup", "indexes"].includes(command)) {
-    print([USAGE]);
+  if (!command || !(COMMANDS as readonly string[]).includes(command)) return "Unknown command.";
+  if (command !== "indexes" && rest.length > 0) return `"${command}" takes no options.`;
+  let values: { feature?: string[] | undefined; apply?: boolean | undefined };
+  try {
+    values = parseArgs({ args: rest, options: { feature: { type: "string", multiple: true }, apply: { type: "boolean" } }, strict: true }).values;
+  } catch (error) {
+    return error instanceof Error ? error.message : "Invalid options.";
+  }
+  const features = (values.feature ?? []).map((f) => f.toUpperCase());
+  const unknown = features.filter((f) => !INDEX_FEATURES.includes(f));
+  if (unknown.length) return `Unknown feature ${unknown.join(", ")}. Features with indexes: ${INDEX_FEATURES.join(", ")}.`;
+  const apply = values.apply ?? false;
+  if (apply && features.length === 0) return "--apply needs at least one --feature (each feature creates only its own indexes).";
+  return { command: command as Command, features, apply };
+}
+
+export async function runDbCommand(argv: string[], print: Print, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const parsed = parseCommand(argv);
+  if (typeof parsed === "string") {
+    print([parsed, "", USAGE]);
     return 2;
   }
 
-  if (command === "indexes" && !rest.includes("--apply")) {
-    const { values } = parseArgs({ args: rest, options: { feature: { type: "string", multiple: true } }, strict: true });
-    const list = values.feature ? indexesForFeatures(values.feature) : INDEXES;
+  if (parsed.command === "indexes" && !parsed.apply) {
+    const list = parsed.features.length ? indexesForFeatures(parsed.features) : INDEXES;
     print([
       "Indexes (docs/DATABASE.md §8). Nothing was changed; add --apply to create them.",
       ...list.map((i) => `  ${i.feature}  ${i.collection}.${i.name}  ${JSON.stringify(i.keys)}${Object.keys(i.options).length ? " " + JSON.stringify(i.options) : ""}  - ${i.why}`),
@@ -54,16 +82,18 @@ export async function runDbCommand(argv: string[], print: Print, env: NodeJS.Pro
     print(["Database settings problem (nothing was sent to MongoDB):", ...result.problems.map((p) => `  - ${p}`)]);
     return 1;
   }
-  const db = getDb(result.config);
+  const secrets = passwordsIn(result.config.uri);
+  const safePrint: Print = (lines) => print(lines.map((l) => redactConnectionString(l, secrets)));
 
   try {
-    switch (command) {
+    const db = getDb(result.config);
+    switch (parsed.command) {
       case "check": {
         const r = await runHealthCheck(db);
-        print([
+        safePrint([
           "Connected to MongoDB ✓",
           `  Wrote and read back 1 test record in ${r.roundTripMs} ms.`,
-          `  See it in Atlas: Data Explorer → bytereel-dev → ${r.database} → ${r.collection}`,
+          `  See it in Atlas: Data Explorer → your cluster → ${r.database} → ${r.collection}`,
           `  Record: _id "${r.record._id}", message "${r.record.message}", writtenAt ${r.record.writtenAt.toISOString()}`,
           "  When you have seen it, remove it with: npm run db -- cleanup",
         ]);
@@ -71,29 +101,23 @@ export async function runDbCommand(argv: string[], print: Print, env: NodeJS.Pro
       }
       case "ping": {
         const r = await ping(db);
-        print([r.ok ? `MongoDB answered the ping ✓ (${r.roundTripMs} ms). Nothing was written.` : "MongoDB answered, but the ping was not ok."]);
+        safePrint([r.ok ? `MongoDB answered the ping ✓ (${r.roundTripMs} ms). Nothing was written.` : "MongoDB answered, but the ping was not ok."]);
         return r.ok ? 0 : 1;
       }
       case "cleanup": {
         const r = await cleanupHealthCheck(db);
-        print([r.dropped ? `Deleted the test record and the healthchecks collection from "${db.databaseName}".` : "Nothing to clean up: the healthchecks collection does not exist."]);
+        safePrint([r.dropped ? `Deleted the test record and the healthchecks collection from "${db.databaseName}".` : "Nothing to clean up: the healthchecks collection does not exist."]);
         return 0;
       }
       case "indexes": {
-        const { values } = parseArgs({ args: rest, options: { feature: { type: "string", multiple: true }, apply: { type: "boolean" } }, strict: true });
-        if (!values.feature?.length) {
-          print(["--apply needs at least one --feature (each feature creates only its own indexes).", "", USAGE]);
-          return 2;
-        }
-        const created = await ensureIndexes(db, indexesForFeatures(values.feature));
-        print([`Indexes in place (${created.length}):`, ...created.map((c) => `  ${c}`)]);
+        const created = await ensureIndexes(db, indexesForFeatures(parsed.features));
+        safePrint([`Indexes in place (${created.length}):`, ...created.map((c) => `  ${c}`)]);
         return 0;
       }
     }
-    return 2;
   } catch (error) {
-    const explained = explainDbError(error);
-    print(["Could not complete the database command.", `  ${explained.message}`, `  Detail: ${explained.detail}`]);
+    const explained = explainDbError(error, secrets);
+    safePrint(["Could not complete the database command.", `  ${explained.message}`, `  Detail: ${explained.detail}`]);
     return 1;
   } finally {
     await closeMongoClient();
@@ -103,6 +127,5 @@ export async function runDbCommand(argv: string[], print: Print, env: NodeJS.Pro
 // Run when called directly (npm run db -- ...).
 if (import.meta.main) {
   loadLocalEnvFile(".env");
-  const print: Print = (lines) => console.log(redactConnectionString(lines.join("\n")));
-  process.exitCode = await runDbCommand(process.argv.slice(2), print);
+  process.exitCode = await runDbCommand(process.argv.slice(2), (lines) => console.log(lines.join("\n")));
 }

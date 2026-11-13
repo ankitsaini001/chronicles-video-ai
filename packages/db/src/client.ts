@@ -8,12 +8,7 @@ import type { DbConfig } from "./config";
 
 const GLOBAL_KEY = Symbol.for("bytereel.mongoClient");
 
-interface CachedClient {
-  uri: string;
-  client: MongoClient;
-}
-
-type GlobalWithClient = typeof globalThis & { [GLOBAL_KEY]?: CachedClient };
+type GlobalWithClient = typeof globalThis & { [GLOBAL_KEY]?: MongoClient };
 
 /** Options shared by every connection. */
 export const CLIENT_OPTIONS = {
@@ -26,16 +21,13 @@ export const CLIENT_OPTIONS = {
 
 /**
  * The shared client. Creating it does not connect yet: the driver connects on the first command.
- * A different connection string (e.g. in tests) replaces the cached client.
+ * The settings never change while the server runs (changing .env needs a restart), so the first
+ * client is reused for the life of the process.
  */
 export function getMongoClient(config: DbConfig): MongoClient {
   const g = globalThis as GlobalWithClient;
-  const cached = g[GLOBAL_KEY];
-  if (cached && cached.uri === config.uri) return cached.client;
-  if (cached) void cached.client.close().catch(() => undefined);
-  const client = new MongoClient(config.uri, CLIENT_OPTIONS);
-  g[GLOBAL_KEY] = { uri: config.uri, client };
-  return client;
+  g[GLOBAL_KEY] ??= new MongoClient(config.uri, CLIENT_OPTIONS);
+  return g[GLOBAL_KEY];
 }
 
 /** The ByteReel database (MONGODB_DB, default "bytereel"). */
@@ -43,11 +35,11 @@ export function getDb(config: DbConfig): Db {
   return getMongoClient(config).db(config.dbName);
 }
 
-/** Close the shared client (command-line tools call this before exiting). */
+/** Close the shared client (command-line tools and tests call this). Never throws. */
 export async function closeMongoClient(): Promise<void> {
   const g = globalThis as GlobalWithClient;
-  const cached = g[GLOBAL_KEY];
-  if (!cached) return;
+  const client = g[GLOBAL_KEY];
+  if (!client) return;
   delete g[GLOBAL_KEY];
-  await cached.client.close();
+  await client.close().catch(() => undefined);
 }

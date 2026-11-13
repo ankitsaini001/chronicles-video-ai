@@ -1,4 +1,5 @@
 import type { CreateIndexesOptions, Db, IndexSpecification } from "mongodb";
+import { IndexConflictError } from "./errors";
 
 // Index setup (docs/DATABASE.md §8). Every index ByteReel needs is listed here once, tagged with
 // the feature that first needs it. Each feature creates ONLY its own indexes (DATABASE.md §11), so
@@ -31,18 +32,35 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "rateLimits", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Old sign-up/login counters delete themselves" },
 ];
 
+/** Features that have indexes in the list (for checking command-line input). */
+export const INDEX_FEATURES: readonly string[] = [...new Set(INDEXES.map((i) => i.feature))];
+
 export function indexesForFeatures(features: readonly string[]): IndexDefinition[] {
   return INDEXES.filter((index) => features.includes(index.feature));
 }
 
 /**
- * Create the given indexes. Creating an index that already exists with the same keys and options
- * does nothing, so this is safe to run again. Note: it also creates the collection if missing.
+ * Create the given indexes. Re-running is safe for indexes this script created (same name, keys
+ * and options: MongoDB does nothing). If Atlas already has a DIFFERENT index in the way (same name
+ * with other settings, or the same keys under another name, e.g. created by hand), it stops with a
+ * plain message instead. Note: it also creates the collection if missing.
  */
 export async function ensureIndexes(db: Db, indexes: readonly IndexDefinition[]): Promise<string[]> {
   const created: string[] = [];
   for (const index of indexes) {
-    await db.collection(index.collection).createIndex(index.keys, { ...index.options, name: index.name });
+    try {
+      await db.collection(index.collection).createIndex(index.keys, { ...index.options, name: index.name });
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (code === 85 || code === 86) {
+        throw new IndexConflictError(
+          `The "${index.collection}" collection already has an index that conflicts with "${index.name}" ${JSON.stringify(index.keys)}. ` +
+            `Open Atlas → Data Explorer → ${db.databaseName} → ${index.collection} → Indexes, drop the old one, then run the command again. ` +
+            `Indexes already in place: ${created.length ? created.join(", ") : "none"}.`,
+        );
+      }
+      throw error;
+    }
     created.push(`${index.collection}.${index.name}`);
   }
   return created;
