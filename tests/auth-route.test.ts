@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkSignUpBody, clientIp, handleAuthRequest, isSameOrigin, MAX_BODY_BYTES, type AuthHandlerDeps } from "../apps/web/lib/auth/handler";
+import { checkSignUpBody, clientIp, handleAuthRequest, isSameOrigin, MAX_BODY_BYTES, SHARED_IP_BUCKET, type AuthHandlerDeps } from "../apps/web/lib/auth/handler";
 import { DISABLED_AUTH_PATHS } from "../apps/web/lib/auth/endpoints";
 import { AUTH_MESSAGES } from "../apps/web/lib/auth/messages";
 
@@ -14,6 +14,7 @@ function deps(options: { allowed?: boolean; answer?: Response } = {}) {
   const ips: string[] = [];
   const d: AuthHandlerDeps = {
     appOrigins: [APP],
+    trustForwardedFor: true,
     forward: async (r) => {
       forwarded.push(r);
       return options.answer?.clone() ?? Response.json({ ok: true });
@@ -191,9 +192,13 @@ describe("checkSignUpBody", () => {
 });
 
 describe("clientIp", () => {
-  it("uses the last x-forwarded-for entry, then x-real-ip", () => {
-    expect(clientIp(new Headers({ "x-forwarded-for": "1.1.1.1, 2.2.2.2" }))).toBe("2.2.2.2");
-    expect(clientIp(new Headers({ "x-real-ip": "3.3.3.3" }))).toBe("3.3.3.3");
-    expect(clientIp(new Headers())).toBe("unknown");
+  it("on Vercel uses the X-Forwarded-For address Vercel wrote", () => {
+    expect(clientIp(new Headers({ "x-forwarded-for": "203.0.113.24" }), true)).toBe("203.0.113.24");
+    expect(clientIp(new Headers(), true)).toBe(SHARED_IP_BUCKET);
+  });
+
+  it("elsewhere ignores caller-sent headers, so a made-up address buys no extra attempts", () => {
+    expect(clientIp(new Headers({ "x-forwarded-for": "198.51.100.7" }), false)).toBe(SHARED_IP_BUCKET);
+    expect(clientIp(new Headers({ "x-real-ip": "198.51.100.7" }), false)).toBe(SHARED_IP_BUCKET);
   });
 });

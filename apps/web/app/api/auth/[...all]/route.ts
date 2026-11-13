@@ -15,6 +15,8 @@ async function handle(request: Request): Promise<Response> {
     appOrigins: [settings.config.appOrigin],
     forward: (r) => getAuth().handler(r),
     hitSignUpLimit: (ip) => hitRateLimit(getDb(db.config), AUTH_RATE_LIMITS.signUpPerIp, ip),
+    // Vercel sets VERCEL=1 and writes X-Forwarded-For itself.
+    trustForwardedFor: process.env.VERCEL === "1",
   });
 }
 

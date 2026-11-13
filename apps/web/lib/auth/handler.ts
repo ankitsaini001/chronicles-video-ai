@@ -17,6 +17,8 @@ export interface AuthHandlerDeps {
   forward: (request: Request) => Promise<Response>;
   /** Counts one sign-up attempt for this IP address. */
   hitSignUpLimit: (ip: string) => Promise<RateLimitResult>;
+  /** True only on Vercel, which overwrites X-Forwarded-For with the real caller's address. */
+  trustForwardedFor: boolean;
 }
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -36,7 +38,7 @@ export async function handleAuthRequest(request: Request, deps: AuthHandlerDeps)
   if (endpoint.id !== "A1") return deps.forward(request);
 
   // A1 sign-up.
-  const limit = await deps.hitSignUpLimit(clientIp(request.headers));
+  const limit = await deps.hitSignUpLimit(clientIp(request.headers, deps.trustForwardedFor));
   if (!limit.allowed) {
     return authError(429, "TOO_MANY_ATTEMPTS", AUTH_MESSAGES.TOO_MANY_ATTEMPTS, { "Retry-After": String(limit.retryAfterSeconds) });
   }
@@ -110,14 +112,17 @@ function isJson(headers: Headers): boolean {
 }
 
 /**
- * The caller's IP address for the rate limit. On Vercel `x-forwarded-for` is set by Vercel itself.
- * The LAST entry is used: a proxy (also `next start`) appends the address it really saw, so a
- * caller can't pick a fresh IP by sending the header.
+ * The caller's IP address for the rate limit.
+ * - On Vercel, X-Forwarded-For is written by Vercel itself (a caller can't fake it): use it.
+ * - Anywhere else (your computer, `next start`), the header is whatever the caller sent, so it is
+ *   ignored and all requests share one counter. Faking an address must never buy more attempts.
  */
-export function clientIp(headers: Headers): string {
-  const forwarded = headers.get("x-forwarded-for");
-  const last = forwarded?.split(",").map((p) => p.trim()).filter(Boolean).at(-1);
-  return last || headers.get("x-real-ip")?.trim() || "unknown";
+export const SHARED_IP_BUCKET = "untrusted-network";
+
+export function clientIp(headers: Headers, trustForwardedFor: boolean): string {
+  if (!trustForwardedFor) return SHARED_IP_BUCKET;
+  const first = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return first || SHARED_IP_BUCKET;
 }
 
 /** Better Auth's duplicate-email error, renamed to the API.md code and wording. */
