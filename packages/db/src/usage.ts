@@ -91,12 +91,22 @@ function offsetMs(instant: number, zone: string): number {
 }
 
 /**
- * The UTC instant of 00:00 on year-month-day in `zone` (month 1–12; overflow rolls over).
- * Corrected twice so a daylight-saving change near midnight still gives the right answer.
+ * The UTC instant when year-month-day starts in `zone` (month 1–12; overflow rolls over).
+ * Normally that is 00:00 local time: the offset is looked up twice so a daylight-saving change
+ * near midnight still gives the right offset. In zones where the clocks jump forward AT midnight
+ * (e.g. America/Santiago, America/Havana: 00:00 → 01:00), 00:00 never happens that day; the day
+ * then starts at the moment of the jump (01:00 new time), which is 00:00 at the offset from
+ * before the change.
  */
 function localMidnightToUtc(year: number, month: number, day: number, zone: string): Date {
   const wallClock = Date.UTC(year, month - 1, day);
   let guess = wallClock - offsetMs(wallClock, zone);
   guess = wallClock - offsetMs(guess, zone);
+  // The day the guess falls on, as a UTC date number, compared with the wanted day.
+  const local = localDate(new Date(guess), zone);
+  if (Date.UTC(local.year, local.month - 1, local.day) < wallClock) {
+    // Midnight was skipped: use the offset from the day before (before the jump).
+    guess = wallClock - offsetMs(wallClock - 86_400_000, zone);
+  }
   return new Date(guess);
 }

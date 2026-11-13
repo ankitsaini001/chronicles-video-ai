@@ -55,6 +55,23 @@ describe("usagePeriods", () => {
     expect(p.monthResetsAt.toISOString()).toBe("2026-12-01T05:00:00.000Z");
   });
 
+  it.each([
+    // Clocks jump 00:00 → 01:00, so local midnight doesn't exist: the day starts at the jump.
+    ["America/Santiago", "2026-09-05T12:00:00.000Z", "2026-09-06T04:00:00.000Z"],
+    ["America/Havana", "2026-03-07T12:00:00.000Z", "2026-03-08T05:00:00.000Z"],
+  ])("%s: when midnight is skipped, the next day starts at the first real moment", (zone, now, expected) => {
+    const p = usagePeriods(zone, new Date(now));
+    expect(p.dayResetsAt.toISOString()).toBe(expected);
+    // That moment is already the next day, and one millisecond earlier is still today.
+    expect(usagePeriods(zone, p.dayResetsAt).day).not.toBe(p.day);
+    expect(usagePeriods(zone, new Date(p.dayResetsAt.getTime() - 1)).day).toBe(p.day);
+  });
+
+  it("America/Santiago, clocks go back at midnight: the day starts at the first 00:00", () => {
+    const p = usagePeriods("America/Santiago", new Date("2026-04-04T12:00:00.000Z"));
+    expect(p.dayResetsAt.toISOString()).toBe("2026-04-05T04:00:00.000Z");
+  });
+
   it("UTC works too", () => {
     const p = usagePeriods("UTC", new Date("2026-02-28T23:59:00.000Z"));
     expect(p.dayResetsAt.toISOString()).toBe("2026-03-01T00:00:00.000Z");
