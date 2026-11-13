@@ -55,8 +55,8 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | 🧪 Testing |
-| F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ⬜ Not started |
+| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | ✅ Done |
+| F13 | [Voice preview samples](F13-voice-preview.md) | F12 | 🔨 In progress |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ⬜ Not started |
 | F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ⬜ Not started |
 | F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | ⬜ Not started |
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F12 is in progress (Step 1 Idea: create a project). Phases A1 and A2 done (F01–F11).
+**Next up:** F13 is in progress (voice preview samples). Phases A1 and A2 done; F12 done.
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.

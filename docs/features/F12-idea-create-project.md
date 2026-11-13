@@ -60,7 +60,7 @@ It creates 6 indexes: `projects` (2), `idempotencyKeys` (2, one deletes clicks a
 - [x] 5 projects per day, then "You've created 5 projects today. Try again tomorrow." with the time it resets
 - [x] Only the owner can open `/projects/[id]`
 - [x] Code review passed (code-reviewer agent; no must-fix, all suggestions applied)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ### How to try it (founder)
 1. Run the index command above.
@@ -74,3 +74,4 @@ It creates 6 indexes: `projects` (2), `idempotencyKeys` (2, one deletes clicks a
 |---|---|
 | 2026-11-13 | Built steps 1–8. 488 unit tests, typecheck and `next build` pass; e2e `tools/e2e/f12-idea.ts` passed all 63 checks on `bytereel_test` (dropped afterwards). F12 indexes are NOT applied to the real `bytereel` database yet: founder runs the command above. Status 🧪, waiting for the code review and the founder's test. |
 | 2026-11-13 | Code review: no must-fix. Applied all suggestions: (1) each click record gets its own lock id, so a very slow request and a repeat that took over can never both save a project: the slow one's transaction rolls back and it answers 409 (`18d5517`); (2) a handler's 5xx error frees the click key so it can be retried (`18d5517`); (3) the Idea screen counts characters exactly like the server (control characters removed, NFC, trim; Hindi nukta letters count 2), so there is no hard stop at 5,000 in the box any more: the counter turns red instead (`fcc0866`); (4) the server removes control characters before checking the length (`fcc0866`), plain wording on the project page, DATABASE.md aligned (projects/day enforced since F12). 505 unit tests, typecheck and `next build` pass; e2e passed all 68 checks on `bytereel_test` (dropped afterwards). Code review ticked; waiting for the founder's test. |
+| 2026-11-13 | Founder applied the F12 indexes (6, checked read-only: projects ownerId_updatedAt/ownerId_state, idempotencyKeys ownerId_key_unique/createdAt_ttl, usageCounters ownerId_kind_period_unique/expiresAt_ttl) and created "Why is the sky blue?" (English, male voice): 2 projects about a minute apart, `draft`, `ownerId` = founder's user id (ObjectId), usageCounters projects 2 for 2026-11-13. Founder: "looked good" → ✅. |
