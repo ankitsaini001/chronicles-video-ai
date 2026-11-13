@@ -14,6 +14,8 @@ export interface PlannerRequest {
   turns: PlannerTurn[];
   /** JSON Schema for structured output. */
   responseJsonSchema: Record<string, unknown>;
+  /** Cancels the request (e.g. a caller's overall timeout). The provider then throws a transient error. */
+  abortSignal?: AbortSignal;
 }
 
 export interface TokenUsage {
