@@ -61,7 +61,7 @@ Also: ElevenLabs labels both "Indian English" voices with a *British* accent. Pl
 4. Phone: same, the sound starts on the tap. Please also listen for the accent of the two English voices.
 
 ## How we test it (done when all are ticked)
-- [ ] Each ▶ plays the right language and gender (English now; Hindi/Hinglish show no ▶ until their samples are recorded before F23)
+- [x] Each ▶ plays the right language and gender (English now; Hindi/Hinglish show no ▶ until their samples are recorded before F23)
 - [x] No ElevenLabs call happens when you click ▶ (only the static MP3 is loaded; e2e: no page script mentions ElevenLabs)
 - [x] Code review passed (code-reviewer agent; no must-fix, all 8 suggestions applied)
 - [x] Founder tested it and said OK
