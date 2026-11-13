@@ -348,6 +348,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -399,12 +401,16 @@ paths:
                 error: { code: FORBIDDEN, message: Your password is incorrect., details: { reason: wrong_password }, requestId: req_01JCXM0G5H6J }
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/voices:
     get:
       operationId: listVoices
@@ -510,10 +516,14 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
 
   # =============================== Projects ===============================
   /api/v1/projects:
@@ -704,10 +714,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
     delete:
       operationId: archiveProject
       summary: Archive a project (soft delete)
@@ -741,10 +755,14 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: This video is being published right now. You can archive it in a few minutes., details: { state: publishing }, requestId: req_01JCXM1N0P1Q }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/status:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -831,6 +849,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           description: PROVIDER_REJECTED (unsafe subject).
           content:
@@ -970,10 +990,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/voice:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -1020,10 +1044,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/revisions:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -1072,6 +1100,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -1160,10 +1190,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/projects/{projectId}/storyboard-approval:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -1233,6 +1267,8 @@ paths:
                   $ref: '#/components/examples/ErrApprovalStale'
                 staleVersion:
                   $ref: '#/components/examples/ErrStaleVersion'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           description: PLAN_INVALID (details.issues are ValidationIssues) or IDEMPOTENCY_KEY_REUSED.
           content:
@@ -1318,6 +1354,8 @@ paths:
               examples:
                 requeued:
                   $ref: '#/components/examples/JobPlanQueued'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -1332,6 +1370,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: "This step can't be retried. Please edit your idea or storyboard instead.", details: { jobState: failed, retryable: false }, requestId: req_01JCXM3G1H2J }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -1381,10 +1421,14 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: This job has already finished., details: { jobState: succeeded }, requestId: req_01JCXM3K3L4M }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
 
   # =============================== Video ===============================
   /api/v1/projects/{projectId}/renders:
@@ -1564,6 +1608,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -1628,10 +1674,14 @@ paths:
                 error: { code: NOT_FOUND, message: No Instagram account is connected., requestId: req_01JCXM4G7H8J }
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/instagram/connect:
     get:
       operationId: startInstagramConnect
@@ -1752,6 +1802,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           description: PROVIDER_REJECTED.
           content:
@@ -1850,6 +1902,8 @@ paths:
                   summary: Render changed
                   value:
                     error: { code: APPROVAL_STALE, message: The video changed after you approved it. Please review and approve again., details: { reason: render_not_current }, requestId: req_01JCXM5D1E2F }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -1957,10 +2011,14 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: "This post is being published right now and can't be cancelled.", details: { postState: publishing }, requestId: req_01JCXM5A9B0C }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
   /api/v1/posts/{postId}/retry:
     parameters:
       - $ref: '#/components/parameters/PostId'
@@ -1993,6 +2051,8 @@ paths:
               example:
                 post: { id: 673310209f1e4b2a7c0d8b01, state: publishing, mode: now, scheduledAt: null, permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Here's the journey of a UPI payment 👇 #UPI", jobId: 673310209f1e4b2a7c0d3c05, approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: null }, igMediaId: null, attempts: 2, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z' }
                 job: { id: 673310209f1e4b2a7c0d3c05, projectId: 67330d5e9f1e4b2a7c0d2a10, type: publish, state: queued, attempt: 2, stages: [ { name: approve, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: create_container, status: skipped, startedAt: null, endedAt: null, attempts: 1, error: null }, { name: poll, status: pending, startedAt: null, endedAt: null, attempts: 1, error: null }, { name: publish, status: pending, startedAt: null, endedAt: null, attempts: 1, error: null } ], progress: { stage: approve, percent: 0, message: Publishing again… }, error: null, needsInput: null, result: { postId: 673310209f1e4b2a7c0d8b01 }, cancelRequestedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: 2000 }
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -2007,12 +2067,16 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: APPROVAL_STALE, message: The video changed after you approved it. Please review and approve again., details: { reason: render_not_current }, requestId: req_01JCXM5D1E2F }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/Maintenance'
 
   # =============================== Admin ===============================
   /api/v1/admin/allowlist:
@@ -2089,6 +2153,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: ALREADY_EXISTS, message: This email is already on the allow-list., requestId: req_01JCXM5K5L6M }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2121,6 +2187,8 @@ paths:
           $ref: '#/components/responses/AdminOnly'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2236,6 +2304,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_STATE, message: "You can't suspend your own account.", details: { reason: self }, requestId: req_01JCXM5Z3A4B }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2273,6 +2343,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2373,6 +2445,8 @@ paths:
               examples:
                 failedJob:
                   $ref: '#/components/examples/AdminJobFailed'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -2387,6 +2461,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: JOB_ALREADY_RUNNING, message: This project already has a running job., details: { activeJobId: 67330f109f1e4b2a7c0d3c03 }, requestId: req_01JCXM6G9H0J }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
@@ -2529,6 +2605,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: STALE_VERSION, message: Settings were changed by someone else. Reload and try again., details: { expectedVersion: 3, currentVersion: 4 }, requestId: req_01JCXM6R5S6T }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2572,6 +2650,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_SIGNATURE, message: Invalid signed_request., requestId: req_01JCXM6V7W8X }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -2609,6 +2689,8 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: { code: INVALID_SIGNATURE, message: Invalid signed_request., requestId: req_01JCXM6Z9A0B }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '500':
@@ -4855,6 +4937,15 @@ components:
               $ref: '#/components/examples/ErrMaintenance'
             spendCeiling:
               $ref: '#/components/examples/ErrSpendCeiling'
+    Maintenance:
+      description: Admin turned on maintenance mode (MAINTENANCE); reads still work. Returned by every creator write operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            maintenance:
+              $ref: '#/components/examples/ErrMaintenance'
     Internal:
       description: Unexpected error (INTERNAL).
       content:

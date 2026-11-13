@@ -1423,7 +1423,7 @@ Example: see §8.2 (running) and §8.3 (`needs_input`). Failed example:
 #### E2. `POST /api/v1/jobs/{jobId}/retry` — Retry / resume
 Purpose: **Retry** / **Try again** buttons. Resumes from the last good checkpoint; finished stages and paid artifacts are reused (ARCHITECTURE §13.2). Auth: creator. Rate: 30/hour. **Idempotency-Key required.** Body: `{}`.
 Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota. Effect: state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
-Success `202` → `Job`. Errors: `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
+Success `202` → `Job`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
 ```json
 {}
 ```
@@ -1688,7 +1688,7 @@ Success `200` → `Post`. Errors: `404` · `409 INVALID_STATE` (`publishing`, `p
 #### H6. `POST /api/v1/posts/{postId}/retry` — Retry a failed publish
 Auth: creator. Rate: 10/hour. **Idempotency-Key required.** Body: `{}`.
 Allowed: `publish_failed`. The **approval is re-checked** (render still current, same hash, connection active and same `igUserId`); if anything changed → `409 APPROVAL_STALE` and the creator approves again with H2. Effect: post → `publishing`, `attempts + 1`, publish job re-queued (reusing the container if it's still valid, ARCHITECTURE §17.4).
-Success `202` → `{ post: Post, job: Job }`. Errors: `404` · `409 INVALID_STATE` · `409 APPROVAL_STALE` · `409 INSTAGRAM_TOKEN_EXPIRED` · `409 INSTAGRAM_NOT_CONNECTED`.
+Success `202` → `{ post: Post, job: Job }`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` · `409 APPROVAL_STALE` · `409 INSTAGRAM_TOKEN_EXPIRED` · `409 INSTAGRAM_NOT_CONNECTED`.
 ```json
 { "error": { "code": "APPROVAL_STALE", "message": "The video changed after you approved it. Please review and approve again.", "details": { "reason": "render_not_current" }, "requestId": "req_01JCXM5D1E2F" } }
 ```
@@ -1778,7 +1778,7 @@ Success `200` → `{ items: AdminJob[], nextCursor }`, `AdminJob = Job & { owner
 
 #### I9. `POST /api/v1/admin/jobs/{jobId}/retry` — Retry any user's job
 Same rules as E2 (including the approval re-check) but without the ownership filter, and also allowed for `publish` jobs in `publish_failed` (re-checks the publish approval). **Idempotency-Key required.** Body: `{}`. Audit `admin.job_retried`.
-Success `202` → `AdminJob`. Errors: `404` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` · `409 APPROVAL_STALE`.
+Success `202` → `AdminJob`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` · `409 APPROVAL_STALE`.
 ```json
 { "error": { "code": "JOB_ALREADY_RUNNING", "message": "This project already has a running job.", "details": { "activeJobId": "67330f109f1e4b2a7c0d3c03" }, "requestId": "req_01JCXM6G9H0J" } }
 ```
