@@ -1,5 +1,6 @@
 "use client";
 
+import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaInputType, ideaProblem } from "@bytereel/db/idea-text";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
 import type { Usage } from "@/lib/account/me";
@@ -11,11 +12,14 @@ import type { Language, VoiceGender } from "@/lib/auth/session";
 // The button sends C2 POST /api/v1/projects with an Idempotency-Key. The same key is sent again
 // if the click is repeated with the same idea after a network failure, so a lost answer can never
 // create the project twice. Success → the project's page.
+// The counter, the limits and the topic/notes choice use the server's own cleaning
+// (`@bytereel/db/idea-text`: control characters out, NFC, trim), so the numbers always agree.
+// There is no hard 5,000 stop in the box: NFC can make a text longer or shorter, so the box only
+// stops at a generous safety size and the counter turns red above 5,000.
 
-/** API.md C2: notes up to 5,000 characters; up to 300 the idea is a "topic". */
-const MAX_CHARS = 5000;
-const TOPIC_MAX = 300;
-const MIN_CHARS = 3;
+const MAX_CHARS = IDEA_MAX_CHARS;
+/** Only a safety stop for huge pastes; the real limit is checked on the cleaned text. */
+const SAFETY_MAX_LENGTH = 4 * IDEA_MAX_CHARS;
 
 const LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
   { value: "en", label: "English" },
@@ -37,7 +41,8 @@ const VOICE_OPTIONS: readonly ChoiceOption<VoiceGender>[] = [
 
 const MESSAGES = {
   EMPTY: "Type a topic or paste your notes first.",
-  TOO_SHORT: `Please write at least ${MIN_CHARS} characters.`,
+  TOO_SHORT: `Please write at least ${IDEA_MIN_CHARS} characters.`,
+  TOO_LONG: `Please shorten it to ${IDEA_MAX_CHARS.toLocaleString("en-US")} characters.`,
   OFFLINE: "Couldn't reach the server. Check your internet connection and try again.",
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
@@ -91,11 +96,13 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
     event.preventDefault();
     if (busy) return;
     setFormError(null);
-    const idea = text.trim();
-    if (idea.length === 0) return showTextError(MESSAGES.EMPTY);
-    if (idea.length < MIN_CHARS) return showTextError(MESSAGES.TOO_SHORT);
+    const idea = cleanIdeaText(text);
+    const problem = ideaProblem(idea);
+    if (problem === "empty") return showTextError(MESSAGES.EMPTY);
+    if (problem === "too_short") return showTextError(MESSAGES.TOO_SHORT);
+    if (problem === "too_long") return showTextError(MESSAGES.TOO_LONG);
 
-    const body = JSON.stringify({ inputType: idea.length <= TOPIC_MAX ? "topic" : "notes", text: idea, language, voiceGender });
+    const body = JSON.stringify({ inputType: ideaInputType(idea), text: idea, language, voiceGender });
     const key = pendingKey.current?.request === body ? pendingKey.current.key : newIdempotencyKey();
     pendingKey.current = { key, request: body };
 
@@ -134,7 +141,7 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         return;
       case "INVALID_INPUT": {
         const textIssue = json.error?.details?.issues?.find((i) => i.path === "text");
-        if (textIssue) return showTextError(idea.length > TOPIC_MAX ? `Your notes ${textIssue.message}.` : `Your topic ${textIssue.message}.`);
+        if (textIssue) return showTextError(idea.length > IDEA_TOPIC_MAX_CHARS ? `Your notes ${textIssue.message}.` : `Your topic ${textIssue.message}.`);
         return setFormError(message);
       }
       case "QUOTA_EXCEEDED":
@@ -144,7 +151,8 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
     }
   }
 
-  const count = text.length;
+  const count = cleanIdeaText(text).length;
+  const over = count > MAX_CHARS;
 
   return (
     <form onSubmit={onSubmit} noValidate className="flex flex-col">
@@ -163,7 +171,7 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
           id="idea-text"
           name="text"
           rows={6}
-          maxLength={MAX_CHARS}
+          maxLength={SAFETY_MAX_LENGTH}
           value={text}
           onChange={(e) => {
             setText(e.target.value);
@@ -175,7 +183,7 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
           placeholder="e.g. How UPI payments work"
           className="block w-full resize-y bg-transparent text-base leading-relaxed text-text placeholder:text-muted/60 focus:outline-none disabled:opacity-60"
         />
-        <p aria-hidden="true" className={cn("absolute right-4 bottom-3 font-mono text-xs", count >= MAX_CHARS ? "text-warning" : "text-muted")}>
+        <p aria-hidden="true" className={cn("absolute right-4 bottom-3 font-mono text-xs", over ? "text-danger" : count === MAX_CHARS ? "text-warning" : "text-muted")}>
           {count.toLocaleString("en-US")} / {MAX_CHARS.toLocaleString("en-US")}
         </p>
       </div>
@@ -186,7 +194,8 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
       )}
       <p id="idea-text-help" className="mt-2 mb-7 text-xs text-muted">
         Type a topic, or paste your notes (up to 5,000 characters).
-        {count >= MAX_CHARS && <span className="text-warning"> You&apos;ve reached the limit.</span>}
+        {count === MAX_CHARS && <span className="text-warning"> You&apos;ve reached the limit.</span>}
+        {over && <span className="text-danger"> That&apos;s {(count - MAX_CHARS).toLocaleString("en-US")} too many. Please shorten it.</span>}
       </p>
 
       <ChoiceChips label="Language" options={LANGUAGE_OPTIONS} value={language} onChange={setLanguage} disabled={busy} className="mb-6" />

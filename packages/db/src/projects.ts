@@ -1,5 +1,6 @@
 import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
+import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS } from "./idea-text";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
@@ -37,8 +38,8 @@ export type ProjectStep = "idea" | "storyboard" | "video" | "publish";
 
 /** Idea text limits per input type (API.md C2, DATABASE.md §4.8), counted after trim + NFC. */
 export const IDEA_LIMITS = {
-  topic: { min: 3, max: 300 },
-  notes: { min: 20, max: 5000 },
+  topic: { min: IDEA_MIN_CHARS, max: IDEA_TOPIC_MAX_CHARS },
+  notes: { min: 20, max: IDEA_MAX_CHARS },
   brainstorm: { min: 3, max: 300 },
 } as const satisfies Record<InputType, { min: number; max: number }>;
 
@@ -69,8 +70,8 @@ export interface ProjectDocument {
   stateBeforeArchive?: ProjectState;
 }
 
-/** API.md §2: strings are trimmed and NFC-normalized before length checks. */
-const cleanText = z.string({ error: "must be text" }).transform((s) => s.trim().normalize("NFC"));
+/** API.md §2: control characters removed, NFC, trimmed, before length checks (idea-text.ts). */
+const cleanText = z.string({ error: "must be text" }).transform(cleanIdeaText);
 const textBetween = (min: number, max: number) =>
   cleanText.pipe(z.string().min(min, { error: `must be at least ${min} characters` }).max(max, { error: `must be at most ${max} characters` }));
 
