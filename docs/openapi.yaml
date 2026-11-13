@@ -90,7 +90,7 @@ paths:
                 $ref: '#/components/schemas/AuthTokenResponse'
               example:
                 token: Qm9yZWVsU2Vzc2lvbl9leGFtcGxl
-                user: { id: 67330c1a9f1e4b2a7c0d1e01, name: Ananya Iyer, email: ananya.iyer@example.in, emailVerified: false, image: null, role: creator, status: active, timezone: Asia/Kolkata, defaultLanguage: en, defaultVoiceGender: female, createdAt: '2026-11-12T04:30:00.000Z', updatedAt: '2026-11-12T04:30:00.000Z' }
+                user: { id: 67330c1a9f1e4b2a7c0d1e01, name: Ananya Iyer, email: ananya.iyer@example.in, emailVerified: false, role: creator, status: active, timezone: Asia/Kolkata, defaultLanguage: en, defaultVoiceGender: female, createdAt: '2026-11-12T04:30:00.000Z', updatedAt: '2026-11-12T04:30:00.000Z' }
         '400':
           $ref: '#/components/responses/BetterAuthBadRequest'
         '403':
@@ -2914,7 +2914,7 @@ components:
       properties:
         code:
           type: string
-          enum: [NOT_ALLOWLISTED, USER_ALREADY_EXISTS, PASSWORD_TOO_SHORT, PASSWORD_TOO_LONG, INVALID_EMAIL, INVALID_EMAIL_OR_PASSWORD, TOO_MANY_ATTEMPTS, ACCOUNT_SUSPENDED, INVALID_PASSWORD, INVALID_TOKEN, FORBIDDEN_ORIGIN, UNAUTHORIZED]
+          enum: [NOT_ALLOWLISTED, USER_ALREADY_EXISTS, PASSWORD_TOO_SHORT, PASSWORD_TOO_LONG, INVALID_EMAIL, INVALID_INPUT, PAYLOAD_TOO_LARGE, NOT_FOUND, INVALID_EMAIL_OR_PASSWORD, TOO_MANY_ATTEMPTS, ACCOUNT_SUSPENDED, INVALID_PASSWORD, INVALID_TOKEN, FORBIDDEN_ORIGIN, UNAUTHORIZED]
         message:
           type: string
     LastError:

@@ -187,9 +187,9 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 ### Accounts (phase A2, plus `verification` in A6)
 
-**Better Auth fields (4.1–4.4).** The core fields below come from Better Auth's documented core schema (`user`, `session`, `account`, `verification`). **To confirm against the real documents in F08** (Q17). Two rules for all four collections:
+**Better Auth fields (4.1–4.4).** The core fields below come from Better Auth's core schema (`user`, `session`, `account`, `verification`). **Confirmed in F08 (2026-11-13) against real documents written by Better Auth 1.7.14** (Q17). Two rules for all four collections:
 - **All ids are ObjectId.** Better Auth calls its id `id`; in MongoDB it is stored as `_id`. Our code in `packages/db` converts between ObjectId (database) and string (API) in one place.
-- **F08 check:** if the adapter stores `userId` as a **string** instead of an ObjectId, a lookup with an ObjectId would find nothing. F08 checks a real `session`/`account` document and, if needed, makes `packages/db` convert consistently.
+- **`userId` is stored as an ObjectId** in `session` and `account` (checked in F08), so lookups by the user's `_id` work directly and no conversion is needed. The adapter turns the string ids the API uses into ObjectIds itself. Only `account.accountId` is a **string** (the user's id as 24 hex characters).
 
 #### 4.1 `user` (Better Auth)
 **Purpose:** one document per person with a ByteReel account. Better Auth (our login library) creates and manages it; we add a few extra fields. Unlike a Laravel `users` table, **the password is not here**: it's in `account` (4.3).
@@ -236,7 +236,9 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 - `timezone`, `defaultLanguage`, `defaultVoiceGender` and `name` change only through `PATCH /api/v1/me` (B2).
 - Sign-up only succeeds if the email is in `allowlist` (4.5).
 
-**Indexes (required, phase A2):** unique `email` = one account per email. **We create the Better Auth indexes ourselves** (setup script, F06/F08), because Better Auth's MongoDB adapter may not create any; F08 verifies this. Full list in §8.
+**Confirmed in F08:** a new user has exactly the fields in the example except `image`, which is **missing** (not `null`) when no picture is given; `lockedUntil` and `lastLoginAt` are stored as `null` until F09 fills them. The extra fields are set by the server only: the sign-up hook forces `role: creator`, `status: active` and the defaults, and the sign-up endpoint refuses a body that contains any of them (400).
+
+**Indexes (required, phase A2):** unique `email` = one account per email. **We create the Better Auth indexes ourselves** (`npm run db -- indexes --feature F08 --apply`). **Checked in F08:** Better Auth 1.7.14's MongoDB adapter creates **no** indexes for `user`, `session`, `account` or `verification` (it only creates indexes that a plugin declares at table level, and we use none). Full list in §8.
 
 #### 4.2 `session` (Better Auth)
 **Purpose:** one document per logged-in browser. Your browser holds a cookie; on every request the server looks up the matching session here. Logging out deletes the document.
@@ -258,9 +260,9 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 |---|---|---|---|
 | `_id` (`id`) | ObjectId | Session id | Auto |
 | `userId` | ObjectId → `user` | Whose session | Auto |
-| `token` | string | The session token. Your cookie holds this token plus a signature | Auto |
+| `token` | string | The session token (32 characters). Your cookie holds this token plus a signature | Auto |
 | `expiresAt` | date | 30 days after the last refresh (rolling: pushed forward at most once a day while you use the app) | Auto |
-| `ipAddress`, `userAgent` | string? | The browser's IP address and browser name when the session was made | No |
+| `ipAddress`, `userAgent` | string? | The browser's IP address and browser name when the session was made (Better Auth reads the IP from the request headers; outside Vercel this is whatever the browser sent, so treat it as a hint, not proof) | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
 
 **Rules**
@@ -294,7 +296,7 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 | `accountId` | string | The id of the account at the provider. For `credential` it is the user's id | Auto |
 | `providerId` | string | Always `credential` in V1 (no Google/social login, decision D1) | Auto |
 | `userId` | ObjectId → `user` | Whose credential | Auto |
-| `password` | string | **scrypt hash** of the password (§6.1). Unreadable and irreversible | Auto |
+| `password` | string | **scrypt hash** of the password (§6.1): `<salt, 32 hex characters>:<key, 128 hex characters>` (seen in F08). Unreadable and irreversible | Auto |
 | `accessToken`, `refreshToken`, `idToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `scope` | | Better Auth fields for social logins. **Unused in V1** (missing or `null`) | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
 
@@ -369,7 +371,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
-| `_id` | string | `<rule>:<sha256(subject)>:<windowStart>`. `rule` names the limit (e.g. `signin-ip`, `signin-email`, `create-project`); `subject` is the IP address, the lowercased email or the user id; `windowStart` is when this fixed window began. **No raw IP or email is stored**, only the hash | Auto |
+| `_id` | string | `<rule>:sha256:<sha256(subject) as hex>:<windowStart>` (e.g. `signup-ip:sha256:3f9a…:2026-11-12T04:30:00.000Z`). `rule` names the limit (e.g. `signin-ip`, `signin-email`, `create-project`); `subject` is the IP address, the lowercased email or the user id; `windowStart` is when this fixed window began. **No raw IP or email is stored**, only the hash | Auto |
 | `count` | int | Attempts in this window so far | Auto |
 | `expiresAt` | date | End of the window | Auto |
 
@@ -378,6 +380,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - Better Auth's own rate limiter is **turned off**: by default it keeps its counters in server memory, which is useless on Vercel (every function instance has its own memory).
 - Counters disappear when their window ends (TTL), and the code ignores a counter whose `expiresAt` has passed (§1.5).
 - The account lockout (`failedLoginCount`, `lockedUntil`) is stored on `user`, not here.
+- **Which IP (F08):** on Vercel the IP comes from `X-Forwarded-For`, which Vercel writes itself. Anywhere else (your computer, a plain `next start`) that header is whatever the caller sent, so it is ignored and all requests share one counter (`untrusted-network`); a made-up address never buys extra attempts. The code: `packages/db/src/rate-limit.ts` (counters) and `apps/web/lib/auth/handler.ts` (which IP).
 - A plain hash of an IP address could be guessed back by trying every IP; we accept that because a counter lives at most one hour.
 
 **Indexes:** TTL on `expiresAt` (`expireAfterSeconds: 0`). The `_id` itself is the lookup key, so no other index is needed.
@@ -1311,7 +1314,7 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 
 ## 8. Indexes summary
 
-"Source" = where the index is defined (Q = decided in §12.3). **Required (BA)** = Better Auth index that **we create ourselves** with the setup script in F06/F08, because Better Auth's MongoDB adapter may not create indexes (verified in F08). All of them are needed for **phase A2**.
+"Source" = where the index is defined (Q = decided in §12.3). **Required (BA)** = Better Auth index that **we create ourselves** with the setup script (F08), because Better Auth's MongoDB adapter creates none for these collections (verified in F08 with Better Auth 1.7.14). All of them are needed for **phase A2**.
 
 | Collection | Index | Unique? | Why (plain words) | Source |
 |---|---|---|---|---|
@@ -1523,7 +1526,7 @@ These were the gaps and contradictions in the source documents. **Decided 2026-1
 | Q14 | `allowlist.invitedBy` for your own email in F07 | **Decided 2026-11-13.** `invitedBy: null`, `note: "added by setup command"` |
 | Q15 | Reset tokens are plain text in `verification.identifier` for up to 1 hour | **Decided 2026-11-13.** Accepted for the beta: links are one-time, last 1 hour, and only admins create them; the TTL index deletes expired ones. Same caution as the plain-text **session tokens** (4.2): database read access must be protected. Revisit at public launch |
 | Q16 | `healthchecks` after F06 | **Decided 2026-11-13.** Dropped at the end of F06 (after you've seen the test record in Atlas). Later health checks use `db.command({ ping: 1 })`, which writes nothing |
-| Q17 | Better Auth housekeeping fields | **Decided 2026-11-13.** Filled in from Better Auth's documented core schema (4.1–4.4). **F08 confirms** them against real documents, including whether `userId` is stored as an ObjectId |
+| Q17 | Better Auth housekeeping fields | **Decided 2026-11-13.** Filled in from Better Auth's documented core schema (4.1–4.4). **Confirmed in F08 (2026-11-13, Better Auth 1.7.14):** the fields match 4.1–4.3 (only difference: `user.image` is missing rather than `null`); `userId` is an **ObjectId** in `session` and `account`; `accountId` is a string; the adapter creates no indexes, ours are the only ones |
 
 **Q10 — decided (2026-11-13).** The founder wants to keep records of deleted accounts. Final rule (6.7): a 30-day soft delete, then personal data is erased and an anonymous `deletionLog` entry (4.26) is kept forever. Keeping the personal data itself was ruled out because the DPDP Act requires erasure on request and Meta requires deleting Instagram data.
 

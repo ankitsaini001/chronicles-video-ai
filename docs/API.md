@@ -117,6 +117,9 @@
 | `INVALID_PASSWORD` | 400 | Change password: current password wrong | "Your current password is incorrect." |
 | `INVALID_TOKEN` | 400 | Reset token unknown, used or expired | "This reset link is invalid or has expired. Ask the ByteReel team for a new one." |
 | `FORBIDDEN_ORIGIN` | 403 | Origin check failed (§3.6) | "Please reload the page and try again." |
+| `INVALID_INPUT` | 400 | Body isn't JSON, or a sign-up body has a field other than `name`, `email`, `password` (e.g. `role`, `status`, `image`, `callbackURL`, `rememberMe`), or the name is empty / over 80 characters | "Something in the form isn't right. Please check it and try again." |
+| `PAYLOAD_TOO_LARGE` | 413 | Body over 64 KB | same as `INVALID_INPUT` |
+| `NOT_FOUND` | 404 | Any `/api/auth/*` method + path that isn't one of A1–A6 (lockdown, §3.1) | — |
 | `UNAUTHORIZED` | 401 | No/expired session on A3/A5 | redirect to `/login` |
 
 ### 3.3 Sign-up and login flows
@@ -144,7 +147,8 @@ Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie c
 | Rate limit | 5 requests / 15 min per IP |
 | Body | `name` string 1–80 (required) · `email` string, valid email, ≤ 254, lowercased (required) · `password` string 8–128 (required). `callbackURL`, `image`, `rememberMe` and the server-owned fields (`role`, `status`, …, §3.1) are **not accepted** |
 | Success | `200` `{ token, user }` + `Set-Cookie` (session). `user` = Better Auth user incl. our additional fields |
-| Errors | `NOT_ALLOWLISTED` 403 · `USER_ALREADY_EXISTS` 422 · `PASSWORD_TOO_SHORT`/`PASSWORD_TOO_LONG`/`INVALID_EMAIL` 400 · `TOO_MANY_ATTEMPTS` 429 · `FORBIDDEN_ORIGIN` 403 |
+| Errors | `NOT_ALLOWLISTED` 403 · `USER_ALREADY_EXISTS` 422 · `PASSWORD_TOO_SHORT`/`PASSWORD_TOO_LONG`/`INVALID_EMAIL`/`INVALID_INPUT` 400 · `PAYLOAD_TOO_LARGE` 413 · `TOO_MANY_ATTEMPTS` 429 · `FORBIDDEN_ORIGIN` 403 |
+| Order of checks (F08) | 404 if not A1–A6 → Origin → JSON content type → rate limit → body check → Better Auth (allow-list hook). Our route handler (`apps/web/lib/auth/handler.ts`) runs everything before Better Auth and passes it only the cleaned `name` (trimmed), `email` (trimmed, lowercased) and `password`. Better Auth's own duplicate-email code (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`) is renamed to `USER_ALREADY_EXISTS` |
 
 ```http
 POST /api/auth/sign-up/email
@@ -161,7 +165,6 @@ Content-Type: application/json
     "name": "Ananya Iyer",
     "email": "ananya.iyer@example.in",
     "emailVerified": false,
-    "image": null,
     "role": "creator",
     "status": "active",
     "timezone": "Asia/Kolkata",
@@ -309,7 +312,7 @@ The UI shell uses A4 for "am I logged in?" and **`GET /api/v1/me` (B1)** for eve
 | Rule | Detail |
 |---|---|
 | Cookie | Session cookie is **SameSite=Lax**: browsers don't send it on cross-site `POST/PUT/PATCH/DELETE` sub-requests |
-| Origin check | Every **mutating** request (`POST`, `PUT`, `PATCH`, `DELETE`) to `/api/v1/*` **and** `/api/auth/*` must carry an `Origin` header equal to the app origin (`NEXT_PUBLIC_APP_URL`, plus `http://localhost:3000` in development and the Vercel preview URL in preview). If `Origin` is missing, `Sec-Fetch-Site: same-origin` is accepted instead; otherwise the request is rejected **before** any work: `/api/v1` → `403 FORBIDDEN` with `details.reason = "origin_mismatch"`; `/api/auth` → `403 FORBIDDEN_ORIGIN` (Better Auth `trustedOrigins`) |
+| Origin check | Every **mutating** request (`POST`, `PUT`, `PATCH`, `DELETE`) to `/api/v1/*` **and** `/api/auth/*` must carry an `Origin` header equal to the app origin: the origin of `BETTER_AUTH_URL` (`http://localhost:3000` on your computer, the real domain in production; preview URLs are set in F38. `NEXT_PUBLIC_APP_URL`, once added, must hold the same value). If `Origin` is missing, `Sec-Fetch-Site: same-origin` is accepted instead; otherwise the request is rejected **before** any work: `/api/v1` → `403 FORBIDDEN` with `details.reason = "origin_mismatch"`; `/api/auth` → `403 FORBIDDEN_ORIGIN`, checked by our route handler (F08). Better Auth's `trustedOrigins` is set to the same origin as a second layer, but on its own it checks the Origin only when a cookie or fetch-metadata header is present, so it would let a cookie-less cross-site sign-up through |
 | Content type | JSON endpoints require `Content-Type: application/json` (`415`-style rejection reported as `400 INVALID_INPUT`), so a plain HTML form can't post to them |
 | Exempt | The Meta callbacks (`/api/v1/meta/*`, verified by HMAC `signed_request`) and the internal Inngest endpoint (`/api/inngest`, verified by the Inngest signing key) |
 | GET never mutates | Except the Instagram OAuth pair: `GET /instagram/connect` only creates a **signed, session-bound `state`** (nothing stored) and `GET /instagram/callback` only acts when that `state` matches the current session (this is the OAuth CSRF protection) |
@@ -329,7 +332,7 @@ The UI shell uses A4 for "am I logged in?" and **`GET /api/v1/me` (B1)** for eve
 | A6 reset password | 5 / 15 min | IP | same |
 | A4 get-session | 120 / min | IP | same |
 
-Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `failedLoginCount` / `lockedUntil` live on `user`.
+Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `failedLoginCount` / `lockedUntil` live on `user`. **IP** = the address Vercel writes in `X-Forwarded-For`; outside Vercel that header can be faked, so all requests share one counter (DATABASE.md §4.6). F08 enforces the A1 limit; the A2/A4/A5/A6 limits come with the features that build those screens (F09 login, F11 shell, F33 settings, F35 reset link).
 
 ### 3.8 Unauthenticated / unauthorized on `/api/v1`
 
