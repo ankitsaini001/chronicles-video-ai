@@ -45,8 +45,8 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F04 | [Database design document (doc only)](F04-database-design-doc.md) | — | ✅ Done |
 | F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ✅ Done |
 | F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ✅ Done |
-| F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | 🧪 Testing |
-| F08 | [Sign up](F08-sign-up.md) | F07 | ⬜ Not started |
+| F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ✅ Done |
+| F08 | [Sign up](F08-sign-up.md) | F07 | 🔄 In progress |
 | F09 | [Log in and log out](F09-log-in-out.md) | F08 | ⬜ Not started |
 | F10 | [Access pending page](F10-access-pending.md) | F08 | ⬜ Not started |
 | F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ⬜ Not started |
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F07 is in progress (invite list). F04–F06 done.
+**Next up:** F08 is in progress (sign up). F04–F07 done.
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.

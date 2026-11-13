@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F07 |
 | **Design** | Stitch: ByteReel — Sign up |
