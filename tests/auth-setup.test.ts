@@ -106,6 +106,50 @@ describe("server-owned user fields (input: false)", () => {
   });
 });
 
+describe("log in (F09): only active users get a session", () => {
+  async function signedUp() {
+    const s = setup(["priya@example.com"]);
+    await s.auth.api.signUpEmail({ body: { name: "Priya", email: "priya@example.com", password } });
+    s.store.session = [];
+    return s;
+  }
+
+  it("an active user logs in", async () => {
+    const { auth, store } = await signedUp();
+    const res = await auth.api.signInEmail({ body: { email: "priya@example.com", password } });
+    expect(res.token).toBeTruthy();
+    expect(store.session).toHaveLength(1);
+  });
+
+  it.each(["suspended", "deleting"])("a %s user is refused with 403 ACCOUNT_SUSPENDED and gets no session", async (status) => {
+    const { auth, store } = await signedUp();
+    (store.user?.[0] as Record<string, unknown>).status = status;
+    const err = await errorOf(auth.api.signInEmail({ body: { email: "priya@example.com", password } }));
+    expect(err.statusCode).toBe(403);
+    expect(err.body).toMatchObject({ code: "ACCOUNT_SUSPENDED", message: AUTH_MESSAGES.ACCOUNT_SUSPENDED });
+    expect(store.session).toHaveLength(0);
+  });
+
+  it("a wrong password for a suspended user still gets the generic 401 (status checked after the password)", async () => {
+    const { auth, store } = await signedUp();
+    (store.user?.[0] as Record<string, unknown>).status = "suspended";
+    const err = await errorOf(auth.api.signInEmail({ body: { email: "priya@example.com", password: "wrong-password-1" } }));
+    expect(err.statusCode).toBe(401);
+    expect(err.body?.code).toBe("INVALID_EMAIL_OR_PASSWORD");
+  });
+
+  it("an unknown email gets the same 401 as a wrong password", async () => {
+    const { auth } = await signedUp();
+    const err = await errorOf(auth.api.signInEmail({ body: { email: "nobody@example.com", password } }));
+    expect(err.statusCode).toBe(401);
+    expect(err.body?.code).toBe("INVALID_EMAIL_OR_PASSWORD");
+  });
+
+  it("the paused-account message uses the configured product name", () => {
+    expect(AUTH_MESSAGES.ACCOUNT_SUSPENDED).toBe(`Your account is paused. Contact the ${SITE.name} team.`);
+  });
+});
+
 describe("password rules", () => {
   it.each([
     ["short", "1234567", "PASSWORD_TOO_SHORT"],

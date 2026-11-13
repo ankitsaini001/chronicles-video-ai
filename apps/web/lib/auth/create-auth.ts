@@ -106,6 +106,20 @@ export function createAuth({ config, database, invites, plugins = [], logError =
           },
         },
       },
+      session: {
+        create: {
+          // Only `active` users get a session (API.md §3.1). Runs for every new session (log in,
+          // sign-up, change password), after the password was checked, so a wrong password still
+          // gets the generic "incorrect" answer and this answer never reveals that an email exists.
+          // `suspended` and `deleting` (account deletion in progress) are both refused.
+          before: async (session, ctx) => {
+            const user = ctx ? await ctx.context.internalAdapter.findUserById(session.userId) : null;
+            if ((user as { status?: unknown } | null)?.status !== "active") {
+              throw APIError.from("FORBIDDEN", { code: "ACCOUNT_SUSPENDED", message: AUTH_MESSAGES.ACCOUNT_SUSPENDED });
+            }
+          },
+        },
+      },
     },
     plugins,
   });
