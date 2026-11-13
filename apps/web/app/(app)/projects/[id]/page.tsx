@@ -65,11 +65,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         </dl>
-        <p className="mb-8 rounded-2xl border border-line bg-progress-bg px-4 py-3 text-sm text-text">The AI storyboard arrives in F15.</p>
+        <p className="mb-8 rounded-2xl border border-line bg-progress-bg px-4 py-3 text-sm text-text">Your storyboard will appear here soon.</p>
         <Button href="/dashboard" variant="secondary">
           Back to My videos
         </Button>
-        <p className="mt-6 font-mono text-[11px] uppercase tracking-wider text-muted">Temporary page · the storyboard screen comes in F16</p>
       </section>
     </div>
   );
