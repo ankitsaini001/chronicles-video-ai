@@ -3,6 +3,17 @@ export { closeMongoClient, getDb, getMongoClient, CLIENT_OPTIONS } from "./clien
 export { DEFAULT_DB_NAME, passwordsIn, readDbConfig, redactConnectionString, type DbConfig, type DbConfigResult } from "./config";
 export { explainDbError, IndexConflictError, type ExplainedDbError } from "./errors";
 export { ping } from "./health";
+export {
+  AUTH_RATE_LIMITS,
+  hashRateLimitSubject,
+  hitRateLimit,
+  RATE_LIMITS_COLLECTION,
+  rateLimitId,
+  rateLimitWindow,
+  type RateLimitDocument,
+  type RateLimitResult,
+  type RateLimitRule,
+} from "./rate-limit";
 export { ensureIndexes, INDEX_FEATURES, INDEXES, indexesForFeatures, type IndexDefinition } from "./indexes";
 export {
   addInvite,
