@@ -119,7 +119,9 @@ export async function runDbCommand(argv: string[], print: Print, env: NodeJS.Pro
       }
       case "invite": {
         if (parsed.action === "add") {
-          const r = await addInvite(db, parsed.email, parsed.note === undefined ? {} : { note: parsed.note });
+          await ensureIndexes(db, indexesForFeatures(["F07"])); // the unique email index (safe to repeat)
+          // DATABASE.md Q14: command-added entries get this note unless one is given.
+          const r = await addInvite(db, parsed.email, { note: parsed.note?.trim() || "added by setup command" });
           safePrint(
             r.status === "added"
               ? [`Invited ${r.entry.email} ✓`, `  They can sign up once sign-up is built (F08). See it in Atlas: Data Explorer → your cluster → ${db.databaseName} → allowlist`]

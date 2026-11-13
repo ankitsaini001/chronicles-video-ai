@@ -44,8 +44,12 @@ describe("normalizeEmail", () => {
     expect(normalizeEmail("  Priya.Sharma@Example.COM ")).toEqual({ ok: true, email: "priya.sharma@example.com" });
   });
 
-  it.each(["", "   ", "priya", "priya@", "@example.com", "priya@example", "pri ya@example.com", "a@b@c.com"])("rejects %j", (input) => {
+  it.each(["", "   ", "priya", "priya@", "@example.com", "priya@example", "pri ya@example.com", "a@b@c.com", "a@b..com", "a@.b.com", "a@b.com.", "a.@b.com", "<a@b.com>", "a,b@c.com", "é@b.com", "a\u200b@b.com"])("rejects %j", (input) => {
     expect(normalizeEmail(input).ok).toBe(false);
+  });
+
+  it("accepts normal addresses, including +tags and subdomains", () => {
+    for (const e of ["a+tag@gmail.com", "x@sub.example.co.in", "first.last@example.com"]) expect(normalizeEmail(e).ok).toBe(true);
   });
 
   it("rejects emails longer than 254 characters", () => {
@@ -56,11 +60,11 @@ describe("normalizeEmail", () => {
 describe("addInvite", () => {
   const now = new Date("2026-11-13T10:00:00.000Z");
 
-  it("saves a lowercase entry with the fields from DATABASE.md §4.5 and makes sure the unique index exists", async () => {
+  it("saves a lowercase entry with the fields from DATABASE.md §4.5", async () => {
     const { db, docs, indexes } = fakeDb();
     const r = await addInvite(db, " Priya@Example.com ", { note: " Physics teacher ", now });
     expect(r.status).toBe("added");
-    expect(indexes).toEqual(["email_unique"]);
+    expect(indexes).toEqual([]); // the command creates the index, not addInvite
     expect(docs).toEqual([{ _id: 1, email: "priya@example.com", note: "Physics teacher", invitedBy: null, createdAt: now, signedUpUserId: null }]);
   });
 
@@ -78,6 +82,29 @@ describe("addInvite", () => {
     expect(docs).toHaveLength(1);
     expect(docs[0]?.createdAt).toEqual(now);
     expect(docs[0]).not.toHaveProperty("note");
+  });
+
+  it("treats a simultaneous duplicate (E11000 from the unique index) as already invited", async () => {
+    const { db, docs } = fakeDb();
+    await addInvite(db, "priya@example.com", { now });
+    const racing = {
+      ...db,
+      collection: (name: string) => ({
+        ...db.collection(name),
+        updateOne: async () => Promise.reject(Object.assign(new Error("E11000 duplicate key"), { code: 11000 })),
+      }),
+    } as unknown as Db;
+    expect((await addInvite(racing, "priya@example.com")).status).toBe("already_invited");
+    expect(docs).toHaveLength(1);
+  });
+
+  it("passes other database errors through", async () => {
+    const { db } = fakeDb();
+    const broken = {
+      ...db,
+      collection: (name: string) => ({ ...db.collection(name), updateOne: async () => Promise.reject(Object.assign(new Error("boom"), { code: 13 })) }),
+    } as unknown as Db;
+    await expect(addInvite(broken, "priya@example.com")).rejects.toThrow("boom");
   });
 
   it("refuses a bad email or a too-long note before touching the database", async () => {
