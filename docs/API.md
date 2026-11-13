@@ -113,14 +113,14 @@
 | `INVALID_EMAIL` | 400 | Malformed email | "Enter a valid email address." |
 | `INVALID_EMAIL_OR_PASSWORD` | 401 | Wrong email or password (or unknown email) | **"Email or password is incorrect"** |
 | `TOO_MANY_ATTEMPTS` | 429 | IP/email rate limit hit **or** account locked; `Retry-After` header set | "Too many attempts. Please wait 15 minutes and try again." |
-| `ACCOUNT_SUSPENDED` | 403 | Correct password but `status = suspended` (checked after the password) | "Your account is paused. Contact the ByteReel team." |
+| `ACCOUNT_SUSPENDED` | 403 | Correct password but `status` is `suspended` or `deleting` (checked after the password, in Better Auth's `databaseHooks.session.create.before`, so no session is ever created for a non-active user) | "Your account is paused. Contact the ByteReel team." |
 | `INVALID_PASSWORD` | 400 | Change password: current password wrong | "Your current password is incorrect." |
 | `INVALID_TOKEN` | 400 | Reset token unknown, used or expired | "This reset link is invalid or has expired. Ask the ByteReel team for a new one." |
 | `FORBIDDEN_ORIGIN` | 403 | Origin check failed (§3.6) | "Please reload the page and try again." |
-| `INVALID_INPUT` | 400 | Body isn't JSON, or a sign-up body has a field other than `name`, `email`, `password` (e.g. `role`, `status`, `image`, `callbackURL`, `rememberMe`), or the name is empty / over 80 characters | "Something in the form isn't right. Please check it and try again." |
+| `INVALID_INPUT` | 400 | Body isn't JSON, or a sign-up body has a field other than `name`, `email`, `password` (e.g. `role`, `status`, `image`, `callbackURL`, `rememberMe`), or the name is empty / over 80 characters, or a sign-in body has a field other than `email`, `password`, `rememberMe` (boolean), or its password is empty / over 128 characters | "Something in the form isn't right. Please check it and try again." |
 | `PAYLOAD_TOO_LARGE` | 413 | Body over 64 KB | same as `INVALID_INPUT` |
 | `NOT_FOUND` | 404 | Any `/api/auth/*` method + path that isn't one of A1–A6 (lockdown, §3.1) | — |
-| `UNAUTHORIZED` | 401 | No/expired session on A3/A5 | redirect to `/login` |
+| `UNAUTHORIZED` | 401 | No/expired session on A5 (A3 sign-out answers `200` even without a session, F09) | redirect to `/login` |
 
 ### 3.3 Sign-up and login flows
 
@@ -137,7 +137,7 @@ Login    /login form (email, password)  ["Forgot your password? Contact the Byte
       fail: failedLoginCount += 1 (10th failure sets lockedUntil = now + 15 min) → 401 generic message
       ok:   failedLoginCount = 0, lockedUntil = null, lastLoginAt = now; session; Set-Cookie → /dashboard
 
-Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie cleared → /login
+Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie cleared → home page / (F09, founder's choice)
 ```
 
 #### A1. `POST /api/auth/sign-up/email` — Create account
@@ -188,9 +188,10 @@ Error (email not on the allow-list):
 |---|---|
 | Auth | anonymous (Origin check) |
 | Rate limit | 5 attempts / 15 min **per IP** and 5 / 15 min **per email**; lockout after **10 consecutive failures** for 15 min |
-| Body | `email` string (required) · `password` string 1–128 (required). `rememberMe` is ignored (sessions are always 30 days) |
-| Success | `200` `{ redirect: false, token, user }` + `Set-Cookie` |
-| Errors | `INVALID_EMAIL_OR_PASSWORD` 401 · `TOO_MANY_ATTEMPTS` 429 (+ `Retry-After: 900`) · `ACCOUNT_SUSPENDED` 403 · `FORBIDDEN_ORIGIN` 403 |
+| Body | `email` string (required) · `password` string 1–128 (required) · `rememberMe` boolean (optional; accepted but dropped before Better Auth, sessions are always 30 days). Anything else (`callbackURL`, `role`, …) → `400 INVALID_INPUT` |
+| Success | `200` `{ redirect: false, token, user }` + `Set-Cookie`. Sets `failedLoginCount = 0`, `lockedUntil = null`, `lastLoginAt = now` |
+| Errors | `INVALID_EMAIL_OR_PASSWORD` 401 · `TOO_MANY_ATTEMPTS` 429 (+ `Retry-After`: seconds left in the window, or on the lock) · `ACCOUNT_SUSPENDED` 403 · `FORBIDDEN_ORIGIN` 403 · `INVALID_EMAIL` / `INVALID_INPUT` 400 · `PAYLOAD_TOO_LARGE` 413 |
+| Order of checks (F09) | 404 if not A1–A6 → Origin → JSON content type → IP limit → body (≤ 64 KB, strict) → email limit → account lock → Better Auth (password, then status). All in `apps/web/lib/auth/handler.ts` except the status check (`create-auth.ts`, session hook). Better Auth's 401 is answered with our message and counted on the account (`recordFailedLogin`, one atomic update; an unknown email stores nothing) |
 
 ```http
 POST /api/auth/sign-in/email
@@ -223,7 +224,7 @@ Retry-After: 900
 | Auth | session · Origin check |
 | Body | none (`{}` accepted) |
 | Success | `200` `{ "success": true }`; the session row is deleted and the cookie is cleared (`Max-Age=0`) |
-| Errors | `UNAUTHORIZED` 401 (no session: the UI just goes to `/login`) · `FORBIDDEN_ORIGIN` 403 |
+| Errors | `FORBIDDEN_ORIGIN` 403. Without a session Better Auth 1.7.14 still answers `200 { success: true }` and clears the cookie (confirmed in F09). The UI goes to the home page `/` afterwards |
 
 ```json
 { "success": true }
@@ -327,12 +328,12 @@ The UI shell uses A4 for "am I logged in?" and **`GET /api/v1/me` (B1)** for eve
 |---|---|---|---|
 | A1 sign-up | 5 / 15 min | IP | `429 TOO_MANY_ATTEMPTS` + `Retry-After` |
 | A2 sign-in | 5 / 15 min | IP **and** lowercased email (both checked) | same |
-| A2 lockout | 10 consecutive failures → `lockedUntil = now + 15 min` | user | same `429 TOO_MANY_ATTEMPTS` (same message as the rate limit, so it doesn't reveal that the email exists) |
+| A2 lockout | 10 consecutive failures → `lockedUntil = now + 15 min` (F09: every 10th failure in a row, i.e. 10, 20, …; the count resets only on a successful login) | user | same `429 TOO_MANY_ATTEMPTS` (same message as the rate limit, so it doesn't reveal that the email exists) |
 | A5 change password | 5 / 15 min | user | same |
 | A6 reset password | 5 / 15 min | IP | same |
 | A4 get-session | 120 / min | IP | same |
 
-Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `failedLoginCount` / `lockedUntil` live on `user`. **IP** = the address Vercel writes in `X-Forwarded-For`; outside Vercel that header can be faked, so all requests share one counter (DATABASE.md §4.6). F08 enforces the A1 limit; the A2/A4/A5/A6 limits come with the features that build those screens (F09 login, F11 shell, F33 settings, F35 reset link).
+Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `failedLoginCount` / `lockedUntil` live on `user`. **IP** = the address Vercel writes in `X-Forwarded-For`; outside Vercel that header can be faked, so all requests share one counter (DATABASE.md §4.6). F08 enforces the A1 limit, F09 the A2 limits, the lockout and the A4 limit; the A5/A6 limits come with F33 (settings) and F35 (reset link). Off Vercel, everyone shares one IP counter, so on your computer 5 log-in attempts per 15 minutes is the total for all users.
 
 ### 3.8 Unauthenticated / unauthorized on `/api/v1`
 

@@ -140,6 +140,8 @@ paths:
                 redirect: false
                 token: Qm9yZWVsU2Vzc2lvbl9leGFtcGxl
                 user: { id: 67330c1a9f1e4b2a7c0d1e01, name: Ananya Iyer, email: ananya.iyer@example.in, role: creator, status: active }
+        '400':
+          $ref: '#/components/responses/BetterAuthBadRequest'
         '401':
           description: INVALID_EMAIL_OR_PASSWORD (generic message, no enumeration).
           content:
@@ -148,7 +150,7 @@ paths:
                 $ref: '#/components/schemas/BetterAuthError'
               example: { code: INVALID_EMAIL_OR_PASSWORD, message: Email or password is incorrect }
         '403':
-          description: ACCOUNT_SUSPENDED (after a correct password) or FORBIDDEN_ORIGIN.
+          description: ACCOUNT_SUSPENDED (after a correct password; status suspended or deleting) or FORBIDDEN_ORIGIN.
           content:
             application/json:
               schema:
@@ -160,7 +162,7 @@ paths:
     post:
       operationId: signOut
       summary: Log out
-      description: A3. Deletes the current session and clears the cookie. Origin check.
+      description: A3. Deletes the current session and clears the cookie. Origin check. Answers 200 also without a session (Better Auth 1.7.14).
       tags: [Auth]
       security:
         - sessionCookie: []
@@ -183,8 +185,6 @@ paths:
                   success:
                     type: boolean
               example: { success: true }
-        '401':
-          $ref: '#/components/responses/BetterAuthUnauthorized'
         '403':
           $ref: '#/components/responses/BetterAuthForbiddenOrigin'
   /api/auth/get-session:
@@ -4172,7 +4172,7 @@ components:
           maxLength: 128
         rememberMe:
           type: boolean
-          description: Ignored; sessions are always 30 days.
+          description: Accepted but dropped before Better Auth; sessions are always 30 days.
     ChangePasswordRequest:
       type: object
       additionalProperties: false

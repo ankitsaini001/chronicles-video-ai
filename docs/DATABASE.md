@@ -226,8 +226,8 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 | `timezone` | string (IANA name) | For "today" limits and schedule times. Default `Asia/Kolkata` | Auto |
 | `defaultLanguage` | `en` \| `hi` \| `hinglish` | Pre-selected language on the Idea step | Auto |
 | `defaultVoiceGender` | `female` \| `male` | Pre-selected voice | Auto |
-| `failedLoginCount` | int | Wrong passwords in a row. Reset to 0 on success | Auto |
-| `lockedUntil` | date \| null | Set to now + 15 min after 10 wrong passwords | No |
+| `failedLoginCount` | int | Wrong passwords in a row. Reset to 0 on success. Added with one atomic update (F09, `packages/db/src/login-guard.ts`) | Auto |
+| `lockedUntil` | date \| null | Set to now + 15 min at every 10th wrong password in a row (10, 20, …) | No |
 | `lastLoginAt` | date \| null | Last successful login | No |
 | `createdAt`, `updatedAt` | date | Better Auth timestamps | Auto |
 
