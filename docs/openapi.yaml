@@ -657,8 +657,15 @@ paths:
           $ref: '#/components/responses/Internal'
     patch:
       operationId: renameProject
-      summary: Rename a project
-      description: C4. **expectedStateVersion required.** Allowed in every state except archived. Rate limit 60/min.
+      summary: Rename a project, or edit its idea after the storyboard failed
+      description: |
+        C4. **expectedStateVersion required.** Rate limit 60/min. At least one of `title`, `text`.
+        Rename (`title`): allowed in every state except archived. Edit idea (`text`, optional `title`): only in
+        plan_failed with no active job; replaces `input.text` (same length rules as create for the project's
+        inputType), sets the title (sent title or first 120 chars of the text), keeps the project plan_failed.
+        Then retry the failed plan job (POST /api/v1/jobs/{jobId}/retry), which plans from the edited idea.
+        Does not count toward the 5 projects/day quota. 409 INVALID_STATE (archived, or text outside
+        plan_failed), STALE_VERSION, JOB_ALREADY_RUNNING.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -668,10 +675,16 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RenameProjectRequest'
-            example: { title: UPI in 2 seconds, expectedStateVersion: 4 }
+            examples:
+              rename:
+                summary: Rename
+                value: { title: UPI in 2 seconds, expectedStateVersion: 4 }
+              editIdea:
+                summary: Edit the idea after the storyboard failed (plan_failed only)
+                value: { text: "How a UPI payment travels from your phone to the shop's bank in two seconds", expectedStateVersion: 3 }
       responses:
         '200':
-          description: The renamed project (stateVersion + 1).
+          description: The updated project (stateVersion + 1).
           content:
             application/json:
               schema:
@@ -1273,8 +1286,10 @@ paths:
       operationId: retryJob
       summary: Retry / resume a failed job
       description: |
-        E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable and
-        cancelled plan/caption jobs (not publish jobs: use the post retry). **Idempotency-Key required.**
+        E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable,
+        cancelled plan/caption jobs, and failed plan jobs whose idea was edited (PATCH project `text`) after the
+        failure; plan retries use the current idea and never count toward projects/day (not publish jobs: use
+        the post retry). **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
       tags: [Jobs]
       security:
@@ -2739,7 +2754,7 @@ components:
       enum: [active, expired, revoked, error]
     AllowedAction:
       type: string
-      enum: [rename, archive, edit_storyboard, request_revision, approve_storyboard, cancel_job, retry_job, edit_captions, download, publish, cancel_post, retry_post]
+      enum: [rename, edit_idea, archive, edit_storyboard, request_revision, approve_storyboard, cancel_job, retry_job, edit_captions, download, publish, cancel_post, retry_post]
     NotificationType:
       type: string
       enum: [storyboard_ready, video_ready, needs_input, generate_failed, post_published, post_failed, approval_invalidated, instagram_reconnect]
@@ -4163,13 +4178,22 @@ components:
           $ref: '#/components/schemas/BrainstormChoice'
     RenameProjectRequest:
       type: object
+      description: Rename (title) and/or edit the idea (text, only while plan_failed). At least one of title, text.
       additionalProperties: false
-      required: [title, expectedStateVersion]
+      required: [expectedStateVersion]
+      anyOf:
+        - required: [title]
+        - required: [text]
       properties:
         title:
           type: string
           minLength: 1
           maxLength: 120
+        text:
+          type: string
+          description: New idea text; only accepted while the project is plan_failed. Length rules as in CreateProjectRequest for the project's inputType (topic/brainstorm 3–300, notes 20–5,000).
+          minLength: 3
+          maxLength: 5000
         expectedStateVersion:
           type: integer
           minimum: 1

@@ -416,9 +416,9 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 |---|---|---|
 | `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for C7/H1) |
 | `PROVIDER_BUSY` (ElevenLabs) | "Voice service busy. Please try again in a few minutes." | Retry |
-| `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea |
+| `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea (C4 with `text`, then E2) |
 | `PROVIDER_UNAVAILABLE` | "Voice service unavailable right now. We've been notified." | — |
-| `PLAN_INVALID` (job) | "Couldn't build a good storyboard, try rephrasing." | Edit idea / Try again |
+| `PLAN_INVALID` (job) | "Couldn't build a good storyboard, try rephrasing." | Edit idea (C4 with `text`, then E2) / Try again (E2) |
 | `PLAN_INVALID` (approve) | "Some scenes need fixing before you can approve." + issues per scene | — |
 | `NEEDS_INPUT` (duration) | "Your script is about 98 seconds; videos must be 60–90 s. Try 'make it shorter'." | Revise |
 | `NEEDS_INPUT` (alignment) | "Please adjust the wording in scene 3." | Edit scene |
@@ -485,7 +485,7 @@ Idempotent-Replayed: true
 |---|---|
 | Version field | `project.stateVersion` (integer, starts at 1, +1 on every project change) |
 | How to send | Body field **`expectedStateVersion`** on project mutations, **or** header **`If-Match: "<stateVersion>"`** (needed for body-less calls such as `DELETE /projects/{id}`). If both are sent they must be equal |
-| Required on | C4 rename, C5 archive, D3 narration edit, D4 voice, D5 revision, D7 restore, D8 approve, F4 caption overrides, H2 publish/schedule |
+| Required on | C4 rename / edit idea, C5 archive, D3 narration edit, D4 voice, D5 revision, D7 restore, D8 approve, F4 caption overrides, H2 publish/schedule |
 | ETag | `GET /projects/{id}` and `GET /projects/{id}/status` return `ETag: "<stateVersion>"` |
 | Mismatch | `409 STALE_VERSION` with `details.currentStateVersion`; nothing is changed. UI: "This project changed in another tab, refresh." |
 | Admin settings | Same pattern with `settings.version` (`expectedVersion` in I12) |
@@ -610,7 +610,7 @@ Idempotent-Replayed: true
 | Quota | Default | Counted when | Resets | Error |
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
-| Projects created per user per day | 5 | C2 accepted | same | `quota: projects_per_day` |
+| Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count | same | `quota: projects_per_day` |
 | Plan + revision requests per project | 20 | C2 (counts 1) and each D5 accepted | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
@@ -628,7 +628,7 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | Other reads (`GET`) | 300 / min |
 | C7 brainstorm, H1 caption suggestions | 10 / hour each |
 | C2 create project | 10 / hour (plus the daily quota) |
-| D3 narration edit, D4 voice, D7 restore, C4 rename | 60 / min |
+| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min |
 | D5 revision | 20 / hour |
 | D8 approve, F4 caption overrides | 10 / hour |
 | H2 publish/schedule, H5, H6 | 10 / hour |
@@ -669,7 +669,7 @@ Types use TypeScript notation; `| null` fields are always present. Full JSON Sch
 | `RenderStatus` | `pending` \| `rendering` \| `validating` \| `ready` \| `failed` | ARCHITECTURE §8.8 |
 | `PostMode` / `PostState` | `now`\|`scheduled` / `draft` (reserved) \| `scheduled` \| `publishing` \| `outcome_unknown` \| `published` \| `publish_failed` \| `approval_invalidated` \| `cancelled` | ARCHITECTURE §7.4, §8.12 |
 | `ConnectionStatus` | `active` \| `expired` \| `revoked` \| `error` | ARCHITECTURE §8.11 |
-| `AllowedAction` | `rename`, `archive`, `edit_storyboard`, `request_revision`, `approve_storyboard`, `cancel_job`, `retry_job`, `edit_captions`, `download`, `publish`, `cancel_post`, `retry_post` | derived server side (principle "the server owns state") |
+| `AllowedAction` | `rename`, `edit_idea` (only in `plan_failed`), `archive`, `edit_storyboard`, `request_revision`, `approve_storyboard`, `cancel_job`, `retry_job`, `edit_captions`, `download`, `publish`, `cancel_post`, `retry_post` | derived server side (principle "the server owns state") |
 | `NotificationType` | `storyboard_ready`, `video_ready`, `needs_input`, `generate_failed`, `post_published`, `post_failed`, `approval_invalidated`, `instagram_reconnect` | §14.2 |
 
 ### 11.2 Plan contract (exact code field names: `packages/pipeline/src/contracts/plan.ts`)
@@ -781,7 +781,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | C1 | GET | `/api/v1/projects` | Library (tabs, paginated) | creator | 200 | | |
 | C2 | POST | `/api/v1/projects` | Create project + start storyboard | creator | 202 | ✓ | |
 | C3 | GET | `/api/v1/projects/{projectId}` | Project detail | creator | 200 | | |
-| C4 | PATCH | `/api/v1/projects/{projectId}` | Rename | creator | 200 | | ✓ |
+| C4 | PATCH | `/api/v1/projects/{projectId}` | Rename; edit the idea after the storyboard failed | creator | 200 | | ✓ |
 | C5 | DELETE | `/api/v1/projects/{projectId}` | Archive (soft delete) | creator | 200 | | ✓ |
 | C6 | GET | `/api/v1/projects/{projectId}/status` | Lightweight status for 2 s polling | creator | 200 | | |
 | C7 | POST | `/api/v1/brainstorm` | AI idea suggestions (sync) | creator | 200 | | |
@@ -843,6 +843,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | App shell (every signed-in page) | A4, B1 | A3 logout, B5/B6 notifications bell, toasts from B5 (`unreadOnly=true`) |
 | `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new` |
 | `/projects/new` ① Idea | B1 (defaults), B4 (voices) | C7 brainstorm, C2 create storyboard → poll C6 |
+| ① Idea of an existing project in `plan_failed` (storyboard failed) | C3 (idea text + `lastError`) | **Edit idea** = C4 with `text` (and optional `title`), then **Try again** = E2 on the failed plan job → poll C6 |
 | `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob` |
 | `/projects/[id]/video` ③ | C3, F2 current render, F3 `kind=video` | F3 `kind=download`, F4 caption fixes, D5 revision (`stage: video`), E2 retry, E3 cancel, F1 previous versions, poll C6 |
 | `/projects/[id]/publish` ④ | C3, F2, F3 (`thumbnail`, `video`), G1, H3 | G2 connect, H1 AI caption, H2 publish now / schedule, H5 cancel, H6 retry, F3 download, poll H4 / C6 |
@@ -1065,13 +1066,21 @@ Errors: `404 NOT_FOUND`.
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM1G6H7J" } }
 ```
 
-#### C4. `PATCH /api/v1/projects/{projectId}` — Rename
-Auth: creator. Body: `title` string 1–120 (required) · `expectedStateVersion` int (required). Allowed in every state except `archived`. Doesn't touch plans or approvals.
-Success `200` → `Project`. Errors: `400 INVALID_INPUT` · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived).
+#### C4. `PATCH /api/v1/projects/{projectId}` — Rename, or edit the idea after the storyboard failed
+Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `text` string (the idea; same length rules as C2 for the project's `inputType`) · plus `expectedStateVersion` int (required).
+- **Rename** (`title` only): allowed in every state except `archived`. Doesn't touch plans or approvals.
+- **Edit idea** (`text`, optionally with `title`): allowed **only in `plan_failed`** with no active job (the "Edit idea" button after a failed storyboard, §4.3). Effect (transaction): `project.input.text` replaced (`inputType` and `brainstormChoice` unchanged), `title` = the sent `title`, else the first 120 chars of the new text (as in C2), `stateVersion + 1`; the project stays `plan_failed` with its `lastError`, and `allowedActions` includes `retry_job`. The creator then presses **Try again** (E2 on the failed `plan` job), which plans from the edited idea. Editing the idea and trying again **does not count toward the 5 projects/day quota** (no new project is created). Language and voice are not editable here (language: create a new project, PRD decision #25; voice: D4 once a storyboard exists).
+Success `200` → `Project`. Errors: `400 INVALID_INPUT` (no field, text length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived; `text` sent outside `plan_failed`) · `409 JOB_ALREADY_RUNNING`.
 ```json
 { "title": "UPI in 2 seconds", "expectedStateVersion": 4 }
 ```
 Response: the `Project` with `"title": "UPI in 2 seconds"`, `"stateVersion": 5`.
+
+Edit idea after a failed storyboard:
+```json
+{ "text": "How a UPI payment travels from your phone to the shop's bank in two seconds", "expectedStateVersion": 3 }
+```
+Response: the `Project` with `"state": "plan_failed"`, the new `input.text` and `title`, `"stateVersion": 4`, `"allowedActions": ["rename", "edit_idea", "retry_job", "archive"]`. Next call: `POST /api/v1/jobs/{planJobId}/retry` (E2).
 ```json
 { "error": { "code": "STALE_VERSION", "message": "This project changed in another tab, refresh.", "details": { "expectedStateVersion": 4, "currentStateVersion": 5 }, "requestId": "req_01JCXM1K8L9M" } }
 ```
@@ -1413,7 +1422,7 @@ Example: see §8.2 (running) and §8.3 (`needs_input`). Failed example:
 
 #### E2. `POST /api/v1/jobs/{jobId}/retry` — Retry / resume
 Purpose: **Retry** / **Try again** buttons. Resumes from the last good checkpoint; finished stages and paid artifacts are reused (ARCHITECTURE §13.2). Auth: creator. Rate: 30/hour. **Idempotency-Key required.** Body: `{}`.
-Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job; no other active job on the project. Effect: state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
+Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota. Effect: state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
 Success `202` → `Job`. Errors: `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
 ```json
 {}
