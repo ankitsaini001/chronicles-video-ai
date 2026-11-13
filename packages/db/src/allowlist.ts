@@ -1,4 +1,4 @@
-import type { Db, ObjectId } from "mongodb";
+import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 
 // The invite list (F07, docs/DATABASE.md §4.5). Only emails on this list can sign up (F08 checks
@@ -96,6 +96,20 @@ export async function isInvited(db: Db, email: string): Promise<boolean> {
   const normalized = normalizeEmail(email);
   if (!normalized.ok) return false;
   return (await db.collection(ALLOWLIST_COLLECTION).countDocuments({ email: normalized.email }, { limit: 1 })) === 1;
+}
+
+/**
+ * Record that this invited person now has an account (F08, after sign-up). Only fills an empty
+ * `signedUpUserId`, so an existing link is never overwritten. Returns whether an entry changed.
+ */
+export async function markInviteSignedUp(db: Db, email: string, userId: string): Promise<boolean> {
+  const normalized = normalizeEmail(email);
+  if (!normalized.ok) return false;
+  if (!ObjectId.isValid(userId)) throw new Error("markInviteSignedUp: the user id is not a MongoDB ObjectId.");
+  const result = await db
+    .collection(ALLOWLIST_COLLECTION)
+    .updateOne({ email: normalized.email, signedUpUserId: null }, { $set: { signedUpUserId: new ObjectId(userId) } });
+  return result.modifiedCount === 1;
 }
 
 /** Bad input from the person running the command (not a database problem). */

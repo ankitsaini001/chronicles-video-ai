@@ -21,6 +21,7 @@ export {
   InviteInputError,
   isInvited,
   listInvites,
+  markInviteSignedUp,
   normalizeEmail,
   removeInvite,
   type AddInviteResult,
