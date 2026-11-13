@@ -163,7 +163,7 @@ Why: video and audio files are large (a 75-second reel ≈ 18 MB). 512 MB of dat
 | 4.11 | `revisions` | The creator's change requests ("make it shorter") | F18 | A3 |
 | 4.12 | `storyboardApprovals` | Approval #1: "I approve this exact storyboard" | F20 | A3 |
 | 4.13 | `idempotencyKeys` | Remembers button clicks for 24 h so a double-click does nothing twice | F12 | A3 |
-| 4.14 | `usageCounters` | Daily/monthly counts for the limits (projects, videos, voice characters) | F12 (counting), F27 (limits enforced) | A3 |
+| 4.14 | `usageCounters` | Daily/monthly counts for the limits (projects, videos, voice characters) | F12 (projects counted and limited), F27 (the other limits enforced) | A3 |
 | 4.15 | `providerUsage` | Every paid AI/render call and its estimated cost | F14 | A3 |
 | 4.16 | `auditLogs` | Who did what important thing, and when | F20 | A3 |
 | 4.17 | `settings` | One global document: limits, ceilings, models, maintenance | F27, F36 | A4 |
@@ -1449,7 +1449,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F22 | Nothing in MongoDB: your R2 bucket |
 | F23 | `speechArtifacts`, `renders` (files in R2) |
 | F25 | `captionOverrides` |
-| F27 | `settings`; the limits in `usageCounters` and `projects.planRequestCount` start being enforced |
+| F27 | `settings`; the remaining limits in `usageCounters` (videos, voice characters) and `projects.planRequestCount` start being enforced (projects/day is enforced since F12) |
 | F28 | `instagramConnections` |
 | F30, F31 | `posts`, `publishAttempts` |
 | F32 | `notifications` |
@@ -1524,7 +1524,7 @@ These were the gaps and contradictions in the source documents. **Decided 2026-1
 | Q4 | `planVersions.stats` names | **Decided 2026-11-13.** The code's names: `sceneCount`, `wordCount`, `estimatedSeconds` (`PlanStats`, `packages/pipeline/src/planning/semantic-validation.ts`). ARCHITECTURE §8.4 fixed |
 | Q5 | One-live-post index | **Decided 2026-11-13.** Covers `scheduled`, `publishing` **and `outcome_unknown`** (API A-14). ARCHITECTURE §8.12 fixed |
 | Q6 | Job `idempotencyKey` formats | **Decided 2026-11-13.** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. The key is **required** on every job (4.9) |
-| Q7 | Where the per-project and per-user limits are counted | **Decided 2026-11-13.** The 20 plan + revision requests: `projects.planRequestCount`, increased in the same transaction and only if below the limit. Per-user daily/monthly counts (projects, videos, voice characters): `usageCounters`. **Counting starts in F12, enforcement in F27** |
+| Q7 | Where the per-project and per-user limits are counted | **Decided 2026-11-13.** The 20 plan + revision requests: `projects.planRequestCount`, increased in the same transaction and only if below the limit. Per-user daily/monthly counts (projects, videos, voice characters): `usageCounters`. **Counting starts in F12. Enforcement: projects/day since F12 (F12 review, protects the paid storyboard calls); the other limits in F27** |
 | Q8 | Indexes not defined in the docs | **Decided 2026-11-13.** The list in §8: required Better Auth indexes, partial unique `deletionRequests.confirmationCode`, `notifications { ownerId: 1, createdAt: -1 }`, `publishAttempts { postId: 1 }`, plus the `rateLimits`/`idempotencyKeys`/`usageCounters` indexes. **No** extra indexes on `captionOverrides` or `auditLogs`; the sparse `activeJobId` index is dropped |
 | Q9 | Database validators | **Decided 2026-11-13.** A **minimal** validator: on owner-scoped collections, only `ownerId` (ObjectId) and `schemaVersion` are required (`idempotencyKeys`, `usageCounters`: `ownerId` only). Zod in our code is the real check (§1.4) |
 | Q10 | **Account deletion details** | **Decided by the founder, 2026-11-13.** 30-day soft delete (account hidden and restorable by an admin), Instagram data deleted right away, then personal data erased and one anonymous `deletionLog` entry kept forever (rounded months and cost range, random id). `providerUsage` and `auditLogs` anonymized, `allowlist` entry deleted. See 6.7 and 4.26 |
