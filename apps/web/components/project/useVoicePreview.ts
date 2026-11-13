@@ -41,7 +41,8 @@ export function useVoicePreview() {
         });
         audio.addEventListener("error", () => {
           const url = currentRef.current;
-          if (url === null) return;
+          // A late error from an older sample (or after stop) is not about the current one.
+          if (url === null || !sameUrl(audio!.currentSrc || audio!.src, url)) return;
           currentRef.current = null;
           setPlaying(null);
           setFailed(url);
@@ -68,10 +69,26 @@ export function useVoicePreview() {
   useEffect(
     () => () => {
       currentRef.current = null;
-      audioRef.current?.pause();
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        // Let go of the file, so the browser stops loading it.
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      audioRef.current = null;
     },
     [],
   );
 
   return { playing, failed, toggle, stop };
+}
+
+/** The element reports an absolute URL; the samples are given as paths ("/voices/x.mp3"). */
+function sameUrl(elementUrl: string, sampleUrl: string): boolean {
+  try {
+    return new URL(elementUrl, window.location.href).href === new URL(sampleUrl, window.location.href).href;
+  } catch {
+    return false;
+  }
 }

@@ -90,11 +90,10 @@ export function VoicePicker({ language, value, onChange, preview, samplePresets,
           Playing: “<span lang={lang}>{playingPreset.sampleText}</span>”
         </p>
       )}
-      {failed && !playingPreset && (
-        <p role="status" className="mt-2.5 text-xs text-warning">
-          Couldn&apos;t play this sample. Please try again.
-        </p>
-      )}
+      {/* Always present, so screen readers announce the message when its text appears. */}
+      <p role="status" className={cn("text-xs text-warning", failed && !playingPreset && "mt-2.5")}>
+        {failed && !playingPreset ? "Couldn't play this sample. Please try again." : ""}
+      </p>
     </fieldset>
   );
 }
