@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (English now, Hindi/Hinglish later: founder, 2026-11-13; waiting for the code review and the founder's test) |
+| **Status** | 🧪 Testing (English now, Hindi/Hinglish later: founder, 2026-11-13; code review passed; waiting for the founder's test) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F12 |
 | **Design** | Stitch: ByteReel — Step 1 Idea (▶ next to Female voice / Male voice) |
@@ -63,7 +63,7 @@ Also: ElevenLabs labels both "Indian English" voices with a *British* accent. Pl
 ## How we test it (done when all are ticked)
 - [ ] Each ▶ plays the right language and gender (English now; Hindi/Hinglish show no ▶ until their samples are recorded before F23)
 - [x] No ElevenLabs call happens when you click ▶ (only the static MP3 is loaded; e2e: no page script mentions ElevenLabs)
-- [ ] Code review passed (code-reviewer agent)
+- [x] Code review passed (code-reviewer agent; no must-fix, all 8 suggestions applied)
 - [ ] Founder tested it and said OK
 
 ## Progress log
@@ -72,3 +72,4 @@ Also: ElevenLabs labels both "Indian English" voices with a *British* accent. Pl
 | 2026-11-13 | Started. Founder decided: 6 samples (Hinglish says its own sentence with the Hindi voices), the three sentences above, about 450 ElevenLabs characters, one time. |
 | 2026-11-13 | Built steps 1, 2, 4, 5, 6. Recorded 2 of 6 samples (English, 110 characters); Hindi refused by ElevenLabs (402: library voices need a paid plan), recorder stopped as designed. 526 unit tests, typecheck and `next build` pass; e2e F13 (all pass, 4 Hindi/Hinglish files skipped) and F12 (68/68) on `bytereel_test` (dropped afterwards). Waiting for the founder's Hindi voice decision, then the code review. |
 | 2026-11-13 | Founder chose **English now, Hindi later** (free premade voices are all American/British/Australian). Spent so far: **110 characters** (Hindi refused with 402 "Free users cannot use library voices via the API", not charged). ▶ now shows only for presets whose MP3 exists (server file check); B4 `sampleUrl: null` otherwise; API.md/openapi updated; MUST added to F23 and the tracker. 530 unit tests, typecheck and `next build` pass; e2e F13 and F12 (68/68) pass on `bytereel_test` (dropped afterwards). Status 🧪, waiting for the code review and the founder's test. |
+| 2026-11-13 | Code review: no must-fix. Applied all 8 suggestions. Recorder (`bacb1ae`): checks that ffprobe runs and that voice IDs look right (refused by variable name) before any paid call; a recording whose check fails is kept as `{preset}.mp3.unverified` instead of deleted; after any failure it still shows the account usage, and says "may have been charged" for a timeout or unreadable answer; voice IDs are blanked out of provider errors; a 0-byte file counts as missing; `.part` is always cleaned up; `*.part` / `*.unverified` ignored by git. Player (`4915fc8`): ignores a late error from an older sample, lets go of the file when you leave the page; the "couldn't play" status line is always in the page so screen readers announce it. No ElevenLabs calls (characters spent still 110). 539 unit tests, typecheck and `next build` pass; e2e F13 and F12 (68/68) pass on `bytereel_test` (dropped afterwards). Waiting for the founder's test. |
