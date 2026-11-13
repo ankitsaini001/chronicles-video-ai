@@ -4,3 +4,14 @@ export { DEFAULT_DB_NAME, passwordsIn, readDbConfig, redactConnectionString, typ
 export { explainDbError, IndexConflictError, type ExplainedDbError } from "./errors";
 export { ping } from "./health";
 export { ensureIndexes, INDEX_FEATURES, INDEXES, indexesForFeatures, type IndexDefinition } from "./indexes";
+export {
+  addInvite,
+  ALLOWLIST_COLLECTION,
+  InviteInputError,
+  isInvited,
+  listInvites,
+  normalizeEmail,
+  removeInvite,
+  type AddInviteResult,
+  type AllowlistEntry,
+} from "./allowlist";
