@@ -9,6 +9,11 @@
 | **Data (MongoDB / storage)** | `jobs`, `speechArtifacts`, `renders` |
 | **API endpoints** (docs/API.md) | D8, C6, E1–E3 |
 
+## MUST before starting (founder, 2026-11-13)
+- [ ] **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters).
+  - Why: the Hindi voice IDs in `.env` are ElevenLabs "professional" library voices; on the free plan the API refuses them (402 "Free users cannot use library voices via the API"), so Hindi/Hinglish narration would fail. The free premade voices are only American/British/Australian (founder checked). Found in F13.
+  - Also: ElevenLabs labels both "Indian English" voices (free premade) with a *British* accent: founder to listen and decide if they are good enough.
+
 ## Goal
 Turn the approved storyboard into an MP4 in the background, with progress steps.
 

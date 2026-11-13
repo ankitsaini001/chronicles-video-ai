@@ -3229,8 +3229,8 @@ components:
         label:
           type: string
         sampleUrl:
-          type: string
-          description: Static pre-recorded MP3 under /voices/ (decision D7).
+          type: [string, 'null']
+          description: Static pre-recorded MP3 under /voices/ (decision D7). null while the preset's sample isn't recorded yet (F13 - the Hindi/Hinglish samples wait for the voice-plan decision before F23); the Idea screen shows no play button then.
         sampleText:
           type: string
         enabled:
