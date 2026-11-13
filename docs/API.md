@@ -83,7 +83,7 @@
 | Session lifetime | **30 days**, rolling: when a request arrives and the session is older than **1 day** since its last refresh (`updateAge`), `expiresAt` is pushed to now + 30 days |
 | Session check cache | Better Auth cookie cache **off** in V1 (every request reads the `session` collection), so revocation (password change, suspension, account deletion) is immediate |
 | Roles | `creator` (default) and `admin` (`user.role`). Admin endpoints check `role = admin` server side |
-| Status | `active`, `suspended`, `deleting`. Only `active` users get a session; suspension and deletion revoke all sessions. **Every server-side session read also requires `status = active`** (F09: `apps/web/lib/auth/session.ts` treats any other status as signed out), so a session left over from before a status change is never honoured. The `/api/v1` auth helper (`requireUser`) must do the same when it is built |
+| Status | `active`, `suspended`, `deleting`. Only `active` users get a session; suspension and deletion revoke all sessions. **Every server-side session read also requires `status = active`** (F09: `apps/web/lib/auth/session.ts` treats any other status as signed out), so a session left over from before a status change is never honoured. The `/api/v1` pipeline does the same (F11: `apps/web/lib/api/v1.ts` + `server.ts` read the session through the same `toSessionUser`, so a non-active user gets `401 UNAUTHENTICATED`) |
 | Password rules | **8–128 characters**, any characters (Unicode allowed; no composition rules), hashed with **scrypt** by Better Auth, never logged or returned. "Confirm password" is checked by the form only (the API receives one `password`) |
 | Brute-force | Rate limits per IP and per email (§3.7); **10 consecutive failed logins → account locked for 15 minutes** |
 | Enumeration | Login failures always answer *"Email or password is incorrect"*; lockout and rate-limit answers use one message that doesn't reveal whether the email exists. **Conscious exception (private beta): sign-up (A1) does tell the caller whether an email is not invited (`NOT_ALLOWLISTED`) or already registered (`USER_ALREADY_EXISTS`)**, so invited people get clear messages ("request access" / "log in instead"). This leaks only allow-list/account membership, never a password, and is protected by the sign-up rate limit (5 / 15 min per IP, §3.7). **The A2 account lock falls under the same exception (F09 review):** the lock lives on `user`, so an email without an account never locks; someone spreading attempts over several 15-minute windows sees `429` on the 11th attempt for a registered email but keeps getting `401` for an unknown one. Accepted for the private beta because sign-up already reveals registered emails more cheaply. Revisit when sign-up opens to the public: then the lock moves to a counter keyed by the hashed email (unknown emails lock too) and the A1 exception is removed |
@@ -633,7 +633,7 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 |---|---|
 | Auth (A1, A2, A5, A6) | see §3.7 |
 | Polling reads (C6, E1, H4) | 120 / min |
-| Other reads (`GET`) | 300 / min |
+| Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
 | C7 brainstorm, H1 caption suggestions | 10 / hour each |
 | C2 create project | 10 / hour (plus the daily quota) |
 | D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min |
@@ -874,6 +874,7 @@ A1–A6 are specified in §3 with examples.
 Purpose: profile, defaults, quotas, Instagram badge and unread count for the app shell. Auth: creator. Rate: 300/min.
 Success `200` → `Me`.
 Errors: common only.
+**Until the related features exist (F11):** the `usage` counts are `0` (limits and `resetsAt` are real; counting starts in F12 for projects and with video generation for videos and voice characters), `instagram` is `{ "status": "not_connected", "username": null }` (until F28), `unreadNotifications` is `0` (until F32) and `maintenance` is off (until the `settings` document, F27/F36). The limits live in one constant, `USAGE_LIMITS` in `packages/db/src/usage.ts`; the app shell's "Videos today" pill calls the same server function as this endpoint (`apps/web/lib/account/me.ts`).
 ```json
 {
   "id": "67330c1a9f1e4b2a7c0d1e01",
