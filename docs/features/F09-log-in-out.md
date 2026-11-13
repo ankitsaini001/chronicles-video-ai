@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F08 |
 | **Design** | Stitch: ByteReel — Log in |
@@ -28,7 +28,14 @@ The 'ByteReel — Log in' screen and a Log out option.
 - —
 
 ## Steps
-_We break this into small steps together when we start this feature._
+- [ ] 1. Sign-in limits (5 / 15 min per IP and per email) and the 10-failure lockout helpers in `packages/db`
+- [ ] 2. Better Auth: only `active` users get a session (403 `ACCOUNT_SUSPENDED`, checked after the password)
+- [ ] 3. `/api/auth` route: sign-in rate limits, strict body, lockout, one message for wrong email or password; get-session limit 120 / min per IP
+- [ ] 4. Server-side session helpers: private pages go to `/login`; `/login` and `/signup` go to `/dashboard` when signed in
+- [ ] 5. `/login` page from the Stitch design
+- [ ] 6. Log out button, and the user's name in the header (home page and temporary dashboard)
+- [ ] 7. End-to-end test over HTTP against `next start` on port 3232 with `bytereel_test` (then dropped)
+- [ ] 8. Docs match what was built
 
 ## How we test it (done when all are ticked)
 - [ ] Correct password logs in

@@ -47,7 +47,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ✅ Done |
 | F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ✅ Done |
 | F08 | [Sign up](F08-sign-up.md) | F07 | ✅ Done |
-| F09 | [Log in and log out](F09-log-in-out.md) | F08 | 🔨 In progress |
+| F09 | [Log in and log out](F09-log-in-out.md) | F08 | 🔄 In progress |
 | F10 | [Access pending page](F10-access-pending.md) | F08 | ⬜ Not started |
 | F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ⬜ Not started |
 
