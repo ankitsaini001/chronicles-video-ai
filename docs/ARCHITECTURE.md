@@ -590,6 +590,7 @@ Measure cold start, render time and cost per 60/90 s video at 2/4/8 vCPUs. If to
 - Adapter from the prototype (`@google/genai`, streaming, structured JSON output).
 - **Model config:** one model, `GEMINI_MODEL` (currently `gemini-3.6-flash`). **No automatic model fallback** (decision D4). When Gemini stays busy after the allowed retries, the job fails with `PROVIDER_BUSY` and the creator sees: *"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."* with a **Try again** button. Changing the model is an admin config change, recorded on each plan version (`plannerUsage.model`).
 - Schema compatibility: no `minItems`/`maxItems` in the response schema (verified incompatibility); limits are enforced by our validation + one repair.
+- **Brainstorm (C7, F14):** same adapter, no retries of its own; `packages/pipeline/src/brainstorm/` runs it with a **30 s limit for the whole brainstorm**, at most 2 quick retries for busy errors (never past the 30 s), 1 repair of an invalid answer, then `PROVIDER_BUSY` with the brainstorm wording *"Our AI is very busy right now. Please try again in a few minutes."* (no project exists). Each request is logged in `providerUsage`.
 - Timeouts: 180 s per request; at most 3 requests per plan job (initial + up to 2 transient retries) plus 1 repair.
 - **Data use:** on the free tier, Google may use content to improve its products. **Before real beta users, switch to the paid tier** (§22).
 

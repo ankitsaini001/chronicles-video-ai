@@ -681,14 +681,15 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id`, `ownerId` | ObjectId | Record id; whose count | Auto |
-| `kind` | `videos` \| `projects` \| `voiceChars` | What is counted | Yes |
-| `period` | string | The day (`"2026-11-13"`) for `videos`/`projects`, the month (`"2026-11"`) for `voiceChars`, **in the user's timezone** | Yes |
+| `kind` | `videos` \| `projects` \| `voiceChars` \| `brainstorms` | What is counted (`brainstorms`: C7 requests, F14) | Yes |
+| `period` | string | The day (`"2026-11-13"`) for `videos`/`projects`/`brainstorms`, the month (`"2026-11"`) for `voiceChars`, **in the user's timezone** | Yes |
 | `count` | int | Used so far in this period (characters for `voiceChars`) | Yes |
 | `expiresAt` | date | A week after the period ends; old counters then delete themselves | Yes |
 
 **Rules (Q7)**
 - Increased inside the same transaction as the action (C2, D8; `voiceChars` when characters are reserved), with one atomic "add, create if missing" on `{ ownerId, kind, period }`, and only if the result stays within the limit.
 - **Counting starts in F12** (projects) and grows with each feature. The **projects** limit (5 per day) is also **enforced since F12** (C2 answers `429 QUOTA_EXCEEDED` and saves nothing), because the check costs nothing and protects the paid storyboard calls coming in F15. The other limits are enforced as their actions arrive (videos: F20/F27; voice characters: F23/F27).
+- **`brainstorms` (F14, 30 per day):** C7 saves nothing else, so there is no transaction: one atomic update "add 1 where `count < 30`, create the counter if missing" (`packages/db/src/brainstorm.ts`, `countBrainstormWithinLimit`). At the limit the filter matches nothing and the insert hits the unique index (E11000) = full, nothing added; two first brainstorms of the day at the same moment can also hit E11000, and the retry then adds to the new counter. Counted before the AI call; a busy or refused answer still counts. The 10 per hour are a `rateLimits` counter (4.6).
 - Code: `packages/db/src/usage-counters.ts` (`addUsageWithinLimit` adds 1, and if that goes over the limit the caller throws so the transaction rolls the +1 back; two clicks at the same moment write the same counter, so MongoDB makes one of them wait and retry, and it sees the new count).
 - The **20 plan + revision requests per project** are not here: they are `projects.planRequestCount` (4.8), because they never reset.
 
@@ -710,22 +711,32 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
   units: { promptTokens: 0, outputTokens: 0, characters: 214, renderSeconds: 0 },
   estCostInr: 1.9,
   status: "final",
+  outcome: "ok",
+  latencyMs: 4210,
   at: ISODate("2026-11-12T05:40:20.000Z")
 }
+```
+
+A C7 brainstorm call (F14) has no `projectId`/`jobId`:
+```js
+{ _id: ObjectId("…"), ownerId: ObjectId("67330c1a9f1e4b2a7c0d1e01"), schemaVersion: 1, provider: "gemini", operation: "brainstorm", model: "gemini-3.6-flash",
+  units: { promptTokens: 912, outputTokens: 540, characters: 0, renderSeconds: 0 }, estCostInr: 0, status: "final", outcome: "ok", latencyMs: 8400, at: ISODate("2026-11-13T10:00:00.000Z") }
 ```
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id`, `ownerId` | ObjectId | Record id; whose usage | Auto |
-| `projectId`, `jobId` | ObjectId? | Which project/job caused it (brainstorm has no project) | No |
+| `projectId`, `jobId` | ObjectId? | Which project/job caused it. **Not set** (field absent) when there is none, e.g. brainstorm | No |
 | `provider` | `gemini` \| `elevenlabs` \| `vercel-sandbox` \| `meta` | Which service | Yes |
 | `operation`, `model` | string | What was called | Yes |
-| `units` | `{ promptTokens, outputTokens, characters, renderSeconds }` | How much was used | Yes |
-| `estCostInr` | number | Estimated cost in rupees | Yes |
+| `units` | `{ promptTokens, outputTokens, characters, renderSeconds }` | How much was used. Gemini `outputTokens` = answer + thinking tokens (both are billed as output) | Yes |
+| `estCostInr` | number | Estimated cost in rupees. **Rule (F14): what we actually pay, so `0` while on Gemini's free tier**; the tokens are always stored, so a paid-tier price can be applied later (price table with the spend ceilings, F27) | Yes |
 | `status` | `reserved` \| `final` \| `failed` | `reserved` = written before the call with the estimate; `final` = the call finished, real units filled in; `failed` = the call failed (kept with the units the provider still billed, usually 0) | Yes |
+| `outcome` | string? | How the call ended (null while `reserved`). Brainstorm: `ok`, `invalid_output` (answer failed our check), `unsuitable` (model said no safe video), `rejected` (safety block), `busy`, `timeout`, `error` (F14) | Yes (null while reserved) |
+| `latencyMs` | int? | From sending the request to its end (null while `reserved`) (F14) | Yes (null while reserved) |
 | `at` | date | When | Yes |
 
-**Rules:** written **before** the call (`status: reserved`) and finalized after (`final` or `failed`), so a crash can't hide spending: a `reserved` row still counts toward the ceilings. Kept 12 months (ARCHITECTURE §22; see Q10 for account deletion).
+**Rules:** written **before** the call (`status: reserved`) and finalized after (`final` or `failed`), so a crash can't hide spending: a `reserved` row still counts toward the ceilings. **One row per provider request**: each retry and each repair is its own row. **Never stores what the creator typed** (no subject, prompt or answer text). Kept 12 months (ARCHITECTURE §22; see Q10 for account deletion). **Created in F14** (C7 brainstorm calls; `packages/db/src/provider-usage.ts`).
 
 **Indexes:** `{ at: -1 }` (totals by time), `{ ownerId: 1, at: -1 }` (one user's usage), `{ provider: 1, at: -1 }` (per service).
 
