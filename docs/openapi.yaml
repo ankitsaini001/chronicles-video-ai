@@ -361,7 +361,7 @@ paths:
       summary: Delete account (asynchronous cascade)
       description: |
         B3. Re-authenticates with the password and `confirm: "DELETE"`. Marks the user `deleting`, revokes all
-        sessions, cancels scheduled posts, then the `delete-account` Inngest function deletes R2 data, the
+        sessions, cancels scheduled and publish_failed posts, then the `delete-account` Inngest function deletes R2 data, the
         Instagram token and all owner-scoped records. **Idempotency-Key required.** Rate limit 3/hour.
         409 INVALID_STATE while a post is publishing.
       tags: [Account]
@@ -725,7 +725,7 @@ paths:
     delete:
       operationId: archiveProject
       summary: Archive a project (soft delete)
-      description: C5. **If-Match required.** Blocked while a post is publishing (409 INVALID_STATE). Cancels the active job and a scheduled post. Nothing is deleted from R2.
+      description: C5. **If-Match required.** Blocked while a post is publishing or outcome_unknown (409 INVALID_STATE). Cancels the active job and a scheduled or publish_failed post (so it can never be published or retried). Nothing is deleted from R2.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -955,7 +955,7 @@ paths:
         D3. Inline narration edit → new `user_edit` plan version (re-validated, re-hashed); the approval is
         reset. Saved even if validation fails (validation.valid = false). **expectedStateVersion required.**
         Allowed in storyboard_ready, generate_failed, video_ready, scheduled, publish_failed with no active job. A scheduled
-        post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
+        or publish_failed post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
       tags: [Storyboard]
       security:
@@ -1004,7 +1004,7 @@ paths:
     post:
       operationId: changeVoice
       summary: Switch the narrator voice (new user_edit version)
-      description: D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled; the scheduled post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
+      description: D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled or publish_failed; that post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1061,7 +1061,7 @@ paths:
       description: |
         D5. Starts a `revise` job; on success a new `ai_revision` version becomes current and the project
         returns to storyboard_ready (approve again). Ambiguous requests end `rejected` with an assistantReply.
-        A scheduled post's approval is cancelled immediately when the revision is requested (approval_invalidated
+        A scheduled or publish_failed post's approval is cancelled immediately when the revision is requested (approval_invalidated
         + notification), not when the revise job succeeds (PRD §7).
         **Idempotency-Key and expectedStateVersion required.** Rate limit 20/hour; quota 20 plan+revision
         requests per project (429, resetsAt null); 503 SPEND_CEILING.
@@ -1159,7 +1159,7 @@ paths:
     post:
       operationId: restorePlanVersion
       summary: Undo / restore an earlier plan version
-      description: D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. **expectedStateVersion required.** 409 INVALID_STATE when already current.
+      description: D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1566,6 +1566,7 @@ paths:
         F4. Saves a new caption-override set and starts a `caption` job (compile + render + validate).
         renderId must be the current render. **Idempotency-Key and expectedStateVersion required.**
         Does NOT count toward 3 videos/day and never returns QUOTA_EXCEEDED (decision #24a: only generate jobs count).
+        A scheduled or publish_failed post's approval is cancelled immediately (approval_invalidated + notification).
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING. 503 SPEND_CEILING. Rate limit 10/hour (429 RATE_LIMITED).
       tags: [Video]
       security:
@@ -1648,7 +1649,7 @@ paths:
     delete:
       operationId: disconnectInstagram
       summary: Disconnect Instagram
-      description: G4. Removes the encrypted token, marks the connection revoked and invalidates scheduled posts. 409 INVALID_STATE while a post is publishing.
+      description: G4. Removes the encrypted token, marks the connection revoked and invalidates scheduled and publish_failed posts. 409 INVALID_STATE while a post is publishing.
       tags: [Instagram]
       security:
         - sessionCookie: []
@@ -1722,7 +1723,8 @@ paths:
         requires a BUSINESS or MEDIA_CREATOR account, rejects an Instagram account that already has an active
         connection owned by a different ByteReel user (INSTAGRAM_ACCOUNT_IN_USE, "This Instagram account is already
         connected to another ByteReel account."; unique partial index on igUserId where status = active), then
-        encrypts and stores the token. Always answers with a 302 back to the returnTo page: `?instagram=connected`
+        encrypts and stores the token. Connecting a different account invalidates scheduled and publish_failed posts
+        (one transaction with the connection upsert). Always answers with a 302 back to the returnTo page: `?instagram=connected`
         or one error format `?instagram_error=<CODE>[&reason=<reason>]`:
         `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` / `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` /
         `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`.
@@ -2026,7 +2028,7 @@ paths:
     post:
       operationId: retryPost
       summary: Retry a failed publish
-      description: H6. Only publish_failed. Re-checks the publish approval (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED.
+      description: H6. Only publish_failed. Re-checks the publish approval, including project not archived, user active, and the project's current render and current/approved plan still the approved ones (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED.
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -2268,7 +2270,7 @@ paths:
     patch:
       operationId: adminUpdateUserStatus
       summary: Suspend or reactivate a user
-      description: I6. Suspending deletes all sessions, cancels active jobs and invalidates scheduled posts; reason required. Not allowed on yourself or a deleting user (409 INVALID_STATE).
+      description: I6. Suspending deletes all sessions, cancels active jobs and invalidates scheduled and publish_failed posts; reason required. Not allowed on yourself or a deleting user (409 INVALID_STATE).
       tags: [Admin]
       security:
         - adminSession: []
@@ -2420,7 +2422,7 @@ paths:
     post:
       operationId: adminRetryJob
       summary: Retry any user's job
-      description: I9. Same rules as the creator retry (approval re-checked), also for failed publish jobs. **Idempotency-Key required.** 409 INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED, APPROVAL_STALE.
+      description: I9. Same rules as the creator retry (approval re-checked), also for failed publish jobs (same full re-check as the post retry, including project not archived and user active). **Idempotency-Key required.** 409 INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED, APPROVAL_STALE.
       tags: [Admin]
       security:
         - adminSession: []
@@ -2620,7 +2622,8 @@ paths:
       summary: Meta deauthorize callback
       description: |
         J1. Called by Meta with a form-encoded `signed_request` (HMAC-SHA256 with the app secret, verified in
-        constant time). Marks matching connections revoked, deletes the token, invalidates scheduled posts.
+        constant time). Marks matching connections revoked, deletes the token, invalidates scheduled and publish_failed
+        posts (one transaction).
         Exempt from the Origin check. Rate limit 60/min per IP.
       tags: [Meta]
       security: []

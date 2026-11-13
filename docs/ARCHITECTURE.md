@@ -607,7 +607,7 @@ Meta → /api/v1/instagram/callback?code&state
 *(Exact endpoints and versions are verified against Meta's current docs during implementation.)*
 
 ### 17.3 Publishing flow (`publish-post`)
-1. **Approval re-check** (§18), then the connection is `active` and the token isn't expired.
+1. **Approval re-check** (§18): the post is still `scheduled` (or the expected state), the project is not archived, the owner is `active`, the project's current render and current/approved plan are still the approved ones, and the connection is the approved one, `active`, with an unexpired token and the same `igUserId`.
 2. **Limit check:** `GET /{ig-user-id}/content_publishing_limit`. If exhausted → `PUBLISH_LIMIT_REACHED`, post delayed with a notice (never dropped).
 3. **Create container:** `POST /{ig-user-id}/media` with `media_type=REELS`, `video_url=<presigned R2 URL>`, `caption`, `share_to_feed=true` → `igContainerId` (saved **before** moving on).
 4. **Poll:** `GET /{container-id}?fields=status_code` every 15 s (via `step.sleep`) until `FINISHED` (max ~10 min). `ERROR`/`EXPIRED` → `publish_failed` with a reason.
@@ -621,7 +621,7 @@ If `media_publish` times out or the network fails, the outcome is **unknown**: w
 | Race | Handling |
 |---|---|
 | Video re-rendered or caption changed after scheduling | The approval snapshot no longer matches → `approval_invalidated`; the creator is notified to re-approve; the job won't publish |
-| Revision, narration edit, voice switch, undo or caption fix requested while a post is scheduled | The request itself moves the post to `approval_invalidated` in the same transaction (before any job runs) and notifies the creator; the post never waits for the job's result |
+| Revision, narration edit, voice switch, undo or caption fix requested while a post is `scheduled` or `publish_failed` | The request itself moves the post to `approval_invalidated` in the same transaction (before any job runs) and notifies the creator; the post never waits for the job's result |
 | Instagram disconnected/reconnected to another account | `igUserId` mismatch → invalidated |
 | User cancels while the job sleeps | `cancelOn` + state check → no publish |
 | Double-click "Publish now" | The `Idempotency-Key` replays the first answer; a separate second approval is blocked by the one-live-post index; the unique `publishKey` (per approval) means one approval can publish at most once |
@@ -638,11 +638,11 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Approval | Bound to | Created by | Checked at | Invalidated by |
 |---|---|---|---|---|
 | **Storyboard** | `planVersionId` + `planHash` | `approveStoryboard` (the creator only) | start of `generate-video` | Any new plan version (edit, revision, undo) |
-| **Publish** | `renderId` + `mp4Sha256` + `connectionId` + `igUserId` + `captionHash` | `publishNow` / `schedulePost` (the creator only) | **immediately before** container creation **and** before `media_publish` | Re-render, caption change, disconnect/reconnect, account change, and **any change requested on the project** (revision, narration edit, voice switch, undo, caption fix): cancelled immediately when the change is requested, not when its job finishes (PRD §7) |
+| **Publish** | `renderId` + `mp4Sha256` + `connectionId` + `igUserId` + `captionHash` | `publishNow` / `schedulePost` (the creator only) | **immediately before** container creation **and** before `media_publish`, and on every publish retry (H6, admin I9). The re-check also requires: project not archived, owner `status = active`, and the project's current render and current/approved plan still the approved ones | Re-render, caption change, disconnect/reconnect, account change, suspension, archive, and **any change requested on the project** (revision, narration edit, voice switch, undo, caption fix): cancelled immediately when the change is requested, not when its job finishes (PRD §7). A `scheduled` **or `publish_failed`** post becomes `approval_invalidated` (archive and account deletion: `cancelled`) |
 
 **Implementation guarantees**
 - Approvals are separate immutable documents/snapshots; the model and background jobs can never create them.
-- Publish state transitions use **conditional updates** (`updateOne({ _id, state: 'scheduled', 'approval.renderId': X }, …)`), so a concurrent edit can't slip through.
+- Publish state transitions use **conditional updates** (`updateOne({ _id, state: 'scheduled' }, …)`), so a concurrent edit can't slip through: every change moves the post out of `scheduled`/`publish_failed` in the same transaction, so the `state` filter is the real guard (the approval snapshot itself never changes).
 - The UI shows exactly what will be published (video thumbnail, duration, caption, destination `@username`) next to the approve button.
 
 ---
