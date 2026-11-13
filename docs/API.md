@@ -470,7 +470,7 @@ Response shape: `{ "items": [ … ], "nextCursor": "eyJ1IjoiMjAyNi0xMS0xMlQwOToz
 | Replay | Same key + same fingerprint after completion → the **original status code and body** are returned again, with header `Idempotent-Replayed: true`. No second job, no second post |
 | Concurrent duplicate | While the first request is still running → `409 IDEMPOTENCY_IN_PROGRESS` (retry after ~1 s) |
 | Failures | Responses with status ≥ 500 are **not** stored (the client may retry with the same key). 4xx responses are stored and replayed |
-| Second layer | Domain keys make duplicates impossible even without the header: `plan:{projectId}:{inputHash}`, `gen:{planVersionId}`, `posts.publishKey`, unique `storyboardApprovals.planVersionId` (ARCHITECTURE §20.1) |
+| Second layer | Domain keys make duplicates impossible even without the header: `plan:{projectId}:{inputHash}`, `gen:{planVersionId}`, `posts.publishKey` (`pub:{projectId}:{renderId}:{connectionId}:{approvalId}`), unique `storyboardApprovals.planVersionId` (ARCHITECTURE §20.1) |
 
 ```http
 HTTP/1.1 202 Accepted
@@ -595,7 +595,7 @@ Idempotent-Replayed: true
 | Approval | Client sends | Server checks (all in one transaction) | Stored as | Invalidated by |
 |---|---|---|---|---|
 | **#1 Storyboard** (D8) | `planVersionId`, `planHash` (both from the plan version the user is looking at), `expectedStateVersion` | `planVersionId == project.currentPlanVersionId` · `planHash == planVersions.planHash` (canonical hash, `packages/pipeline/src/planning/plan-hash.ts`) · `validation.valid == true` · state `storyboard_ready`/`generate_failed` · no active job · quota/spend | `storyboardApprovals { planVersionId, planHash, approvedBy, approvedAt }` (immutable, unique per version) | Any new plan version (narration edit, voice change, revision, restore) → the new version has no approval |
-| **#2 Publish** (H2) | `renderId`, `mp4Sha256`, `connectionId`, `caption`, `mode`, `scheduledAt?`, `expectedStateVersion` | `renderId == project.currentRenderId` and render `ready` · `mp4Sha256 == renders.mp4Sha256` · connection is the user's, `active`, token not expired · server computes `captionHash = sha256(NFC(caption))` · copies `igUserId` from the connection | `posts.approval { renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` | Any change the creator **requests** on the project: revision (storyboard or video stage, D5), narration edit (D3), voice switch (D4), restore/undo (D7), caption fix (F4); also a caption change, disconnect/reconnect/other account. The approval is cancelled **at the moment the change is requested**, in the same transaction, never later when the change's job finishes (PRD §7 hard rule). A `scheduled` post becomes `approval_invalidated` ("needs approval") and the creator gets an `approval_invalidated` notification |
+| **#2 Publish** (H2) | `renderId`, `mp4Sha256`, `connectionId`, `caption`, `mode`, `scheduledAt?`, `expectedStateVersion` | `renderId == project.currentRenderId` and render `ready` · `mp4Sha256 == renders.mp4Sha256` · connection is the user's, `active`, token not expired · server computes `captionHash = sha256(NFC(caption))` · copies `igUserId` from the connection | `posts.approval { id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` (`id` = a new approval id for every H2 call) | Any change the creator **requests** on the project: revision (storyboard or video stage, D5), narration edit (D3), voice switch (D4), restore/undo (D7), caption fix (F4); also a caption change, disconnect/reconnect/other account. The approval is cancelled **at the moment the change is requested**, in the same transaction, never later when the change's job finishes (PRD §7 hard rule). A `scheduled` post becomes `approval_invalidated` ("needs approval") and the creator gets an `approval_invalidated` notification |
 
 - Approvals are created **only** by the signed-in creator through these two endpoints. Jobs, admins and the model can never create them (ARCHITECTURE §18).
 - The publish job re-checks the approval **immediately before container creation and before `media_publish`**, with conditional updates (`state: 'publishing', 'approval.renderId': X`).
@@ -747,7 +747,7 @@ InstagramConnection = { id; igUserId: string; username: string; accountType: "BU
 
 PostSummary = { id; state: PostState; mode: PostMode; scheduledAt: string | null; permalink: string | null }
 Post = PostSummary & { projectId; renderId; connectionId; caption: string; jobId: string | null;
-       approval: { renderId; mp4Sha256; connectionId; igUserId; captionHash; approvedBy; approvedAt };
+       approval: { id /*approvalId, new for every H2 approval*/; renderId; mp4Sha256; connectionId; igUserId; captionHash; approvedBy; approvedAt };
        destination: { username: string; profilePictureUrl: string | null };
        igMediaId: string | null; attempts: number; nextAttemptAt: string | null;
        lastError: { code; message; at } | null; publishedAt: string | null; createdAt; updatedAt }
@@ -1597,7 +1597,7 @@ Purpose: the creator approves the **exact video + destination + caption** and pu
 | `expectedStateVersion` | int | ✓ | |
 
 Allowed states: `video_ready`, `publish_failed`; or `scheduled` with an `approval_invalidated` post (re-approval). One live post per project (partial unique index on `scheduled`/`publishing`/`outcome_unknown`); a project that is already `published` → `409 INVALID_STATE` (one video per project, V1).
-Effect (transaction): `posts` insert with `approval` snapshot and `publishKey = pub:{projectId}:{renderId}:{connectionId}:{scheduledAt|now}` (unique), `jobs` (`publish`), project → `publishing` (now) or `scheduled`; audit `post.approved`; Inngest `post.publish.requested` (with `ts = scheduledAt` when scheduled).
+Effect (transaction): `posts` insert with `approval` snapshot (with a new `approval.id`) and `publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (unique). Because the key contains the approval id, **every new approval gets its own key**: re-approving after a failure, after an `approval_invalidated` post or after suspend/reactivate makes a new post, while everything that belongs to the **same** approval (a double-click replayed by the `Idempotency-Key`, a re-delivered Inngest event, H6/I9 retries of that post) can never publish twice. A second, separate click that creates another approval is stopped by the one-live-post index (`409 INVALID_STATE`); `jobs` (`publish`), project → `publishing` (now) or `scheduled`; audit `post.approved`; Inngest `post.publish.requested` (with `ts = scheduledAt` when scheduled).
 Success `202` → `{ post: Post, job: Job, project: Project }`.
 Errors: `400 INVALID_INPUT` (time window, caption length, hashtags) · `404` · `409 STALE_VERSION` · `409 APPROVAL_STALE` (`details.reason`: `render_not_current`, `mp4_hash_mismatch`, `connection_changed`) · `409 INSTAGRAM_NOT_CONNECTED` · `409 INSTAGRAM_TOKEN_EXPIRED` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING`.
 ```http
@@ -1623,7 +1623,7 @@ Idempotency-Key: c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c
     "projectId": "67330d5e9f1e4b2a7c0d2a10", "renderId": "67330fa09f1e4b2a7c0d6f02", "connectionId": "6733101a9f1e4b2a7c0d7a01",
     "caption": "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics",
     "jobId": "673310209f1e4b2a7c0d3c05",
-    "approval": { "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
+    "approval": { "id": "673310209f1e4b2a7c0d8e01", "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
     "destination": { "username": "physics.with.ananya", "profilePictureUrl": "https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg" },
     "igMediaId": null, "attempts": 0, "nextAttemptAt": null, "lastError": null, "publishedAt": null,
     "createdAt": "2026-11-12T06:20:00.000Z", "updatedAt": "2026-11-12T06:20:00.000Z"
@@ -1659,7 +1659,7 @@ Purpose: publish progress + success link. Poll every 2 s while `state` is `publi
   "projectId": "67330d5e9f1e4b2a7c0d2a10", "renderId": "67330fa09f1e4b2a7c0d6f02", "connectionId": "6733101a9f1e4b2a7c0d7a01",
   "caption": "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics",
   "jobId": "673310209f1e4b2a7c0d3c05",
-  "approval": { "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
+  "approval": { "id": "673310209f1e4b2a7c0d8e01", "renderId": "67330fa09f1e4b2a7c0d6f02", "mp4Sha256": "sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f", "connectionId": "6733101a9f1e4b2a7c0d7a01", "igUserId": "17841400000000001", "captionHash": "sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c", "approvedBy": "67330c1a9f1e4b2a7c0d1e01", "approvedAt": "2026-11-12T06:20:00.000Z" },
   "destination": { "username": "physics.with.ananya", "profilePictureUrl": "https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg" },
   "igMediaId": "17900000000000001", "attempts": 1, "nextAttemptAt": null, "lastError": null, "publishedAt": "2026-11-13T13:31:42.000Z",
   "createdAt": "2026-11-12T06:20:00.000Z", "updatedAt": "2026-11-13T13:31:43.000Z"

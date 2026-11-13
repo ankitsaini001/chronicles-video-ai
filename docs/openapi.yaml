@@ -1770,6 +1770,8 @@ paths:
         **Idempotency-Key and expectedStateVersion required.** Rate limit 10/hour.
         409: STALE_VERSION, APPROVAL_STALE (render_not_current, mp4_hash_mismatch, connection_changed),
         INSTAGRAM_NOT_CONNECTED, INSTAGRAM_TOKEN_EXPIRED, INVALID_STATE, JOB_ALREADY_RUNNING.
+        Each approval gets a new approval.id; publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}
+        (unique), so a re-approval makes a new post while the same approval can never publish twice.
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -1799,7 +1801,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PostResult'
               example:
-                post: { id: 673310209f1e4b2a7c0d8b01, state: scheduled, mode: scheduled, scheduledAt: '2026-11-13T13:30:00.000Z', permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics", jobId: 673310209f1e4b2a7c0d3c05, approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }, igMediaId: null, attempts: 0, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z' }
+                post: { id: 673310209f1e4b2a7c0d8b01, state: scheduled, mode: scheduled, scheduledAt: '2026-11-13T13:30:00.000Z', permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics", jobId: 673310209f1e4b2a7c0d3c05, approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }, igMediaId: null, attempts: 0, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z' }
                 job: { id: 673310209f1e4b2a7c0d3c05, projectId: 67330d5e9f1e4b2a7c0d2a10, type: publish, state: queued, attempt: 1, stages: [ { name: approve, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: create_container, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: poll, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: publish, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null } ], progress: { stage: approve, percent: 0, message: 'Scheduled for 13 Nov, 7:00 pm' }, error: null, needsInput: null, result: { postId: 673310209f1e4b2a7c0d8b01 }, cancelRequestedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: null }
                 project: { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work, language: en, voiceGender: female, state: scheduled, currentStep: publish, thumbnailUrl: null, latestPost: { id: 673310209f1e4b2a7c0d8b01, state: scheduled, mode: scheduled, scheduledAt: '2026-11-13T13:30:00.000Z', permalink: null }, activeJobType: null, input: { type: topic, text: How UPI payments work — from scanning the QR code to money reaching the shop, brainstormChoice: null }, stateVersion: 10, currentPlanVersionId: 67330e019f1e4b2a7c0d2b02, approvedPlanVersionId: 67330e019f1e4b2a7c0d2b02, currentRenderId: 67330fa09f1e4b2a7c0d6f02, activeJobId: null, activeJob: null, lastError: null, allowedActions: [rename, download, cancel_post, request_revision, edit_captions], archivedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T06:20:00.000Z' }
         '400':
@@ -1972,7 +1974,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PostRetryResult'
               example:
-                post: { id: 673310209f1e4b2a7c0d8b01, state: publishing, mode: now, scheduledAt: null, permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Here's the journey of a UPI payment 👇 #UPI", jobId: 673310209f1e4b2a7c0d3c05, approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: null }, igMediaId: null, attempts: 2, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z' }
+                post: { id: 673310209f1e4b2a7c0d8b01, state: publishing, mode: now, scheduledAt: null, permalink: null, projectId: 67330d5e9f1e4b2a7c0d2a10, renderId: 67330fa09f1e4b2a7c0d6f02, connectionId: 6733101a9f1e4b2a7c0d7a01, caption: "Here's the journey of a UPI payment 👇 #UPI", jobId: 673310209f1e4b2a7c0d3c05, approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }, destination: { username: physics.with.ananya, profilePictureUrl: null }, igMediaId: null, attempts: 2, nextAttemptAt: null, lastError: null, publishedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z' }
                 job: { id: 673310209f1e4b2a7c0d3c05, projectId: 67330d5e9f1e4b2a7c0d2a10, type: publish, state: queued, attempt: 2, stages: [ { name: approve, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: create_container, status: skipped, startedAt: null, endedAt: null, attempts: 1, error: null }, { name: poll, status: pending, startedAt: null, endedAt: null, attempts: 1, error: null }, { name: publish, status: pending, startedAt: null, endedAt: null, attempts: 1, error: null } ], progress: { stage: approve, percent: 0, message: Publishing again… }, error: null, needsInput: null, result: { postId: 673310209f1e4b2a7c0d8b01 }, cancelRequestedAt: null, createdAt: '2026-11-12T06:20:00.000Z', updatedAt: '2026-11-12T06:40:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: 2000 }
         '401':
           $ref: '#/components/responses/Unauthenticated'
@@ -3649,8 +3651,11 @@ components:
           $ref: '#/components/schemas/Timestamp'
     PostApproval:
       type: object
-      required: [renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt]
+      description: Snapshot of publish approval 2. `id` is a new approval id for every approval; the post's unique publishKey is pub:{projectId}:{renderId}:{connectionId}:{approvalId}.
+      required: [id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt]
       properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
         renderId:
           $ref: '#/components/schemas/ObjectId'
         mp4Sha256:
@@ -5129,7 +5134,7 @@ components:
         connectionId: 6733101a9f1e4b2a7c0d7a01
         caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics"
         jobId: 673310209f1e4b2a7c0d3c05
-        approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
+        approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
         destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }
         igMediaId: null
         attempts: 0
@@ -5151,7 +5156,7 @@ components:
         connectionId: 6733101a9f1e4b2a7c0d7a01
         caption: "Ever wondered how ₹20 reaches the chaiwala in 2 seconds? Here's the journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics"
         jobId: 673310209f1e4b2a7c0d3c05
-        approval: { renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
+        approval: { id: 673310209f1e4b2a7c0d8e01, renderId: 67330fa09f1e4b2a7c0d6f02, mp4Sha256: 'sha256:1f2e3d4c5b6a79880a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f', connectionId: 6733101a9f1e4b2a7c0d7a01, igUserId: '17841400000000001', captionHash: 'sha256:7b3c9d1e5f2a4b6c8d0e1f3a5b7c9d2e4f6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c', approvedBy: 67330c1a9f1e4b2a7c0d1e01, approvedAt: '2026-11-12T06:20:00.000Z' }
         destination: { username: physics.with.ananya, profilePictureUrl: 'https://scontent.cdninstagram.com/v/t51.2885-19/profile_example.jpg' }
         igMediaId: '17900000000000001'
         attempts: 1

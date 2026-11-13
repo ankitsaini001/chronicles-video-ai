@@ -373,11 +373,11 @@ Sign-up is rejected unless the email is here (§10.2).
 | `caption` | Instagram caption + hashtags (≤ 2,200 chars) |
 | `mode` | `now` \| `scheduled` |
 | `scheduledAt?` | UTC; displayed in the user's timezone |
-| `approval` | `{ renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` |
+| `approval` | `{ id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` (`id` = approval id, new for every approval) |
 | `state` | §7.4 |
 | `igContainerId?`, `igMediaId?`, `permalink?` | |
 | `attempts`, `lastError?` | |
-| `publishKey` | unique idempotency key for the publish operation |
+| `publishKey` | unique idempotency key for the publish operation: `pub:{projectId}:{renderId}:{connectionId}:{approvalId}` |
 **Indexes:** unique `publishKey`; `{ ownerId: 1, createdAt: -1 }`; `{ state: 1, scheduledAt: 1 }`; partial unique on `(projectId)` where `state ∈ {scheduled, publishing}` (one live post per project).
 
 ### 8.13 `publishAttempts`
@@ -661,7 +661,7 @@ If `media_publish` times out or the network fails, the outcome is **unknown**: w
 | Revision, narration edit, voice switch, undo or caption fix requested while a post is scheduled | The request itself moves the post to `approval_invalidated` in the same transaction (before any job runs) and notifies the creator; the post never waits for the job's result |
 | Instagram disconnected/reconnected to another account | `igUserId` mismatch → invalidated |
 | User cancels while the job sleeps | `cancelOn` + state check → no publish |
-| Double-click "Publish now" | Unique `publishKey` → one post |
+| Double-click "Publish now" | The `Idempotency-Key` replays the first answer; a separate second approval is blocked by the one-live-post index; the unique `publishKey` (per approval) means one approval can publish at most once |
 | Token expires before the slot | Refresh cron; if it fails → post `publish_failed` (reason: reconnect) + banner |
 | Two scheduled posts for the same project | Partial unique index (one live post per project) |
 
@@ -702,7 +702,7 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Generate | `gen:{planVersionId}` |
 | Speech per scene | `speechArtifacts (ownerId, cacheKey)` unique |
 | Render | `renderInputHash` (reuse) + `render:{jobId}` |
-| Publish | `posts.publishKey = pub:{projectId}:{renderId}:{connectionId}:{scheduledAt or 'now'}` |
+| Publish | `posts.publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (a re-approval after a failure or suspend/reactivate gets a new key; the same approval never publishes twice) |
 | Inngest events | event `id` = the idempotency key (Inngest dedupes) |
 
 ### 20.2 Retry matrix
