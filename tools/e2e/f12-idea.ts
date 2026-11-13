@@ -111,23 +111,26 @@ async function main(): Promise<void> {
   check("heading labels the box: 'What do you want to explain?'", /<label for="idea-text">What do you want to explain\?<\/label>/.test(html));
   check("textarea + live counter '0 / 5,000' (only a 20,000 safety stop; the limit is on the cleaned text)", /<textarea[^>]*maxLength="20000"/i.test(html) && html.includes("0 / 5,000"));
   check("helper text", html.includes("Type a topic, or paste your notes (up to 5,000 characters)."));
-  check("Language and Voice are labelled radiogroups", (html.match(/role="radiogroup"/g) ?? []).length === 2 && (html.match(/aria-labelledby="/g) ?? []).length >= 2 && html.includes(">Language</p>") && html.includes(">Voice</p>"));
+  check("Language is a labelled radiogroup; Voice is a fieldset with a legend (F13)", (html.match(/role="radiogroup"/g) ?? []).length === 1 && html.includes(">Language</p>") && /<fieldset[^>]*>\s*<legend[^>]*>Voice<\/legend>/.test(html));
   const radios = html.match(/<button[^>]*role="radio"[^>]*>.*?<\/button>/g) ?? [];
-  check("5 radio chips, none uses aria-pressed", radios.length === 5 && radios.every((x) => !x.includes("aria-pressed")), `${radios.length}`);
+  check("3 language radio chips, none uses aria-pressed", radios.length === 3 && radios.every((x) => !x.includes("aria-pressed")), `${radios.length}`);
   const checked = radios.filter((x) => x.includes('aria-checked="true"'));
-  check("defaults for a new user: English + Female voice checked", checked.length === 2 && checked[0]!.includes("English") && checked[1]!.includes("Female voice"));
+  const voices = html.match(/<input[^>]*type="radio"[^>]*name="voiceGender"[^>]*>/g) ?? [];
+  const checkedVoice = voices.filter((x) => /\schecked=""/.test(x));
+  check("defaults for a new user: English + Female voice checked", checked.length === 1 && checked[0]!.includes("English") && voices.length === 2 && checkedVoice.length === 1 && checkedVoice[0]!.includes('value="female"'));
   check("Hindi label wrapped in lang=\"hi\"", html.includes('<span lang="hi">हिंदी</span> Hindi'));
-  check("only the checked chip in each group is in the Tab order", radios.filter((x) => x.includes('tabindex="0"')).length === 2 && checked.every((x) => x.includes('tabindex="0"')));
+  check("only the checked language chip is in the Tab order", radios.filter((x) => x.includes('tabindex="0"')).length === 1 && checked.every((x) => x.includes('tabindex="0"')));
   check("one primary button: Create storyboard", (html.match(/Create storyboard/g) ?? []).length === 1 && !html.includes("Create your first reel"));
   check("stepper: Idea is the current step of 4", /aria-current="step"[^>]*>.*?1 .*?Idea/.test(html) && ["Storyboard", "Video", "Publish"].every((s) => html.includes(s)));
-  check("no Brainstorm (F14) and no voice preview ▶ (F13) yet", !html.includes("Brainstorm") && !html.includes("▶"));
+  check("no Brainstorm (F14) yet; a ▶ sample button per voice (F13)", !html.includes("Brainstorm") && html.includes('aria-label="Play female voice sample"') && html.includes('aria-label="Play male voice sample"'));
   check("projects today: 0 of 5", html.includes("Projects today: 0 of 5"));
   check("the F11 placeholder is gone", !html.includes("Step 1 Idea arrives in F12"));
 
   await db.collection("user").updateOne({ _id: b.id }, { $set: { defaultLanguage: "hi", defaultVoiceGender: "male" } });
   html = await htmlOf(await page("/projects/new", b.cookie));
   const bChecked = (html.match(/<button[^>]*role="radio"[^>]*>.*?<\/button>/g) ?? []).filter((x) => x.includes('aria-checked="true"'));
-  check("defaults come from the user (हिंदी Hindi + Male voice)", bChecked.length === 2 && bChecked[0]!.includes('lang="hi"') && bChecked[1]!.includes("Male voice"));
+  const bVoice = (html.match(/<input[^>]*type="radio"[^>]*name="voiceGender"[^>]*>/g) ?? []).filter((x) => /\schecked=""/.test(x));
+  check("defaults come from the user (हिंदी Hindi + Male voice, Hindi label)", bChecked.length === 1 && bChecked[0]!.includes('lang="hi"') && bVoice.length === 1 && bVoice[0]!.includes('value="male"') && html.includes('<span lang="hi">पुरुष आवाज़ (Male)</span>'));
   await db.collection("user").updateOne({ _id: b.id }, { $set: { defaultLanguage: "en", defaultVoiceGender: "female" } });
 
   // --- C2 pipeline checks.
