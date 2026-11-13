@@ -271,7 +271,7 @@ All patterns share **one polished default visual style**, using free, commercial
 | Font | Default style font | Font with full Devanagari support (e.g. Noto Sans Devanagari) | Default style font |
 
 Rules:
-- The language is chosen once per project (on the Idea step) and can be changed only by creating a new storyboard version.
+- The language is chosen once per project (on the Idea step). Changing a project's language is not in V1: to make the video in another language, the creator creates a new project. Only the voice (Male/Female) can be switched on an existing project (decision #25).
 - The **Indian accent comes mainly from the selected voice**, so voice and model are evaluated together for each language.
 - **Voice (Male/Female)** can be changed on the storyboard screen before generating. Changing it after a video exists regenerates the narration for all scenes and creates a new render version (which resets any publish approval).
 - If a configured voice becomes unavailable, the system falls back to the other configured voice of the same gender and language, or shows a clear error. It never silently switches gender.
@@ -515,6 +515,7 @@ Everything else follows the course plan, so our code stays in sync.
 | 22 | API style: REST under `/api/v1` (Next.js route handlers), documented in `docs/API.md` + `docs/openapi.yaml` (OpenAPI 3.1); Better Auth stays at `/api/auth/*` | 2026-11-12 |
 | 23 | UI: "Ember Gold" brand (`docs/BRAND.md`) and all 16 desktop screens in Google Stitch approved by the founder | 2026-11-12 |
 | 24 | Founder answers to API open questions: (a) caption fixes do **not** count toward the 3 videos/day quota; (b) if the AI can't build a valid storyboard after repair, the job fails with "Couldn't build a good storyboard, try rephrasing" + Try again (no key-text fallback scene); (c) if a voice is unavailable, show a clear error, never silently switch voices; (d) one Instagram account can be connected by only one ByteReel user (`igUserId` unique among active connections) | 2026-11-12 |
+| 25 | Changing a project's language is not in V1; create a new project. Voice (female/male) can still be switched | 2026-11-13 |
 
 ## 22. Open Items (resolved during build, do not block it)
 - Domain + trademark check for **ByteReel** (.com / .ai / .in / get… / try… variants); backups: ByteMotion, ByteKahaani

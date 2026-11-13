@@ -1004,7 +1004,7 @@ paths:
     post:
       operationId: changeVoice
       summary: Switch the narrator voice (new user_edit version)
-      description: D4. Male ↔ Female; only voicePreset changes. **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled; the scheduled post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
+      description: D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled; the scheduled post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
       tags: [Storyboard]
       security:
         - sessionCookie: []
