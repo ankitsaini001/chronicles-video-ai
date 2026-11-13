@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F05 |
 | **Design** | — |
@@ -39,7 +39,7 @@ A small dev-only check page/command that writes and reads one test record.
 - [x] App shows a clear error if the database is unreachable
 - [x] Missing `MONGODB_URI` shows a clear message (no crash dump)
 - [x] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
@@ -47,3 +47,4 @@ A small dev-only check page/command that writes and reads one test record.
 | | |
 | 2026-11-13 | Built in one go. New `packages/db` (`@bytereel/db`): settings check (`readDbConfig`, catches missing value, `<db_password>` left in, raw special characters in the password, a port on `+srv`), one shared client on `globalThis`, plain-language errors (auth, bad connection string, DNS/SRV lookup, unreachable/Network Access, TLS, index conflict), health check (one fixed record in `bytereel.healthchecks`), cleanup, ping, and the index list for F07/F08 with `ensureIndexes` (not applied yet: F07/F08 apply their own). `npm run db -- check | ping | cleanup | indexes`. Web: `next.config.ts` loads the root `.env` (`process.loadEnvFile`; `@next/env` caches and did nothing), `instrumentation.ts` prints a clear box when a setting is wrong while public pages keep working. Driver `mongodb@7.7.0`, one copy at the root (also listed by the web app for F08). Checks: ping Pune → Mumbai ~9 ms; 5 failure cases give clear messages and never show the password; a temporary web route using the driver built without warnings and answered ok (removed again); no connection string in `.next/static`; 240 tests pass (54 for the database), typecheck clean. Code review: 1 must-fix (badly formatted connection string crashed the command) and 5 should-fixes, all fixed. Test record written to Atlas, waiting for the founder to see it. |
 | 2026-11-13 | Founder saw the test record in Atlas (bytereel-dev → bytereel → healthchecks, written 12:31:33 IST). Then `npm run db -- cleanup` deleted it; the empty `bytereel` database disappears until F07 writes real data (normal for MongoDB). The test-record code (`check`/`cleanup`) was removed; `npm run db -- ping` remains (writes nothing). 235 tests pass, typecheck clean. Waiting for the founder's dev-server restart check and OK. |
+| 2026-11-13 | Founder moved on to F07 ("go with F07") → ✅. Dev-server restart check (no settings box) still to be confirmed by the founder on their next restart. |
