@@ -55,7 +55,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | 🔨 In progress |
+| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | 🧪 Testing |
 | F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ⬜ Not started |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ⬜ Not started |
 | F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ⬜ Not started |
