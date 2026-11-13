@@ -87,8 +87,8 @@ ByteReel is a web application where an educational creator turns a topic or note
                          ┌──────────────────────────────────────────────────────────────┐
   Creator's browser      │                    Vercel (Next.js app)                      │
  ┌──────────────────┐    │  ┌───────────────────────┐   ┌────────────────────────────┐  │
- │ Next.js React UI │◄──►│  │ App Router pages (RSC)│   │ Route handlers / Server    │  │
- │ (4-step flow)    │    │  │ + Server Actions      │   │ Actions (auth'd API)       │  │
+ │ Next.js React UI │◄──►│  │ App Router pages (RSC)│   │ REST API route handlers    │  │
+ │ (4-step flow)    │    │  │                       │   │ /api/v1 (auth'd)           │  │
  └──────────────────┘    │  └───────────┬───────────┘   └─────────────┬──────────────┘  │
           │              │              │      Domain services (packages/core)          │
           │ signed URLs  │              └──────────────┬────────────────┘               │
@@ -139,7 +139,7 @@ ByteReel is a web application where an educational creator turns a topic or note
 | Layer | Choice | Notes |
 |---|---|---|
 | Language | TypeScript (strict), Node.js 24 LTS | Same as the prototype |
-| Web framework | **Next.js** (App Router, React Server Components, Server Actions) | Pinned at setup |
+| Web framework | **Next.js** (App Router, React Server Components, REST route handlers under `/api/v1`) | Pinned at setup |
 | UI | **Tailwind CSS + shadcn/ui** | Simple, accessible components; mobile-first |
 | Client data | **TanStack Query** | Polling and status refresh |
 | Validation | **Zod** | Shared with the pipeline contracts |
@@ -481,47 +481,9 @@ The planner model **cannot** set ownership, approve plans, choose storage paths 
 
 ## 12. API Design
 
-Mutations are **Server Actions** (typed, CSRF-protected by Next.js); reads are RSC data fetching plus a few JSON **route handlers** for polling, OAuth callbacks and webhooks. Every endpoint: auth → Zod input validation → owner check → service call → typed result `{ ok: true, data } | { ok: false, error: { code, message } }`.
+**Superseded by decision #22 (REST API).** The API is a versioned REST API under `/api/v1`, plus Better Auth at `/api/auth/*` (locked down to the six documented endpoints). Every endpoint, with its auth, owner check, input, errors and examples, is specified in **[docs/API.md](API.md)** and **[docs/openapi.yaml](openapi.yaml)**. Those two files are the source of truth. This section used to list Server Actions and `/api/instagram/*` routes; that design is no longer used.
 
-### 12.0 Authentication
-Better Auth mounts its handler at `/api/auth/*` (sign-up, sign-in, sign-out, session, change password, reset password with a token). The UI calls it through the Better Auth client. Our extra rules: the allow-list hook on sign-up, rate limits and the lockout (§10.1), and the admin-only action `createPasswordResetLink({ userId })` (§24.3).
-
-### 12.1 Projects and planning
-| Operation | Type | Input | Effect |
-|---|---|---|---|
-| `brainstormIdeas` | action | `{ subject, language }` | Synchronous Gemini call (short), returns 5–8 ideas; rate-limited |
-| `createProject` | action | `{ inputType, text, language, voiceGender }` | Creates a project (`draft→planning`), a job, an Inngest `plan.requested` event |
-| `getProject` | RSC / `GET /api/projects/[id]` | — | Project + current plan version + job progress |
-| `listProjects` | RSC | `{ tab, cursor }` | Paginated library |
-| `editNarration` | action | `{ projectId, planVersionId, sceneId, narrationId, text }` | New `user_edit` plan version (validated); approval required again |
-| `requestRevision` | action | `{ projectId, stage, scope, sceneId?, message }` | Revision record + `revision.requested` event |
-| `undoToVersion` | action | `{ projectId, planVersionId }` | Sets `currentPlanVersionId` to an earlier version (no data deleted) |
-| `retryJob` | action | `{ projectId, jobId }` | Re-emits the event for a failed job (resume) |
-| `cancelJob` | action | `{ projectId, jobId }` | Sets `cancelRequestedAt`; functions check it between steps |
-| `archiveProject` | action | `{ projectId }` | Soft delete (blocked while publishing) |
-
-### 12.2 Approval and generation
-| Operation | Type | Input | Effect |
-|---|---|---|---|
-| `approveStoryboard` | action | `{ projectId, planVersionId, planHash }` | Verifies the hash equals the stored version hash **and** it's the current version; writes `storyboardApprovals`; emits `video.generate.requested` with idempotency key `gen:{planVersionId}` |
-| `editCaption` | action | `{ projectId, renderId, sceneId, phraseIndex, text }` | Saves an override; emits `video.recaption.requested` (re-render, no speech) |
-| `getMediaUrl` | `GET /api/projects/[id]/media?kind=mp4\|thumb` | — | Ownership check → presigned URL redirect |
-
-### 12.3 Instagram and publishing
-| Operation | Type | Input | Effect |
-|---|---|---|---|
-| `startInstagramConnect` | `GET /api/instagram/connect` | — | Creates an OAuth `state` (signed, bound to the session), redirects to Meta |
-| OAuth callback | `GET /api/instagram/callback` | `code, state` | Verify state → exchange code → long-lived token → fetch profile → store encrypted |
-| `disconnectInstagram` | action | — | Deletes the token, marks the connection revoked, invalidates scheduled posts' approvals |
-| `generateCaption` | action | `{ projectId, renderId }` | Gemini caption + hashtags (short call) |
-| `publishNow` | action | `{ projectId, renderId, connectionId, caption, mp4Sha256 }` | Creates a post with an approval snapshot; emits `post.publish.requested` |
-| `schedulePost` | action | `{ …same, scheduledAt }` | Validates `scheduledAt ≥ now + 10 min` and within 75 days; creates a `scheduled` post; emits `post.publish.requested` with a `ts` |
-| `cancelScheduledPost` | action | `{ postId }` | `scheduled → cancelled` (conditional update) |
-| Meta deauthorize callback | `POST /api/instagram/deauthorize` | signed request | Marks the connection revoked |
-| Meta data-deletion callback | `POST /api/instagram/data-deletion` | signed request | Deletes Meta-derived data, returns a confirmation code + status URL (required by Meta) |
-
-### 12.4 Error codes (user-facing messages mapped in the UI)
-`UNAUTHENTICATED`, `NOT_FOUND` (also used for other owners' resources), `INVALID_INPUT`, `STALE_VERSION`, `APPROVAL_REQUIRED`, `APPROVAL_STALE`, `QUOTA_EXCEEDED`, `SPEND_CEILING`, `JOB_ALREADY_RUNNING`, `PROVIDER_BUSY`, `PROVIDER_REJECTED`, `NEEDS_INPUT`, `INSTAGRAM_NOT_CONNECTED`, `INSTAGRAM_TOKEN_EXPIRED`, `INSTAGRAM_ACCOUNT_INELIGIBLE`, `PUBLISH_LIMIT_REACHED`, `INTERNAL`.
+Every endpoint still follows the same order: auth → input validation (Zod) → owner check (another user's item answers 404, see §10.3) → service call → typed result.
 
 ---
 
@@ -627,14 +589,14 @@ User notes and topics are passed as **data** inside clearly delimited sections. 
 ### 17.1 Setup
 - **Meta developer app** with the **Instagram API with Instagram Login** product.
 - Permissions: `instagram_business_basic`, `instagram_business_content_publish`.
-- Redirect URI: `https://<domain>/api/instagram/callback`; deauthorize and data-deletion callback URLs configured.
+- Redirect URI: `https://<domain>/api/v1/instagram/callback`; deauthorize and data-deletion callback URLs configured.
 - **App Review** with a screencast of the connect + publish flow is needed before non-tester users can connect. Until then, testers are added in the app dashboard.
 
 ### 17.2 Connect flow
 ```
-User → /api/instagram/connect → (state = signed{sessionId, nonce, exp})
+User → /api/v1/instagram/connect → (state = signed{sessionId, nonce, exp})
      → www.instagram.com/oauth/authorize?client_id&redirect_uri&scope&response_type=code&state
-Meta → /api/instagram/callback?code&state
+Meta → /api/v1/instagram/callback?code&state
      → verify state → POST api.instagram.com/oauth/access_token (short-lived token, user_id)
      → GET graph.instagram.com/access_token?grant_type=ig_exchange_token (long-lived, ~60 days)
      → GET graph.instagram.com/me?fields=user_id,username,account_type,profile_picture_url
@@ -743,7 +705,7 @@ Cross-user data access, Instagram token theft, publishing without consent, provi
 |---|---|
 | AuthN | Better Auth email/password; scrypt-hashed passwords; httpOnly + Secure + SameSite=Lax cookies; login rate limits + temporary lockout; generic login errors; admin-issued one-time reset links (1 h) |
 | AuthZ | Owner-scoped repositories; `NOT_FOUND` for other owners' resources; tests per route |
-| CSRF | Server Actions (origin checks) + signed OAuth `state` |
+| CSRF | SameSite=Lax session cookie + `Origin` check on every mutating request (API.md §3.6) + signed OAuth `state` |
 | Input | Zod on every action and route; length limits (topic 300, notes 5,000, revision 500, caption 2,200) |
 | Output/XSS | React escaping; **no `dangerouslySetInnerHTML`** for model/user text; the review HTML is generated server-side with escaping (already in the prototype) |
 | Secrets | Vercel environment variables only; never sent to the client; redaction in logs (prototype masking reused) |
