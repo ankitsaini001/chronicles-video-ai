@@ -39,8 +39,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     <>
       <h1 className="mb-6 font-display text-3xl font-extrabold tracking-tight text-text sm:text-4xl">My videos</h1>
 
-      <nav aria-label="Filter videos" className="mb-10 -mx-4 overflow-x-auto border-b border-line px-4 sm:mx-0 sm:mb-12 sm:px-0">
-        <ul className="flex min-w-max items-center gap-1 sm:gap-2">
+      {/* No scroll box here: the four tabs fit even at 320px (tighter padding and text on phones). */}
+      <nav aria-label="Filter videos" className="mb-10 border-b border-line sm:mb-12">
+        <ul className="flex items-center justify-between sm:justify-start sm:gap-2">
           {DASHBOARD_TABS.map((t) => {
             const current = t.id === tab.id;
             return (
@@ -50,7 +51,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   aria-current={current ? "page" : undefined}
                   scroll={false}
                   className={cn(
-                    "-mb-px flex min-h-11 items-center border-b-2 px-3 text-[15px] transition-colors sm:px-4",
+                    "-mb-px flex min-h-11 items-center whitespace-nowrap border-b-2 px-2 text-sm transition-colors sm:px-4 sm:text-[15px]",
                     current ? "border-amber font-bold text-amber" : "border-transparent text-muted hover:text-text",
                   )}
                 >
