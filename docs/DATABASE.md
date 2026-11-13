@@ -719,8 +719,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 
 A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 ```js
-{ _id: ObjectId("…"), ownerId: ObjectId("67330c1a9f1e4b2a7c0d1e01"), schemaVersion: 1, provider: "gemini", operation: "brainstorm", model: "gemini-3.6-flash",
-  units: { promptTokens: 912, outputTokens: 540, characters: 0, renderSeconds: 0 }, estCostInr: 0, status: "final", outcome: "ok", latencyMs: 8400, at: ISODate("2026-11-13T10:00:00.000Z") }
+{ _id: ObjectId("…"), ownerId: ObjectId("67330c1a9f1e4b2a7c0d1e01"), schemaVersion: 1, provider: "gemini", operation: "brainstorm", model: "gemini-3.1-flash-lite",
+  units: { promptTokens: 559, outputTokens: 537, characters: 0, renderSeconds: 0 }, estCostInr: 0, status: "final", outcome: "ok", latencyMs: 3254, at: ISODate("2026-11-13T10:00:00.000Z") }
 ```
 
 | Field | Type | Meaning | Req |

@@ -516,6 +516,7 @@ Everything else follows the course plan, so our code stays in sync.
 | 23 | UI: "Ember Gold" brand (`docs/BRAND.md`) and all 16 desktop screens in Google Stitch approved by the founder | 2026-11-12 |
 | 24 | Founder answers to API open questions: (a) caption fixes do **not** count toward the 3 videos/day quota; (b) if the AI can't build a valid storyboard after repair, the job fails with "Couldn't build a good storyboard, try rephrasing" + Try again (no key-text fallback scene); (c) if a voice is unavailable, show a clear error, never silently switch voices; (d) one Instagram account can be connected by only one ByteReel user (`igUserId` unique among active connections) | 2026-11-12 |
 | 25 | Changing a project's language is not in V1; create a new project. Voice (female/male) can still be switched | 2026-11-13 |
+| 26 | "Brainstorm with AI" (C7, F14) uses its own model: `GEMINI_BRAINSTORM_MODEL` (optional, default `gemini-3.1-flash-lite`, a fixed id, never a `-latest` alias) with low thinking; the storyboard planner keeps `GEMINI_MODEL`. Reason: `gemini-3.6-flash` took 55–57 s on the free tier even with low thinking (over the 30 s limit); 3.1 Flash-Lite answered in 3–8 s with 5 good ideas. Exactly 5 ideas; 10/hour and 30/day per creator | 2026-11-13 |
 
 ## 22. Open Items (resolved during build, do not block it)
 - Domain + trademark check for **ByteReel** (.com / .ai / .in / get… / try… variants); backups: ByteMotion, ByteKahaani
