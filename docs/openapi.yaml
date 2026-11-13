@@ -67,6 +67,8 @@ paths:
       description: |
         A1. Creates an account and signs in. The email must be on the allow-list (`NOT_ALLOWLISTED` otherwise).
         Password 8–128 chars. Rate limit 5 / 15 min per IP. Origin check. Errors use Better Auth's `{ code, message }`.
+        Conscious private-beta choice: sign-up reveals whether an email is not invited (NOT_ALLOWLISTED) or
+        already registered (USER_ALREADY_EXISTS), for clear messages to invited people; protected by the rate limit.
       tags: [Auth]
       security: []
       requestBody:
