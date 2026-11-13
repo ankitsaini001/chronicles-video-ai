@@ -572,6 +572,10 @@ paths:
         C2. ① Create storyboard. Creates the project (state planning) and a `plan` job; answers 202.
         **Idempotency-Key required.** Rate limit 10/hour; quota 5 projects/day (429 QUOTA_EXCEEDED);
         503 SPEND_CEILING / MAINTENANCE.
+
+        **Until F15 (built in F12, no AI yet):** creates only the project, in state `draft` with
+        `planRequestCount` 0 and no job, and answers **201** `{ project, job: null }`. No 503 yet.
+        See API.md C2 "Until F15".
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -591,6 +595,21 @@ paths:
                 summary: Chosen brainstorm idea
                 value: { inputType: brainstorm, text: "Why the monsoon reaches Kerala first. Every June, Kerala gets wet before Delhi.", language: en, voiceGender: female, brainstormChoice: { subject: Indian monsoon, title: Why the monsoon reaches Kerala first, hook: 'Every June, Kerala gets wet before Delhi. The reason is a giant sea breeze.' } }
       responses:
+        '201':
+          description: Until F15 (F12) - project saved in state draft; no job (`job` is null).
+          headers:
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project, job]
+                properties:
+                  project:
+                    $ref: '#/components/schemas/Project'
+                  job:
+                    type: 'null'
         '202':
           description: Project created; plan job queued.
           headers:

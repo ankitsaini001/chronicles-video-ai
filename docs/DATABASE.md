@@ -437,7 +437,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `stateBeforeArchive` | enum? | The state it had before archiving (API C5) | No |
 
 **Rules**
-- Idea text length: topic 3–300, notes 20–5,000, brainstorm 3–300 characters. `brainstormChoice` only when `type = brainstorm`.
+- Idea text length: topic 3–300, notes 20–5,000, brainstorm 3–300 characters (after trimming and NFC). `brainstormChoice` only when `type = brainstorm`.
+- **F12 (until F15):** a new project starts in state `draft` with `planRequestCount: 0` and no job; F15 makes C2 start in `planning` with the `plan` job and `planRequestCount: 1` (API.md C2 "Until F15"). Code: `packages/db/src/projects.ts`.
 - At most **one active job** per project: `activeJobId` is set with a conditional update ("only if it is currently null").
 - Every change needs the caller's `stateVersion`; a mismatch changes nothing.
 
@@ -681,7 +682,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 
 **Rules (Q7)**
 - Increased inside the same transaction as the action (C2, D8; `voiceChars` when characters are reserved), with one atomic "add, create if missing" on `{ ownerId, kind, period }`, and only if the result stays within the limit.
-- **Counting starts in F12** (projects) and grows with each feature; **enforcement** (the friendly "limit reached" message) comes in **F27**.
+- **Counting starts in F12** (projects) and grows with each feature. The **projects** limit (5 per day) is also **enforced since F12** (C2 answers `429 QUOTA_EXCEEDED` and saves nothing), because the check costs nothing and protects the paid storyboard calls coming in F15. The other limits are enforced as their actions arrive (videos: F20/F27; voice characters: F23/F27).
+- Code: `packages/db/src/usage-counters.ts` (`addUsageWithinLimit` adds 1, and if that goes over the limit the caller throws so the transaction rolls the +1 back; two clicks at the same moment write the same counter, so MongoDB makes one of them wait and retry, and it sees the new count).
 - The **20 plan + revision requests per project** are not here: they are `projects.planRequestCount` (4.8), because they never reset.
 
 **Indexes:** unique `{ ownerId: 1, kind: 1, period: 1 }`; TTL on `expiresAt` (`expireAfterSeconds: 0`).
@@ -1282,7 +1284,7 @@ The checks (is this still the current version? is the job slot free? quota left?
 
 | # | Action | Endpoint · feature | Changes together | What would go wrong without it |
 |---|---|---|---|---|
-| 1 | Create project | C2 · F12/F15 | insert `projects` (`planning`, `planRequestCount: 1`) + insert `plan` job + set `activeJobId` + `usageCounters` projects +1 | A project stuck in "planning" with no job, or a used quota with no project |
+| 1 | Create project | C2 · F12/F15 | insert `projects` (`planning`, `planRequestCount: 1`) + insert `plan` job + set `activeJobId` + `usageCounters` projects +1. **F12 (until F15):** `usageCounters` projects +1 (within 5) + insert `projects` (`draft`, `planRequestCount: 0`, no job) + the answer saved on the `idempotencyKeys` record | A project stuck in "planning" with no job, or a used quota with no project |
 | 2 | Edit idea after a failed storyboard | C4 · F15 | `projects` idea text, title, `stateVersion` (one document: atomic anyway) | — |
 | 3 | Edit narration / switch voice | D3, D4 · F17, F19 | insert `planVersions` + project pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, state, `stateVersion`) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | A new storyboard while an old publish approval stays live |
 | 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + `planRequestCount` +1 (only if below the limit) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | Same as 3; or a revision with no job, or a counted change with no revision |
@@ -1431,7 +1433,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | **F09** Log in / out | More/fewer `session` documents as you log in and out; `rateLimits` counters that vanish after 15 min; `failedLoginCount` on your `user` |
 | **F10, F11** | Nothing new (F11 only reads) |
 | ✅ **End of A2** | `user`, `session`, `account`, `allowlist`, `rateLimits` (and the Better Auth indexes, including those for `verification`) |
-| F12 | `projects`, `idempotencyKeys`, `usageCounters` (counting starts; limits enforced in F27) |
+| F12 | `projects`, `idempotencyKeys`, `usageCounters` (projects counted **and** limited to 5/day; the other limits in F27). Projects are saved in state `draft` with no job until F15 |
 | F14 | `providerUsage` (brainstorm calls) |
 | F15 | `jobs`, `planVersions` |
 | F17, F19 | More `planVersions` (`user_edit`) |

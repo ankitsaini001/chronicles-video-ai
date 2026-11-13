@@ -477,7 +477,8 @@ Response shape: `{ "items": [ … ], "nextCursor": "eyJ1IjoiMjAyNi0xMS0xMlQwOToz
 | Fingerprint | `sha256(method + path + canonical JSON body)`. Same key + different fingerprint → `422 IDEMPOTENCY_KEY_REUSED` |
 | Replay | Same key + same fingerprint after completion → the **original status code and body** are returned again, with header `Idempotent-Replayed: true`. No second job, no second post |
 | Concurrent duplicate | While the first request is still running → `409 IDEMPOTENCY_IN_PROGRESS` (retry after ~1 s) |
-| Failures | Responses with status ≥ 500 are **not** stored (the client may retry with the same key). 4xx responses are stored and replayed |
+| Failures | Responses with status ≥ 500 are **not** stored (the client may retry with the same key). 4xx responses are stored and replayed (a replayed error body carries the new request's `requestId`). Exception (F12): requests refused **before** the key is checked in (missing/bad `Idempotency-Key`, wrong `Content-Type`, `413`, invalid body) are not stored; a repeat simply gets the same answer again |
+| Abandoned key | An `in_progress` record blocks repeats for ~60 s (`lockedUntil`); after that a repeat may run again (DATABASE.md §4.13). C2 saves its answer on the record inside the same transaction that creates the project, so a crash after the commit can't create a second project |
 | Second layer | Domain keys make duplicates impossible even without the header: job keys `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`, `posts.publishKey` (`pub:{projectId}:{renderId}:{connectionId}:{approvalId}`), unique `storyboardApprovals.planVersionId` (ARCHITECTURE §20.1) |
 
 ```http
@@ -618,7 +619,7 @@ Idempotent-Replayed: true
 | Quota | Default | Counted when | Resets | Error |
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
-| Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count | same | `quota: projects_per_day` |
+| Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count. **Counted and enforced since F12** (inside C2's transaction, so concurrent clicks can't pass 5) | same | `quota: projects_per_day` |
 | Plan + revision requests per project | 20 | C2 (counts 1), each D5 accepted, and each plan retry after an Edit idea (C4 → E2); stored in `projects.planRequestCount` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
@@ -1022,6 +1023,15 @@ Purpose: ① **Create storyboard**. Auth: creator. Rate: 10/hour + quota 5 proje
 Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title` = first 120 chars of the idea until the plan arrives, then `plan.topic`), `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`), `activeJobId`, `planRequestCount: 1`, `usageCounters.projects +1`; then Inngest `plan.requested`. Notes are stored as the plan's single `sources[]` entry (`id: "creator-notes"`).
 Success `202` → `{ project: Project, job: Job }`.
 Errors: `400 INVALID_INPUT` · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503 SPEND_CEILING`.
+
+**Until F15 (built in F12, no AI yet).** C2 saves the project but starts no job. Differences from the spec above:
+- Effect (one transaction): `usageCounters.projects +1` (only while within 5/day, otherwise `429 QUOTA_EXCEEDED` and nothing is saved), insert `projects` with **state `draft`**, `stateVersion 1`, **`planRequestCount: 0`**, `activeJobId: null`, `title` = the first 120 characters of the idea (spaces and line breaks collapsed), and the answer saved on the `Idempotency-Key` record. No `jobs` document, no Inngest event.
+- Success **`201`** → `{ project: Project, job: null }` (`currentStep: "idea"`, `activeJobType: null`, `allowedActions: []` until rename/archive and the job actions exist).
+- The UI sends `inputType: "topic"` when the trimmed text is ≤ 300 characters and `"notes"` above that (one box for both, PRD §6.1). `brainstorm` is accepted by the validator but no screen sends it until F14.
+- No `503 SPEND_CEILING` / `MAINTENANCE` yet (they arrive with the `settings` document, F27/F36).
+- After success the UI goes to the temporary project page **`/projects/[id]`** (owner only; another user's project, a missing one or a malformed id → the same 404 page). F15/F16 turn it into a redirect to the project's current step.
+- F15 switches to the full spec: state `planning`, the queued `plan` job in the same transaction, `planRequestCount: 1`, `202` with the job.
+
 ```http
 POST /api/v1/projects
 Origin: https://bytereel.app
