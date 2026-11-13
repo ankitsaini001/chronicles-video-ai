@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (built 2026-11-13; waiting for the code review and the founder's test) |
+| **Status** | 🧪 Testing (code review passed 2026-11-13; waiting for the founder's test) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F11 |
 | **Design** | Stitch: ByteReel — Step 1 Idea |
@@ -55,11 +55,11 @@ It creates 6 indexes: `projects` (2), `idempotencyKeys` (2, one deletes clicks a
 
 ## How we test it (done when all are ticked)
 - [x] Project appears in Atlas `projects` with your user id (e2e on `bytereel_test`; please check it once in your own Atlas after creating a project)
-- [x] 5,000-character limit works (box stops at 5,000; the server refuses 5,001)
+- [x] 5,000-character limit works (the counter turns red above 5,000 and the form won't send; the server refuses 5,001)
 - [x] Defaults are English + Female (and your own defaults when you change them later)
 - [x] 5 projects per day, then "You've created 5 projects today. Try again tomorrow." with the time it resets
 - [x] Only the owner can open `/projects/[id]`
-- [ ] Code review passed (code-reviewer agent)
+- [x] Code review passed (code-reviewer agent; no must-fix, all suggestions applied)
 - [ ] Founder tested it and said OK
 
 ### How to try it (founder)
@@ -73,3 +73,4 @@ It creates 6 indexes: `projects` (2), `idempotencyKeys` (2, one deletes clicks a
 | Date | What happened |
 |---|---|
 | 2026-11-13 | Built steps 1–8. 488 unit tests, typecheck and `next build` pass; e2e `tools/e2e/f12-idea.ts` passed all 63 checks on `bytereel_test` (dropped afterwards). F12 indexes are NOT applied to the real `bytereel` database yet: founder runs the command above. Status 🧪, waiting for the code review and the founder's test. |
+| 2026-11-13 | Code review: no must-fix. Applied all suggestions: (1) each click record gets its own lock id, so a very slow request and a repeat that took over can never both save a project: the slow one's transaction rolls back and it answers 409 (`18d5517`); (2) a handler's 5xx error frees the click key so it can be retried (`18d5517`); (3) the Idea screen counts characters exactly like the server (control characters removed, NFC, trim; Hindi nukta letters count 2), so there is no hard stop at 5,000 in the box any more: the counter turns red instead (`fcc0866`); (4) the server removes control characters before checking the length (`fcc0866`), plain wording on the project page, DATABASE.md aligned (projects/day enforced since F12). 505 unit tests, typecheck and `next build` pass; e2e passed all 68 checks on `bytereel_test` (dropped afterwards). Code review ticked; waiting for the founder's test. |
