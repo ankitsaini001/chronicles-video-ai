@@ -18,7 +18,9 @@ A small dev-only check page/command that writes and reads one test record.
 ## In scope
 - MongoDB client in `packages/db`
 - A health check that writes + reads one record
-- Delete the test record afterwards
+- MongoDB client cached globally (one client reused across serverless starts, DATABASE.md §9)
+- Setup script that creates indexes (starts with the required Better Auth indexes, DATABASE.md §8)
+- **At the end of F06**, after the founder has seen the test record in Atlas: delete the record and drop the `healthchecks` collection. Later health checks use `db.command({ ping: 1 })`, which writes nothing (DATABASE.md Q16)
 - Environment variable check on start-up: clear message if a required key (e.g. the MongoDB connection string) is missing (moved here from F02)
 
 ## Not in this feature
@@ -30,7 +32,7 @@ A small dev-only check page/command that writes and reads one test record.
 - [ ] Add the health check
 - [ ] Run it
 - [ ] Founder sees the record in Atlas
-- [ ] Clean up the test record
+- [ ] Clean up: delete the test record and drop `healthchecks` (only after the founder has seen it)
 
 ## How we test it (done when all are ticked)
 - [ ] Founder opens Atlas → Browse Collections and sees the test record

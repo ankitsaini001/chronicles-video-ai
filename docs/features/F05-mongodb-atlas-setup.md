@@ -18,6 +18,8 @@ Your Atlas dashboard in the browser showing an empty `bytereel` database.
 ## In scope
 - Create a free Atlas account (founder does the clicks, I guide)
 - Create a free M0 cluster in a nearby region (Mumbai if available)
+- **Region next to the server, not the users:** choose the Atlas region and the Vercel function region together. Recommended: **Atlas Mumbai (AWS `ap-south-1`) + Vercel functions in Mumbai (`bom1`)** (DATABASE.md §2.1). Write the choice in the progress log so F38 uses the same pair
+- Read the current M0 limits (connections, operations per second, data transfer) on Atlas's page and note them in DATABASE.md §9 (no guessed numbers)
 - Create a database user + password
 - Allow network access
 - Copy the connection string into `.env` (never into .env.example)
