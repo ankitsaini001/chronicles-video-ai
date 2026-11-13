@@ -14,6 +14,15 @@ export {
   type RateLimitResult,
   type RateLimitRule,
 } from "./rate-limit";
+export {
+  getLoginLock,
+  LOGIN_LOCKOUT,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+  USER_COLLECTION,
+  type LoginGuardUser,
+  type LoginLock,
+} from "./login-guard";
 export { ensureIndexes, INDEX_FEATURES, INDEXES, indexesForFeatures, type IndexDefinition } from "./indexes";
 export {
   addInvite,

@@ -19,10 +19,16 @@ export interface RateLimitRule {
   windowSeconds: number;
 }
 
-/** The auth limits from API.md §3.7. F09 adds the sign-in rules here. */
+/** The auth limits from API.md §3.7. A5/A6 limits come with F33/F35. */
 export const AUTH_RATE_LIMITS = {
   /** A1 sign-up: 5 requests per 15 minutes per IP address. */
   signUpPerIp: { name: "signup-ip", limit: 5, windowSeconds: 15 * 60 },
+  /** A2 sign-in: 5 attempts per 15 minutes per IP address. */
+  signInPerIp: { name: "signin-ip", limit: 5, windowSeconds: 15 * 60 },
+  /** A2 sign-in: 5 attempts per 15 minutes per (lowercased) email. Checked as well as the IP. */
+  signInPerEmail: { name: "signin-email", limit: 5, windowSeconds: 15 * 60 },
+  /** A4 get-session: 120 requests per minute per IP address. */
+  getSessionPerIp: { name: "session-ip", limit: 120, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {
