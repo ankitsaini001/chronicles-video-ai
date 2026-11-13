@@ -61,12 +61,19 @@ async function main(): Promise<void> {
   r = await get("/api/v1/voices?language=hi", cookie);
   body = (await r.json()) as VoiceJson;
   check("B4 ?language=hi: the 2 Hindi presets with Hindi labels", r.status === 200 && body.items?.length === 2 && body.items[0]!.label === "महिला आवाज़ (Female)" && body.items[1]!.label === "पुरुष आवाज़ (Male)");
+  const onDisk = new Set(await readdir(path.join("apps", "web", "public", "voices")).catch(() => [] as string[]));
+  r = await get("/api/v1/voices", cookie);
+  body = (await r.json()) as VoiceJson;
+  check(
+    "B4: sampleUrl is the file's URL when recorded, null when not (Hindi/Hinglish wait until before F23)",
+    (body.items ?? []).every((i) => (onDisk.has(`${String(i.preset)}.mp3`) ? i.sampleUrl === `/voices/${String(i.preset)}.mp3` : i.sampleUrl === null)),
+    [...onDisk].join(", "),
+  );
   r = await get("/api/v1/voices?language=fr", cookie);
   body = (await r.json()) as VoiceJson;
   check("B4 ?language=fr: 400 INVALID_INPUT on `language`", r.status === 400 && body.error?.code === "INVALID_INPUT" && body.error.details?.issues?.[0]?.path === "language");
 
   // --- Static samples (only the files that are committed; see F13 for the missing ones).
-  const onDisk = new Set(await readdir(path.join("apps", "web", "public", "voices")).catch(() => [] as string[]));
   for (const p of VOICE_PRESET_LIST) {
     const file = `${p.preset}.mp3`;
     if (!onDisk.has(file)) {
@@ -82,7 +89,16 @@ async function main(): Promise<void> {
   // --- Idea page: ▶ buttons, and no ElevenLabs anywhere in what the browser downloads.
   r = await get("/projects/new", cookie);
   const html = (await r.text()).replace(/<!-- -->/g, "");
-  check("Idea page: one ▶ per voice with a clear label", html.includes('aria-label="Play female voice sample"') && html.includes('aria-label="Play male voice sample"'));
+  check("Idea page (English default): one ▶ per voice with a clear label", html.includes('aria-label="Play female voice sample"') && html.includes('aria-label="Play male voice sample"'));
+  await db.collection("user").updateOne({ email }, { $set: { defaultLanguage: "hi" } });
+  const hiHtml = (await (await get("/projects/new", cookie)).text()).replace(/<!-- -->/g, "");
+  const hindiRecorded = onDisk.has("hindi-female.mp3") || onDisk.has("hindi-male.mp3");
+  check(
+    "Idea page (Hindi default): ▶ only when the Hindi MP3s are recorded; the voices are still there",
+    hiHtml.includes('<span lang="hi">महिला आवाज़ (Female)</span>') && (hindiRecorded || !hiHtml.includes("voice sample")),
+  );
+  check("no 'Couldn't play' message on a normal page", !html.includes("play this sample") && !hiHtml.includes("play this sample"));
+  await db.collection("user").updateOne({ email }, { $set: { defaultLanguage: "en" } });
   const scripts = [...html.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]!);
   let mentions = 0;
   for (const src of scripts) {
