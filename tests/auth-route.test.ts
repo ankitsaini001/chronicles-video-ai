@@ -1,17 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { checkSignUpBody, clientIp, handleAuthRequest, isSameOrigin, MAX_BODY_BYTES, SHARED_IP_BUCKET, type AuthHandlerDeps } from "../apps/web/lib/auth/handler";
+import { checkSignInBody, checkSignUpBody, clientIp, handleAuthRequest, isSameOrigin, MAX_BODY_BYTES, SHARED_IP_BUCKET, type AuthHandlerDeps } from "../apps/web/lib/auth/handler";
 import { DISABLED_AUTH_PATHS } from "../apps/web/lib/auth/endpoints";
 import { AUTH_MESSAGES } from "../apps/web/lib/auth/messages";
 
-// F08: the /api/auth gatekeeper (allow-list, Origin, strict sign-up body, rate limit). Better Auth
-// itself is replaced by a stand-in that records what reaches it.
+// F08/F09: the /api/auth gatekeeper (allow-list, Origin, strict bodies, rate limits, account lock).
+// Better Auth itself is replaced by a stand-in that records what reaches it.
 
 const APP = "http://localhost:3230";
 const password = `Pw-${Math.random().toString(36).slice(2)}-test`;
 
-function deps(options: { allowed?: boolean; answer?: Response } = {}) {
+type Limits = { signUp?: boolean; signInIp?: boolean; signInEmail?: boolean; session?: boolean };
+
+function limitResult(allowed: boolean, retryAfterSeconds = 321) {
+  return { allowed, count: allowed ? 1 : 6, limit: 5, resetsAt: new Date(), retryAfterSeconds };
+}
+
+function deps(options: { allowed?: boolean; limits?: Limits; answer?: Response; lockedFor?: number; guardFails?: boolean } = {}) {
   const forwarded: Request[] = [];
   const ips: string[] = [];
+  const hits: string[] = [];
+  const guard: string[] = [];
+  const logged: string[] = [];
+  const limits = options.limits ?? {};
   const d: AuthHandlerDeps = {
     appOrigins: [APP],
     trustForwardedFor: true,
@@ -21,11 +31,39 @@ function deps(options: { allowed?: boolean; answer?: Response } = {}) {
     },
     hitSignUpLimit: async (ip) => {
       ips.push(ip);
-      const allowed = options.allowed ?? true;
-      return { allowed, count: allowed ? 1 : 6, limit: 5, resetsAt: new Date(), retryAfterSeconds: 321 };
+      return limitResult(limits.signUp ?? options.allowed ?? true);
+    },
+    hitSignInIpLimit: async (ip) => {
+      hits.push(`signin-ip:${ip}`);
+      return limitResult(limits.signInIp ?? true, 111);
+    },
+    hitSignInEmailLimit: async (email) => {
+      hits.push(`signin-email:${email}`);
+      return limitResult(limits.signInEmail ?? true, 222);
+    },
+    hitGetSessionLimit: async (ip) => {
+      hits.push(`session-ip:${ip}`);
+      return limitResult(limits.session ?? true, 33);
+    },
+    loginGuard: {
+      getLock: async (email) => {
+        guard.push(`lock?:${email}`);
+        return options.lockedFor ? { locked: true, until: new Date(), retryAfterSeconds: options.lockedFor } : { locked: false };
+      },
+      recordFailure: async (email) => {
+        guard.push(`fail:${email}`);
+        if (options.guardFails) throw new Error("db down");
+      },
+      recordSuccess: async (email) => {
+        guard.push(`ok:${email}`);
+        if (options.guardFails) throw new Error("db down");
+      },
+    },
+    logError: (message) => {
+      logged.push(message);
     },
   };
-  return { d, forwarded, ips };
+  return { d, forwarded, ips, hits, guard, logged };
 }
 
 function req(method: string, path: string, init: { body?: unknown; headers?: Record<string, string> } = {}) {
@@ -38,6 +76,7 @@ function req(method: string, path: string, init: { body?: unknown; headers?: Rec
 }
 
 const signUp = { name: "Priya", email: "priya@example.com", password };
+const signIn = { email: "priya@example.com", password };
 
 describe("endpoint allow-list", () => {
   it.each(DISABLED_AUTH_PATHS.map((p) => [p]))("answers 404 for %s and never reaches Better Auth", async (path) => {
@@ -75,7 +114,8 @@ describe("endpoint allow-list", () => {
       ["POST", "/api/auth/reset-password"],
     ] as const) {
       const { d, forwarded } = deps();
-      const res = await handleAuthRequest(req(method, path, method === "GET" ? {} : { body: {} }), d);
+      const body = path.endsWith("/sign-in/email") ? signIn : {};
+      const res = await handleAuthRequest(req(method, path, method === "GET" ? {} : { body }), d);
       expect(res.status).toBe(200);
       expect(forwarded).toHaveLength(1);
     }
@@ -163,6 +203,146 @@ describe("sign-up", () => {
     const res = await handleAuthRequest(req("POST", "/api/auth/sign-up/email", { body: signUp }), deps({ answer }).d);
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe("NOT_ALLOWLISTED");
+  });
+});
+
+describe("sign-in (A2)", () => {
+  const signInReq = (body: unknown = signIn, headers: Record<string, string> = {}) =>
+    req("POST", "/api/auth/sign-in/email", { body, headers: { "x-forwarded-for": "203.0.113.24", ...headers } });
+  const wrong = () => Response.json({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }, { status: 401 });
+
+  it("checks the IP limit, then the email limit (lowercased), then the lock, then forwards only email + password", async () => {
+    const { d, forwarded, hits, guard } = deps();
+    const res = await handleAuthRequest(signInReq({ email: " Priya@Example.COM ", password, rememberMe: false }), d);
+    expect(res.status).toBe(200);
+    expect(hits).toEqual(["signin-ip:203.0.113.24", "signin-email:priya@example.com"]);
+    expect(guard).toEqual(["lock?:priya@example.com", "ok:priya@example.com"]);
+    expect(await forwarded[0]?.json()).toEqual({ email: "priya@example.com", password });
+  });
+
+  it("over the IP limit: 429 with Retry-After, body not even read", async () => {
+    const { d, forwarded, hits, guard } = deps({ limits: { signInIp: false } });
+    const res = await handleAuthRequest(signInReq(), d);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("111");
+    expect(await res.json()).toEqual({ code: "TOO_MANY_ATTEMPTS", message: AUTH_MESSAGES.TOO_MANY_ATTEMPTS });
+    expect(hits).toEqual(["signin-ip:203.0.113.24"]);
+    expect(guard).toHaveLength(0);
+    expect(forwarded).toHaveLength(0);
+  });
+
+  it("over the email limit: the same 429", async () => {
+    const { d, forwarded } = deps({ limits: { signInEmail: false } });
+    const res = await handleAuthRequest(signInReq(), d);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("222");
+    expect(await res.json()).toEqual({ code: "TOO_MANY_ATTEMPTS", message: AUTH_MESSAGES.TOO_MANY_ATTEMPTS });
+    expect(forwarded).toHaveLength(0);
+  });
+
+  it("locked account: the same 429 and message as the rate limit, even with the right password", async () => {
+    const { d, forwarded, guard } = deps({ lockedFor: 600 });
+    const res = await handleAuthRequest(signInReq(), d);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("600");
+    expect(await res.json()).toEqual({ code: "TOO_MANY_ATTEMPTS", message: AUTH_MESSAGES.TOO_MANY_ATTEMPTS });
+    expect(forwarded).toHaveLength(0);
+    expect(guard).toEqual(["lock?:priya@example.com"]);
+  });
+
+  it("wrong email or wrong password: 401 'Email or password is incorrect', counted as a failure", async () => {
+    const { d, guard } = deps({ answer: wrong() });
+    const res = await handleAuthRequest(signInReq(), d);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Email or password is incorrect" });
+    expect(guard).toEqual(["lock?:priya@example.com", "fail:priya@example.com"]);
+  });
+
+  it("a failed counter update is reported, never shown, and the answer is unchanged", async () => {
+    const failed = deps({ answer: wrong(), guardFails: true });
+    expect((await handleAuthRequest(signInReq(), failed.d)).status).toBe(401);
+    const ok = deps({ guardFails: true });
+    expect((await handleAuthRequest(signInReq(), ok.d)).status).toBe(200);
+    expect([...failed.logged, ...ok.logged].join(" ")).not.toContain("priya");
+    expect(failed.logged).toHaveLength(1);
+    expect(ok.logged).toHaveLength(1);
+  });
+
+  it("a paused account (403 ACCOUNT_SUSPENDED) passes through and counts neither way", async () => {
+    const answer = Response.json({ code: "ACCOUNT_SUSPENDED", message: AUTH_MESSAGES.ACCOUNT_SUSPENDED }, { status: 403 });
+    const { d, guard } = deps({ answer });
+    const res = await handleAuthRequest(signInReq(), d);
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("ACCOUNT_SUSPENDED");
+    expect(guard).toEqual(["lock?:priya@example.com"]);
+  });
+
+  it("refuses unknown fields, wrong types, broken JSON and bodies over 64 KB, before the email counter", async () => {
+    for (const body of [{ ...signIn, role: "admin" }, { ...signIn, callbackURL: "https://evil.example" }, { ...signIn, rememberMe: "yes" }, { email: "priya@example.com" }, "{nope"]) {
+      const { d, forwarded, hits } = deps();
+      const res = await handleAuthRequest(signInReq(body), d);
+      expect(res.status).toBe(400);
+      expect(forwarded).toHaveLength(0);
+      expect(hits).toEqual(["signin-ip:203.0.113.24"]);
+    }
+    const big = await handleAuthRequest(signInReq({ ...signIn, password: "x".repeat(MAX_BODY_BYTES) }), deps().d);
+    expect(big.status).toBe(413);
+  });
+
+  it("wrong Origin is refused before anything is counted", async () => {
+    const { d, hits, guard } = deps();
+    const res = await handleAuthRequest(signInReq(signIn, { origin: "https://evil.example" }), d);
+    expect(res.status).toBe(403);
+    expect(hits).toHaveLength(0);
+    expect(guard).toHaveLength(0);
+  });
+
+  it("a made-up X-Forwarded-For off Vercel shares one counter", async () => {
+    const { d, hits } = deps();
+    d.trustForwardedFor = false;
+    await handleAuthRequest(signInReq(signIn, { "x-forwarded-for": "198.51.100.7" }), d);
+    expect(hits[0]).toBe(`signin-ip:${SHARED_IP_BUCKET}`);
+  });
+});
+
+describe("checkSignInBody", () => {
+  it.each([
+    [{ ...signIn, email: "not-an-email" }, "INVALID_EMAIL"],
+    [{ ...signIn, password: "" }, "INVALID_INPUT"],
+    [{ ...signIn, password: "x".repeat(129) }, "INVALID_INPUT"],
+    [{ ...signIn, password: 12345678 }, "INVALID_INPUT"],
+    [{ ...signIn, name: "Priya" }, "INVALID_INPUT"],
+    [[], "INVALID_INPUT"],
+    [null, "INVALID_INPUT"],
+  ])("refuses %j", (body, code) => {
+    const r = checkSignInBody(body);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe(code);
+  });
+
+  it("accepts a 1-character password (old passwords are never re-checked for length) and drops rememberMe", () => {
+    expect(checkSignInBody({ ...signIn, password: "x" })).toEqual({ ok: true, value: { email: "priya@example.com", password: "x" } });
+    expect(checkSignInBody({ ...signIn, rememberMe: true })).toEqual({ ok: true, value: signIn });
+  });
+});
+
+describe("get-session (A4)", () => {
+  it("counts 120 per minute per IP and answers 429 over it", async () => {
+    const ok = deps();
+    expect((await handleAuthRequest(new Request(`${APP}/api/auth/get-session`, { headers: { "x-forwarded-for": "203.0.113.24" } }), ok.d)).status).toBe(200);
+    expect(ok.hits).toEqual(["session-ip:203.0.113.24"]);
+    const over = deps({ limits: { session: false } });
+    const res = await handleAuthRequest(new Request(`${APP}/api/auth/get-session`), over.d);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("33");
+    expect(over.forwarded).toHaveLength(0);
+  });
+
+  it("sign-out is not rate limited and goes straight to Better Auth", async () => {
+    const { d, hits, forwarded } = deps();
+    expect((await handleAuthRequest(req("POST", "/api/auth/sign-out", { body: {} }), d)).status).toBe(200);
+    expect(hits).toHaveLength(0);
+    expect(forwarded).toHaveLength(1);
   });
 });
 
