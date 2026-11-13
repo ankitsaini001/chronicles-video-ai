@@ -1602,7 +1602,7 @@ Purpose: the creator approves the **exact video + destination + caption** and pu
 | `mp4Sha256` | `sha256:…` | ✓ | Must equal the render's `mp4Sha256` |
 | `connectionId` | id | ✓ | The user's `active` connection |
 | `caption` | string | ✓ | 1–2,200 chars incl. hashtags (Instagram limit; ≤ 30 hashtags) |
-| `scheduledAt` | ISO-8601 with offset | iff `mode = scheduled` | **≥ now + 10 min** and **≤ now + 75 days** (ARCHITECTURE §12.3); stored in UTC |
+| `scheduledAt` | ISO-8601 with offset | iff `mode = scheduled` | **≥ now + 10 min** and **≤ now + 75 days**; stored in UTC |
 | `expectedStateVersion` | int | ✓ | |
 
 Allowed states: `video_ready`, `publish_failed`; or `scheduled` with an `approval_invalidated` post (re-approval). One live post per project (partial unique index on `scheduled`/`publishing`/`outcome_unknown`); a project that is already `published` → `409 INVALID_STATE` (one video per project, V1).
@@ -1679,7 +1679,7 @@ Purpose: publish progress + success link. Poll every 2 s while `state` is `publi
 ```
 
 #### H5. `POST /api/v1/posts/{postId}/cancel` — Cancel a scheduled post
-Auth: creator. Rate: 10/hour. Body: `{}`. Allowed: `scheduled` or `approval_invalidated`. Effect: conditional update `state: scheduled → cancelled` (ARCHITECTURE §12.3), job cancelled (`job.cancelled`), project → `video_ready`. Calling it on an already `cancelled` post returns `200` with the post.
+Auth: creator. Rate: 10/hour. Body: `{}`. Allowed: `scheduled` or `approval_invalidated`. Effect: conditional update `state: scheduled → cancelled`, job cancelled (`job.cancelled`), project → `video_ready`. Calling it on an already `cancelled` post returns `200` with the post.
 Success `200` → `Post`. Errors: `404` · `409 INVALID_STATE` (`publishing`, `published`, …).
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This post is being published right now and can't be cancelled.", "details": { "postState": "publishing" }, "requestId": "req_01JCXM5A9B0C" } }
@@ -1834,7 +1834,7 @@ Success `200` → `Settings` (version + 1). Errors: `400 INVALID_INPUT` · `409 
 { "error": { "code": "STALE_VERSION", "message": "Settings were changed by someone else. Reload and try again.", "details": { "expectedVersion": 3, "currentVersion": 4 }, "requestId": "req_01JCXM6R5S6T" } }
 ```
 
-### 14.10 Meta callbacks (ARCHITECTURE §12.3, §21.3, §22)
+### 14.10 Meta callbacks (ARCHITECTURE §21.3, §22)
 
 Both callbacks receive `application/x-www-form-urlencoded` with one field `signed_request` = `<base64url HMAC-SHA256 signature>.<base64url JSON payload>`. The signature is verified with `META_APP_SECRET` (constant-time compare, `algorithm = HMAC-SHA256`); payload `{ user_id: "<igUserId>", algorithm, issued_at }`. Exempt from the Origin check. Rate: 60/min per IP.
 
@@ -1910,7 +1910,7 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 | A-14 | The live-post uniqueness covers `scheduled`, `publishing` **and `outcome_unknown`** (ARCHITECTURE §8.12 lists only the first two), so reconciliation can't race a new post. |
 | A-15 | Brainstorm ideas aren't stored; the chosen idea is copied into `project.input.brainstormChoice`. |
 | A-16 | Rate-limit numbers in §10.3 are starting values (ARCHITECTURE §21.2 names the endpoints but not the numbers); they live in code config, not in admin settings. |
-| A-17 | Media URLs are returned as JSON by default (`redirect=true` for a `302`); ARCHITECTURE §12.2 described a redirect only. |
+| A-17 | Media URLs are returned as JSON by default (`redirect=true` for a `302`); the old ARCHITECTURE §12.2 (since replaced by this document) described a redirect only. |
 | A-18 | Plan stats use the code names `sceneCount`, `wordCount`, `estimatedSeconds` (`PlanStats` in `semantic-validation.ts`); ARCHITECTURE §8.4 said `{ scenes, words, estimatedSeconds }` and was aligned. |
 
 **Gaps between PRD.md and ARCHITECTURE.md (ARCHITECTURE wins as the later, approved design; listed for the founder):**
