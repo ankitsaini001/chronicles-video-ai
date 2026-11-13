@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F09 |
 | **Design** | Stitch: ByteReel — My videos (empty) |
@@ -43,13 +43,14 @@ Recorded from the F11 review (also a TODO in `apps/web/lib/api/v1.ts`). Add thes
 
 ## How we test it (done when all are ticked)
 - [x] After login you land here (automated: `/login` and sign-up both go to `/dashboard`; the founder repeats it)
-- [ ] Looks like the design (founder checks on desktop and phone width)
+- [x] Looks like the design (founder checks on desktop and phone width)
 - [x] Log out from the avatar menu works (automated: sign-out → `/dashboard` and B1 answer "logged out"; the founder clicks it)
 - [x] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
 | 2026-11-13 | Built steps 1–6 in 6 commits. 441 tests pass (39 new), typecheck and `next build` clean. End-to-end: 46/46 checks pass against `bytereel_test` (F08 and F09 scripts re-run too, all pass; database dropped afterwards). Decisions: Settings is visible as "Settings · Soon" (plain text, no link) until F33; the bell opens a small "No notifications yet" panel and never shows a badge until F32; "Create your first reel" goes to a temporary `/projects/new` page inside the shell (replaced in F12); the design's second "+ New video" button is left out on the empty page (one primary button per screen) and comes back with the cards in F21; tabs are links (`?tab=ready` …) so they survive a reload; B1 usage counts are 0 until counting starts (F12 onwards), `instagram` is `not_connected`, `maintenance` is off (no `settings` document yet). No new indexes, no new packages, no new environment variables. Waiting for code review and the founder's test |
 | 2026-11-13 | Code review: no must-fix. Applied: (1) error pages: `app/(app)/error.tsx` (inside the app shell), plus `app/error.tsx` (needed because an error in the app shell's own layout, e.g. the database unreachable during the login check, is caught one level up) and a minimal `app/global-error.tsx`; all show "Something went wrong on our side. Please try again." with one "Try again" button. It uses Next.js 16.3+ `retry()`, which reloads the failed part from the server; `reset()` would only redraw it (`ab44787`); (2) in zones where clocks jump forward at midnight (America/Santiago, America/Havana, also Beirut and Cairo) the daily reset was one hour early; it is now the first real moment of the new day (`30b400b`); (3) the account menu and bell panel close when Tab moves focus outside them (`696926e`); (4) recorded what the `/api/v1` pipeline needs before the first POST/PATCH endpoint (section above, and a TODO in `v1.ts`) (`3ccdbc2`). 448 tests pass, typecheck and `next build` clean; e2e 46/46 against `bytereel_test` (dropped afterwards). Waiting for the founder's test |
+| 2026-11-13 | Founder test: a small up/down scrollbar showed under the My videos tabs (the sideways-scroll box was 1px too short for the tab underline); removed the scroll box, the four tabs now fit at 320px (`38bb6a2`). Founder found the empty page too empty; agreed to keep it for now and revisit in F21 (no sidebar; idea noted there). Founder: "looks okay" → ✅. Phase A2 complete. |

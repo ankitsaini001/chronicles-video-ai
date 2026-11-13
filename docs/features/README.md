@@ -49,13 +49,13 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F08 | [Sign up](F08-sign-up.md) | F07 | ✅ Done |
 | F09 | [Log in and log out](F09-log-in-out.md) | F08 | ✅ Done |
 | F10 | [Access pending page](F10-access-pending.md) | F08 | ✅ Done |
-| F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | 🧪 Testing |
+| F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ✅ Done |
 
 ### A3 · Idea → Storyboard
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | ⬜ Not started |
+| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | 🔨 In progress |
 | F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ⬜ Not started |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ⬜ Not started |
 | F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ⬜ Not started |
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F11 is in progress (app shell + empty My videos). F04–F10 done.
+**Next up:** F12 is in progress (Step 1 Idea: create a project). Phases A1 and A2 done (F01–F11).
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.
