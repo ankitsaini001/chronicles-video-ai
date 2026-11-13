@@ -954,7 +954,7 @@ paths:
       description: |
         D3. Inline narration edit → new `user_edit` plan version (re-validated, re-hashed); the approval is
         reset. Saved even if validation fails (validation.valid = false). **expectedStateVersion required.**
-        Allowed in storyboard_ready, generate_failed, video_ready, scheduled with no active job. A scheduled
+        Allowed in storyboard_ready, generate_failed, video_ready, scheduled, publish_failed with no active job. A scheduled
         post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
       tags: [Storyboard]
@@ -1326,8 +1326,9 @@ paths:
       description: |
         E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable,
         cancelled plan/caption jobs, and failed plan jobs whose idea was edited (PATCH project `text`) after the
-        failure; plan retries use the current idea and never count toward projects/day (not publish jobs: use
-        the post retry). **Idempotency-Key required.**
+        failure; plan retries use the current idea and never count toward projects/day, but a retry that plans
+        from an edited idea counts 1 toward the 20 plan + revision requests per project (429 QUOTA_EXCEEDED
+        plan_requests_per_project at the limit). Not for publish jobs: use the post retry. **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
       tags: [Jobs]
       security:
@@ -1375,7 +1376,7 @@ paths:
         '422':
           $ref: '#/components/responses/IdempotencyKeyReused'
         '429':
-          $ref: '#/components/responses/RateLimited'
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/Internal'
         '503':
