@@ -35,6 +35,8 @@ export const AUTH_RATE_LIMITS = {
 export const API_RATE_LIMITS = {
   /** "Other reads (GET)": 300 requests per minute per user, shared by all plain GET endpoints. */
   readsPerUser: { name: "v1-read-user", limit: 300, windowSeconds: 60 },
+  /** C2 create project: 10 per hour per user (plus the 5 projects/day quota). */
+  createProjectPerUser: { name: "create-project", limit: 10, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

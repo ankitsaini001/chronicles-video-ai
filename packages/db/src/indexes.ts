@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08";
+  feature: "F07" | "F08" | "F12";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -30,6 +30,12 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "verification", name: "identifier", keys: { identifier: 1 }, options: {}, feature: "F08", why: "Find a reset link" },
   { collection: "verification", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Expired reset links delete themselves" },
   { collection: "rateLimits", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Old sign-up/login counters delete themselves" },
+  { collection: "projects", name: "ownerId_updatedAt", keys: { ownerId: 1, updatedAt: -1 }, options: {}, feature: "F12", why: "My videos list, newest first" },
+  { collection: "projects", name: "ownerId_state", keys: { ownerId: 1, state: 1 }, options: {}, feature: "F12", why: "The My videos tabs" },
+  { collection: "idempotencyKeys", name: "ownerId_key_unique", keys: { ownerId: 1, key: 1 }, options: { unique: true }, feature: "F12", why: "A click is processed once" },
+  { collection: "idempotencyKeys", name: "createdAt_ttl", keys: { createdAt: 1 }, options: { expireAfterSeconds: 86400 }, feature: "F12", why: "Forget clicks after a day" },
+  { collection: "usageCounters", name: "ownerId_kind_period_unique", keys: { ownerId: 1, kind: 1, period: 1 }, options: { unique: true }, feature: "F12", why: "One counter per user, kind and day/month" },
+  { collection: "usageCounters", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F12", why: "Old counters delete themselves" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */

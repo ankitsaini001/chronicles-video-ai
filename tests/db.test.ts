@@ -156,7 +156,22 @@ describe("index list", () => {
     const find = (c: string, n: string) => INDEXES.find((i) => i.collection === c && i.name === n);
     expect(find("user", "email_unique")?.options.unique).toBe(true);
     expect(find("session", "token_unique")?.options.unique).toBe(true);
-    for (const i of INDEXES.filter((x) => x.name.endsWith("_ttl"))) expect(i.options.expireAfterSeconds).toBe(0);
+    // Expiry indexes delete at `expiresAt` (0 s); click records live 24 hours after createdAt (API.md §6).
+    for (const i of INDEXES.filter((x) => x.name.endsWith("_ttl"))) {
+      expect(i.options.expireAfterSeconds).toBe(i.collection === "idempotencyKeys" ? 86400 : 0);
+    }
+  });
+
+  it("has the F12 indexes (DATABASE.md §8: projects, idempotencyKeys, usageCounters)", () => {
+    const f12 = indexesForFeatures(["F12"]).map((i) => `${i.collection}.${i.name} ${JSON.stringify(i.keys)} ${JSON.stringify(i.options)}`);
+    expect(f12).toEqual([
+      'projects.ownerId_updatedAt {"ownerId":1,"updatedAt":-1} {}',
+      'projects.ownerId_state {"ownerId":1,"state":1} {}',
+      'idempotencyKeys.ownerId_key_unique {"ownerId":1,"key":1} {"unique":true}',
+      'idempotencyKeys.createdAt_ttl {"createdAt":1} {"expireAfterSeconds":86400}',
+      'usageCounters.ownerId_kind_period_unique {"ownerId":1,"kind":1,"period":1} {"unique":true}',
+      'usageCounters.expiresAt_ttl {"expiresAt":1} {"expireAfterSeconds":0}',
+    ]);
   });
 
   it("has unique names per collection and filters by feature", () => {
