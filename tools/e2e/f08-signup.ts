@@ -126,7 +126,7 @@ async function main(): Promise<void> {
   r = await fetch(`${base}/dashboard`, { headers: { cookie }, redirect: "manual" });
   check("dashboard shows 'Signed in as <name>'", r.status === 200 && /Signed in as/.test(await r.text()));
   r = await fetch(`${base}/dashboard`, { redirect: "manual" });
-  check("dashboard without a session redirects to /signup", r.status >= 300 && r.status < 400 && (r.headers.get("location") ?? "").includes("/signup"), `status ${r.status}`);
+  check("dashboard without a session redirects to /login (F09)", r.status >= 300 && r.status < 400 && (r.headers.get("location") ?? "").includes("/login"), `status ${r.status}`);
 
   // Same email twice.
   r = await signUp({ name: "Again", email: invited, password });
