@@ -401,6 +401,7 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 | `INSTAGRAM_NOT_CONNECTED` **§12.4** | 409 | No active Instagram connection (or `connectionId` isn't yours/active) | H2, H6 |
 | `INSTAGRAM_TOKEN_EXPIRED` **§12.4** | 409 | Connection `expired`/`revoked`: reconnect needed | H2, H6; publish job |
 | `INSTAGRAM_ACCOUNT_INELIGIBLE` **§12.4** | 422 | Account isn't Business/Creator. Delivered as a redirect query on the OAuth callback | G3 |
+| `INSTAGRAM_ACCOUNT_IN_USE` | — (redirect only) | The Instagram account (`igUserId`) already has an **active** connection owned by a **different** ByteReel user (one Instagram account per ByteReel user, both ways; PRD decision #24d). Delivered as a redirect query on the OAuth callback | G3 |
 | `INSTAGRAM_OAUTH_FAILED` | — (redirect only) | OAuth denied, bad `state`, or code exchange failed | G3 |
 | `PUBLISH_LIMIT_REACHED` **§12.4** | — (post/job only) | Instagram's 24 h publishing limit; the post is **delayed**, never dropped | publish job |
 | `PUBLISH_FAILED` | — (post/job only) | Container `ERROR`/`EXPIRED` or Meta error; `message` carries Meta's reason in plain words | publish job |
@@ -427,6 +428,7 @@ Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for 
 | `APPROVAL_STALE` | "Something changed since you reviewed it. Please review again." | Reload |
 | `INSTAGRAM_TOKEN_EXPIRED` | "Instagram needs reconnecting. Your scheduled posts are paused, nothing is lost." | Reconnect |
 | `INSTAGRAM_ACCOUNT_INELIGIBLE` | "This Instagram account is personal. Switch it to a Creator or Business account in Instagram settings, then connect again. Download still works." | Connect again |
+| `INSTAGRAM_ACCOUNT_IN_USE` | "This Instagram account is already connected to another ByteReel account." | Connect again |
 | `PUBLISH_LIMIT_REACHED` | "Instagram's daily posting limit was reached. We'll publish automatically when it resets." | — |
 | Unknown publish outcome | "Checking whether your post went live…" | — |
 | `INTERNAL` | "Something went wrong on our side. Please try again." | Retry |
@@ -1531,9 +1533,9 @@ Location: https://www.instagram.com/oauth/authorize?client_id=1234567890&redirec
 #### G3. `GET /api/v1/instagram/callback` — OAuth callback
 Purpose: Meta redirects here. Auth: the session cookie **and** a valid `state` bound to that session.
 Query: `code`, `state` (success) or `error`, `error_reason`, `error_description`, `state` (user denied).
-Effect: verify `state` (signature, expiry, `sessionId` = current session) → exchange `code` for a short-lived token → long-lived token (~60 days) → `GET /me?fields=user_id,username,account_type,profile_picture_url` → require `BUSINESS` or `MEDIA_CREATOR` → encrypt (AES-256-GCM) and upsert `instagramConnections` (unique `ownerId`). Reconnecting a **different** account invalidates `scheduled` posts (`approval_invalidated`, notification). Audit `instagram.connected`.
+Effect: verify `state` (signature, expiry, `sessionId` = current session) → exchange `code` for a short-lived token → long-lived token (~60 days) → `GET /me?fields=user_id,username,account_type,profile_picture_url` → require `BUSINESS` or `MEDIA_CREATOR` → **reject if this `igUserId` already has an `active` connection owned by a different user** (`INSTAGRAM_ACCOUNT_IN_USE`; nothing is stored and the new token is discarded) → encrypt (AES-256-GCM) and upsert `instagramConnections`. One Instagram account per ByteReel user is enforced both ways (PRD decision #24d): unique `ownerId` (a user has one connection) **and** a unique partial index on `igUserId` where `status = active` (an Instagram account belongs to one user); the index also catches two users finishing OAuth at the same moment (duplicate-key error → `INSTAGRAM_ACCOUNT_IN_USE`). Reconnecting a **different** account invalidates `scheduled` posts (`approval_invalidated`, notification). Audit `instagram.connected`.
 Success: `302` to `/settings?instagram=connected` or `/projects/{id}/publish?instagram=connected`.
-Errors (a `302` back to the `returnTo` page): `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` · `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`. No session → `302 /login`. Only a malformed call that can't be tied to any flow (neither `code` nor `error`, or no `state`) gets a JSON `400 INVALID_INPUT`.
+Errors (a `302` back to the `returnTo` page, always in the one format `?instagram_error=<CODE>[&reason=<reason>]`): `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` · `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` · `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`. No session → `302 /login`. Only a malformed call that can't be tied to any flow (neither `code` nor `error`, or no `state`) gets a JSON `400 INVALID_INPUT`.
 ```http
 GET /api/v1/instagram/callback?code=AQBx...#_&state=eyJzIjoi...sig
 
@@ -1920,7 +1922,7 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 1. ✅ Caption fixes do **not** count toward the 3 videos/day quota (A-8 changed: only `generate` jobs count; `caption` jobs are still rate-limited by F4, 10/hour).
 2. ✅ No key-text fallback: the plan job fails with `PLAN_INVALID` ("Couldn't build a good storyboard, try rephrasing.") + Try again (G-5 → ARCHITECTURE wins).
 3. ✅ Voice unavailable: fail clearly with `PROVIDER_UNAVAILABLE`; never substitute a voice (G-4 → ARCHITECTURE wins).
-4. ✅ One Instagram account per ByteReel user: `igUserId` is **unique among active connections**. Connecting an account already connected by another user redirects back with `?instagram=error&reason=account_in_use` and the message "This Instagram account is already connected to another ByteReel account."
+4. ✅ One Instagram account per ByteReel user: `igUserId` is **unique among active connections**. Connecting an account already connected by another user redirects back with `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` (same format as every other callback error, G3) and the message "This Instagram account is already connected to another ByteReel account."
 
 **Still open:**
 5. Confirm the domain for the Meta redirect URI and the data-deletion status page (examples use `bytereel.app`, domain check pending per PRD §22).

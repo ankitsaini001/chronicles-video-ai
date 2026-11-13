@@ -364,7 +364,7 @@ Sign-up is rejected unless the email is here (§10.2).
 | `tokenExpiresAt`, `lastRefreshedAt` | |
 | `scopes[]` | |
 | `status` | `active` \| `expired` \| `revoked` \| `error` |
-**Indexes:** unique `ownerId`; `{ status: 1, tokenExpiresAt: 1 }` (refresh job).
+**Indexes:** unique `ownerId` (one connection per user); **unique partial index on `igUserId` where `status = "active"`** (one ByteReel user per Instagram account, PRD decision #24d; the OAuth callback rejects an account already actively connected to a different user with `INSTAGRAM_ACCOUNT_IN_USE`); `{ status: 1, tokenExpiresAt: 1 }` (refresh job).
 
 ### 8.12 `posts`
 | Field | Notes |
@@ -636,6 +636,7 @@ Meta → /api/instagram/callback?code&state
      → GET graph.instagram.com/access_token?grant_type=ig_exchange_token (long-lived, ~60 days)
      → GET graph.instagram.com/me?fields=user_id,username,account_type,profile_picture_url
      → account_type must be BUSINESS or MEDIA_CREATOR, else INSTAGRAM_ACCOUNT_INELIGIBLE
+     → user_id must not have an active connection owned by another user, else INSTAGRAM_ACCOUNT_IN_USE
      → encrypt + store token → redirect to /settings or back to the publish step
 ```
 *(Exact endpoints and versions are verified against Meta's current docs during implementation.)*

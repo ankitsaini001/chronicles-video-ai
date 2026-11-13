@@ -1632,8 +1632,12 @@ paths:
       summary: Instagram OAuth callback
       description: |
         G3. Verifies `state` (signature, expiry, current session), exchanges the code for a long-lived token,
-        requires a BUSINESS or MEDIA_CREATOR account, encrypts and stores the token. Always answers with a 302
-        back to the returnTo page: `?instagram=connected` or `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` /
+        requires a BUSINESS or MEDIA_CREATOR account, rejects an Instagram account that already has an active
+        connection owned by a different ByteReel user (INSTAGRAM_ACCOUNT_IN_USE, "This Instagram account is already
+        connected to another ByteReel account."; unique partial index on igUserId where status = active), then
+        encrypts and stores the token. Always answers with a 302 back to the returnTo page: `?instagram=connected`
+        or one error format `?instagram_error=<CODE>[&reason=<reason>]`:
+        `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` / `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` /
         `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`.
       tags: [Instagram]
       security:
@@ -2754,6 +2758,7 @@ components:
         - INSTAGRAM_NOT_CONNECTED
         - INSTAGRAM_TOKEN_EXPIRED
         - INSTAGRAM_ACCOUNT_INELIGIBLE
+        - INSTAGRAM_ACCOUNT_IN_USE
         - INSTAGRAM_OAUTH_FAILED
         - PUBLISH_LIMIT_REACHED
         - PUBLISH_FAILED
