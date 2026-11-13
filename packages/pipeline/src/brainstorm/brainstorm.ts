@@ -59,8 +59,12 @@ export class BrainstormError extends Error {
   }
 }
 
-/** Per-request limit for a brainstorm request (the whole brainstorm still stops at 30 s). */
-export const BRAINSTORM_REQUEST_TIMEOUT_MS = 25_000;
+/**
+ * Per-request limit: the same 30 s, so one slow answer may use the whole time (the overall abort
+ * stops it first). The first live call (2026-11-13) took over 25 s; a shorter per-request limit
+ * would only cut slow answers off and waste a retry. Retries still happen for quick 429/503 answers.
+ */
+export const BRAINSTORM_REQUEST_TIMEOUT_MS = BRAINSTORM_TIMEOUT_MS;
 /** 5 short ideas need ~600 tokens; the rest is room for the model's thinking. */
 export const BRAINSTORM_MAX_OUTPUT_TOKENS = 8_192;
 
