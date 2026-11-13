@@ -20,6 +20,7 @@ The 'ByteReel — Sign up' screen.
 - Sign-up checks the allow-list
 - Not invited → go to Access pending (F10)
 - Password 8–128 characters, confirm field
+- Better Auth locked down: only the 6 documented auth endpoints are exposed; server-owned user fields use `input: false` (API.md §3.1)
 - After sign-up → My videos (shell comes in F11; temporary page until then)
 
 ## Not in this feature
@@ -33,6 +34,7 @@ _We break this into small steps together when we start this feature._
 - [ ] Not-invited email is refused
 - [ ] Password is never stored in plain text (check in Atlas)
 - [ ] Same email twice → clear error
+- [ ] A user can't set role/status at sign-up or via any auth endpoint
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 

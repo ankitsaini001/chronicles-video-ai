@@ -87,6 +87,8 @@
 | Password rules | **8–128 characters**, any characters (Unicode allowed; no composition rules), hashed with **scrypt** by Better Auth, never logged or returned. "Confirm password" is checked by the form only (the API receives one `password`) |
 | Brute-force | Rate limits per IP and per email (§3.7); **10 consecutive failed logins → account locked for 15 minutes** |
 | Enumeration | Login failures always answer *"Email or password is incorrect"*; lockout and rate-limit answers use one message that doesn't reveal whether the email exists |
+| Exposed auth endpoints | **Only the 6 endpoints A1–A6** (§3.2) are reachable under `/api/auth/*`. Every other Better Auth default endpoint is **disabled** (Better Auth `disabledPaths`) **and** blocked by our route handler, which forwards only an allow-list of these 6 method + path pairs and answers `404` to anything else. Blocked examples: `update-user`, `delete-user`, `list-sessions`, `revoke-session(s)`, `revoke-other-sessions`, `change-email`, `request-password-reset` / `forget-password`, `send-verification-email`, `verify-email`, `link-social`, `list-accounts`, `unlink-account`. Our own `/api/v1` endpoints cover those needs (B2 profile/defaults, B3 delete account, I7 admin reset link) |
+| Server-owned user fields | Every Better Auth `user.additionalFields` entry is declared with **`input: false`**: `role`, `status`, `failedLoginCount`, `lockedUntil`, `lastLoginAt`, and also `timezone`, `defaultLanguage`, `defaultVoiceGender` (defaults set by the server at sign-up, changed only through B2). A caller can therefore never set them through sign-up or any auth endpoint; a sign-up body that includes any of them is rejected with `400`, and the user is always created as `role: creator`, `status: active` |
 
 ### 3.2 Auth endpoints at a glance
 
@@ -140,7 +142,7 @@ Logout   user menu → POST /api/auth/sign-out → session row deleted, cookie c
 |---|---|
 | Auth | anonymous (must pass the Origin check) |
 | Rate limit | 5 requests / 15 min per IP |
-| Body | `name` string 1–80 (required) · `email` string, valid email, ≤ 254, lowercased (required) · `password` string 8–128 (required). `callbackURL`, `image`, `rememberMe` are **not accepted** |
+| Body | `name` string 1–80 (required) · `email` string, valid email, ≤ 254, lowercased (required) · `password` string 8–128 (required). `callbackURL`, `image`, `rememberMe` and the server-owned fields (`role`, `status`, …, §3.1) are **not accepted** |
 | Success | `200` `{ token, user }` + `Set-Cookie` (session). `user` = Better Auth user incl. our additional fields |
 | Errors | `NOT_ALLOWLISTED` 403 · `USER_ALREADY_EXISTS` 422 · `PASSWORD_TOO_SHORT`/`PASSWORD_TOO_LONG`/`INVALID_EMAIL` 400 · `TOO_MANY_ATTEMPTS` 429 · `FORBIDDEN_ORIGIN` 403 |
 

@@ -9,6 +9,10 @@ info:
 
     - All application endpoints are REST JSON route handlers under `/api/v1` (PRD decisions log #21).
     - Better Auth is mounted at `/api/auth/*`; its errors use Better Auth's own body `{ code, message }`.
+      Only the 6 auth operations listed here are exposed; every other Better Auth default endpoint
+      (update-user, delete-user, list/revoke sessions, change-email, request/forget password, …) is disabled
+      and answers 404. Server-owned user fields (role, status, failedLoginCount, lockedUntil, lastLoginAt,
+      timezone and defaults) are declared `input: false`, so no auth request can set them.
       All `/api/v1` errors use the envelope `{ error: { code, message, details?, requestId } }`.
     - CSRF: SameSite=Lax session cookie + an `Origin` check on every mutating request
       (`POST`, `PUT`, `PATCH`, `DELETE`) to `/api/v1/*` and `/api/auth/*`. Meta callbacks are exempt

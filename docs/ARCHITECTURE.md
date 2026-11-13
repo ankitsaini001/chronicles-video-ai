@@ -432,6 +432,8 @@ users/{ownerId}/projects/{projectId}/renders/{renderId}/qa.json
 - **Brute-force protection:** login and sign-up are rate-limited per IP and per email (e.g. 5 attempts per 15 min). After 10 failed logins, the account is locked for 15 min.
 - **No account enumeration:** login failures always show *"Email or password is incorrect"*.
 - **Logout** on every page (user menu). Changing the password revokes the user's other sessions.
+- **Better Auth lockdown:** only the 6 auth endpoints documented in API.md §3.2 are exposed (sign-up, sign-in, sign-out, get-session, change-password, reset-password with an admin-issued token). Every other Better Auth default endpoint (update-user, delete-user, list/revoke sessions, change-email, request/forget password, email verification, account linking, …) is disabled with `disabledPaths` and also blocked by the `/api/auth/[...all]` route handler, which forwards only that allow-list and answers 404 otherwise. Our own `/api/v1` endpoints cover profile changes, account deletion and password resets.
+- **Server-owned user fields:** every additional user field is declared with `input: false` (`role`, `status`, `failedLoginCount`, `lockedUntil`, `lastLoginAt`, and the defaults `timezone`, `defaultLanguage`, `defaultVoiceGender`, which change only through `PATCH /api/v1/me`). A user can never set them through sign-up or any auth endpoint.
 
 ### 10.2 Private beta allow-list
 - Better Auth `databaseHooks.user.create.before` rejects sign-up unless the email is in `allowlist`.
