@@ -68,7 +68,15 @@ export const BRAINSTORM_REQUEST_TIMEOUT_MS = BRAINSTORM_TIMEOUT_MS;
 /** 5 short ideas need ~600 tokens; the rest is room for the model's thinking. */
 export const BRAINSTORM_MAX_OUTPUT_TOKENS = 8_192;
 
-/** The Gemini adapter set up for brainstorming: no retries of its own (they happen here, logged). */
+/**
+ * Brainstorm's own model (GEMINI_BRAINSTORM_MODEL, optional; the planner keeps GEMINI_MODEL).
+ * gemini-3.6-flash took 55-57 s on the free tier even with low thinking (2026-11-13);
+ * gemini-3.1-flash-lite with low thinking answered in about 8 s with 5 good ideas. A fixed model
+ * id, never a moving "-latest" alias.
+ */
+export const DEFAULT_BRAINSTORM_MODEL = "gemini-3.1-flash-lite";
+
+/** The Gemini adapter set up for brainstorming: low thinking, no retries of its own (they happen here, logged). */
 export function createBrainstormProvider(options: { apiKey: string; model: string; fetch?: typeof fetch }): PlannerProvider {
   return new GeminiPlanner({
     apiKey: options.apiKey,
@@ -76,6 +84,7 @@ export function createBrainstormProvider(options: { apiKey: string; model: strin
     retry: { maxRetries: 0 },
     requestTimeoutMs: BRAINSTORM_REQUEST_TIMEOUT_MS,
     maxOutputTokens: BRAINSTORM_MAX_OUTPUT_TOKENS,
+    thinkingLevel: "low",
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
 }

@@ -12,11 +12,12 @@ import {
   buildBrainstormUserPrompt,
   cleanIdeaField,
   createBrainstormProvider,
+  DEFAULT_BRAINSTORM_MODEL,
   evaluateBrainstormOutput,
   type BrainstormCallReport,
   type BrainstormUsageSink,
 } from "../packages/pipeline/src/brainstorm";
-import { ProviderError, withRetries } from "../packages/pipeline/src/providers";
+import { GeminiPlanner, ProviderError, withRetries } from "../packages/pipeline/src/providers";
 import type { PlannerProvider, PlannerRequest, PlannerResponse } from "../packages/pipeline/src/providers";
 
 // F14: C7 brainstorm in the pipeline package: prompt, answer check, runner (retries, repair, time
@@ -306,18 +307,25 @@ describe("Gemini adapter for brainstorm (mocked HTTP API, no network)", () => {
 
   it("503 then 429 then success: retried through the real adapter; JSON mode and schema sent", async () => {
     const mock = mockFetch([() => httpError(503, "UNAVAILABLE"), () => httpError(429, "RESOURCE_EXHAUSTED"), ok]);
-    const provider = createBrainstormProvider({ apiKey: "test-key-not-real", model: "gemini-3.6-flash", fetch: mock.fetch });
+    const provider = createBrainstormProvider({ apiKey: "test-key-not-real", model: DEFAULT_BRAINSTORM_MODEL, fetch: mock.fetch });
     const usage = recordingUsage();
     const r = await brainstormIdeas({ provider, subject: "Indian monsoon", language: "en", usage: usage.sink, sleep: noSleep });
     expect(r.ideas).toHaveLength(5);
     expect(mock.calls).toHaveLength(3);
-    expect(mock.calls[0]!.url).toContain("models/gemini-3.6-flash:streamGenerateContent");
+    expect(DEFAULT_BRAINSTORM_MODEL).toBe("gemini-3.1-flash-lite");
+    expect(mock.calls[0]!.url).toContain("models/gemini-3.1-flash-lite:streamGenerateContent");
     expect(mock.calls[0]!.url).not.toContain("test-key-not-real");
     expect(mock.calls.every((c) => c.signal)).toBe(true);
     const body = JSON.parse(mock.calls[0]!.body);
-    expect(body.generationConfig).toMatchObject({ responseMimeType: "application/json", maxOutputTokens: 8192 });
+    expect(body.generationConfig).toMatchObject({ responseMimeType: "application/json", maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: "LOW" } });
     expect(usage.reports.map((x) => x.outcome)).toEqual(["busy", "busy", "ok"]);
     expect(usage.reports[2]!.usage).toMatchObject({ promptTokens: 700, outputTokens: 300, thinkingTokens: 120 });
+  });
+
+  it("the storyboard planner (GeminiPlanner without the option) sends no thinkingConfig", async () => {
+    const mock = mockFetch([ok]);
+    await new GeminiPlanner({ apiKey: "k", model: "gemini-3.6-flash", fetch: mock.fetch }).generate({ systemInstruction: "s", turns: [{ role: "user", text: "u" }], responseJsonSchema: { type: "object" } });
+    expect(JSON.parse(mock.calls[0]!.body).generationConfig.thinkingConfig).toBeUndefined();
   });
 
   it("a safety block in the answer → rejected", async () => {

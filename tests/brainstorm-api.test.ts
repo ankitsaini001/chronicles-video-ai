@@ -249,11 +249,15 @@ describe("Gemini setup and the test-only fake switch", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("real Gemini needs GEMINI_API_KEY and GEMINI_MODEL", () => {
-    expect(brainstormProviderFromEnv({ GEMINI_MODEL: "m" })).toEqual({ ok: false, problem: expect.stringContaining("GEMINI_API_KEY is missing") });
-    expect(brainstormProviderFromEnv({ GEMINI_API_KEY: "k" })).toEqual({ ok: false, problem: expect.stringContaining("GEMINI_MODEL is missing") });
-    const r = brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_MODEL: "gemini-3.6-flash" });
+  it("real Gemini needs GEMINI_API_KEY; brainstorm has its own model (default gemini-3.1-flash-lite), not GEMINI_MODEL", () => {
+    expect(brainstormProviderFromEnv({ GEMINI_BRAINSTORM_MODEL: "m1" })).toEqual({ ok: false, problem: expect.stringContaining("GEMINI_API_KEY is missing") });
+    const d = brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_MODEL: "gemini-3.6-flash" });
+    expect(d.ok && d.fake === false && d.provider.model).toBe("gemini-3.1-flash-lite");
+    const e = brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_BRAINSTORM_MODEL: "  " });
+    expect(e.ok && e.provider.model).toBe("gemini-3.1-flash-lite");
+    const r = brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_MODEL: "gemini-3.6-flash", GEMINI_BRAINSTORM_MODEL: "gemini-3.6-flash" });
     expect(r.ok && r.fake === false && r.provider.model).toBe("gemini-3.6-flash");
+    expect(brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_BRAINSTORM_MODEL: "gemini flash" })).toEqual({ ok: false, problem: expect.stringContaining("GEMINI_BRAINSTORM_MODEL") });
     const f = brainstormProviderFromEnv(localTest);
     expect(f.ok && f.fake && f.provider.model).toBe("fake-gemini-e2e");
   });

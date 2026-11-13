@@ -1,4 +1,4 @@
-import { ApiError, GoogleGenAI, type GenerateContentResponse, type Model } from "@google/genai";
+import { ApiError, GoogleGenAI, ThinkingLevel, type GenerateContentResponse, type Model } from "@google/genai";
 import { parseRetryAfter, ProviderError } from "./errors";
 import type { PlannerProvider, PlannerRequest, PlannerResponse, TokenUsage } from "./planner";
 import { withRetries, type RetryOptions } from "./retry";
@@ -26,6 +26,8 @@ export interface GeminiOptions {
   requestTimeoutMs?: number;
   /** Output token cap (default 32,768, room for a full plan). */
   maxOutputTokens?: number;
+  /** Ask the model to think less (C7 brainstorm: "low"). Default: the model's own setting. */
+  thinkingLevel?: "low";
   /** Injectable for tests; defaults to global fetch. */
   fetch?: typeof fetch;
 }
@@ -49,10 +51,12 @@ export class GeminiPlanner implements PlannerProvider {
   private readonly state: { lastRetryAfterMs: number | null };
   private readonly retry: RetryOptions;
   private readonly maxOutputTokens: number;
+  private readonly thinkingLevel: "low" | undefined;
 
   constructor(options: GeminiOptions) {
     this.model = options.model;
     this.maxOutputTokens = options.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
+    this.thinkingLevel = options.thinkingLevel;
     const { client, state } = createClient(options.apiKey, options.fetch, options.requestTimeoutMs);
     this.client = client;
     this.state = state;
@@ -76,6 +80,7 @@ export class GeminiPlanner implements PlannerProvider {
               responseMimeType: "application/json",
               responseJsonSchema: request.responseJsonSchema,
               maxOutputTokens: this.maxOutputTokens,
+              ...(this.thinkingLevel === "low" ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
               ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
             },
           });
