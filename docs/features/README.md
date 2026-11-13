@@ -46,8 +46,8 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F05 | [MongoDB Atlas: create the account and database (together)](F05-mongodb-atlas-setup.md) | F04 | ✅ Done |
 | F06 | [Connect the app to MongoDB (test record)](F06-mongodb-connect.md) | F05 | ✅ Done |
 | F07 | [Allow-list (invite list)](F07-allow-list.md) | F06 | ✅ Done |
-| F08 | [Sign up](F08-sign-up.md) | F07 | 🧪 Testing |
-| F09 | [Log in and log out](F09-log-in-out.md) | F08 | ⬜ Not started |
+| F08 | [Sign up](F08-sign-up.md) | F07 | ✅ Done |
+| F09 | [Log in and log out](F09-log-in-out.md) | F08 | 🔨 In progress |
 | F10 | [Access pending page](F10-access-pending.md) | F08 | ⬜ Not started |
 | F11 | [App shell + empty My videos](F11-app-shell-empty-dashboard.md) | F09 | ⬜ Not started |
 
@@ -98,11 +98,11 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F08 is in progress (sign up). F04–F07 done.
+**Next up:** F09 is in progress (log in and log out). F04–F08 done.
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.
 - **Waitlist instead of a closed invite list:** people who aren't invited can request access from the Access pending page; the founder approves them (command first, admin page later).
 - **Email verification + self-service "Forgot password":** needs an email sending service and the domain (decided before F28/F38). Recommended before opening sign-up to everyone.
 - **Public launch sign-up:** email verification + per-account limits + spend ceilings + a bot check (captcha), then drop the approval step.
-- **First admin account:** a one-time command (e.g. `npm run db -- make-admin <email>`) after the founder signs up; decide in F08.
+- **First admin account:** a one-time command (e.g. `npm run db -- make-admin <email>`) after the founder signs up; decide before F34.

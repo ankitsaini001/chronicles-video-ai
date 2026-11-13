@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F07 |
 | **Design** | Stitch: ByteReel — Sign up |
@@ -38,7 +38,7 @@ The 'ByteReel — Sign up' screen.
 - [x] 7. F08 indexes created in the real `bytereel` database (`npm run db -- indexes --feature F08 --apply`)
 - [x] 8. End-to-end test over HTTP against `next start` on port 3231 with the separate `bytereel_test` database; found and fixed a way around the rate limit (`2b12e56`); script `tools/e2e/f08-signup.ts` (`17181e6`); `bytereel_test` dropped afterwards
 - [x] 9. Q17 checks; DATABASE.md, API.md and openapi.yaml updated to match (`852f2ac`)
-- [ ] 10. Founder creates their own account at http://localhost:3000/signup and checks it in Atlas
+- [x] 10. Founder creates their own account at http://localhost:3000/signup and checks it in Atlas
 
 ## How we test it (done when all are ticked)
 - [x] Invited email can sign up; user appears in Atlas `user` collection (automated, in `bytereel_test`; the founder repeats it with their own email)
@@ -50,10 +50,11 @@ The 'ByteReel — Sign up' screen.
 - [x] Check whether the adapter stores `userId` as an ObjectId or a string; if a string, `packages/db` converts consistently (DATABASE.md §4 "Better Auth fields")
 - [x] Check whether the adapter created any indexes; the required ones exist (Atlas → collection → Indexes)
 - [x] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
 | 2026-11-13 | Built steps 1–9 in 9 commits. 353 tests pass (82 new), typecheck and `next build` clean, no secret in the browser files, one `mongodb` copy. End-to-end: 35/35 checks pass against `bytereel_test` (then dropped). The e2e found that a made-up `X-Forwarded-For` header gave fresh sign-up attempts under `next start`; fixed (header trusted only on Vercel). Q17: fields match, `userId` is an ObjectId, the adapter creates no indexes. Waiting for code review and the founder's own sign-up |
 | 2026-11-13 | Code review: the reviewer agent failed twice on an API outage (403 from the AI service), so the main session reviewed handler.ts, endpoints.ts, create-auth.ts, server.ts, route.ts, config.ts, rate-limit.ts and markInviteSignedUp directly. No must-fix: exact-path lockdown (encoded/trailing-slash/other-method → 404), Origin check (missing/`null`/foreign origin refused), role/status forced twice (strict body + hook), invite link stored as ObjectId once, atomic fixed-window counter with E11000 retry, secret never logged. **Known gap for F09 (before any deploy):** sign-in (A2) has no rate limit or lockout yet. change-password (needs a session) and reset-password (no way to create tokens until F35) stay on Better Auth defaults behind the lockdown. 353 tests pass, typecheck clean. Waiting for the founder to create their account. |
+| 2026-11-13 | Founder signed up with their own email at http://localhost:3000/signup and landed on the temporary dashboard ("Signed in as Ankit"). Read-only check on Atlas: 1 user (`role creator`, `status active`, Asia/Kolkata), password stored only as a scrypt `salt:hash`, 1 session valid 30 days with `userId` as ObjectId, `allowlist.signedUpUserId` matches the user, all F07/F08 indexes present. Header stays "Log in" only (invite-only); the home page's "Create your first reel" buttons lead to `/signup`. Founder: "F08 look good" → ✅. F09 must show the user's name in the header when signed in. |
