@@ -5035,7 +5035,7 @@ components:
               narration:
                 - { id: line-hook, text: 'You scan a QR code, type your PIN, and the chaiwala gets paid in two seconds. How does the money travel so fast?', speech: null, display: null }
               objects:
-                - { id: hook-title, kind: headline, label: How does UPI move money?, icon: question, value: null }
+                - { id: hook-title, kind: headline, label: 'How does UPI move money?', icon: question, value: null }
                 - { id: hook-sub, kind: subtitle, label: "From QR code to the shop's bank in 2 seconds", value: null }
               events:
                 - { id: ev-hook-title, anchor: { narrationId: line-hook, phrase: How does the money travel }, action: appear, target: hook-title }
