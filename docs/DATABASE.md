@@ -440,7 +440,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 **Indexes**
 - `{ ownerId: 1, updatedAt: -1 }`: the "My videos" list, newest first.
 - `{ ownerId: 1, state: 1 }`: the tabs (Drafts, Ready, Scheduled, Published).
-- No index on `activeJobId`: ARCHITECTURE §8.3 listed a sparse one, but it isn't needed. A job already stores its `projectId`, so "which project does this job belong to?" is a lookup by `_id`.
+- No index on `activeJobId`: an earlier version of ARCHITECTURE §8.3 listed a sparse one, but it isn't needed. A job already stores its `projectId`, so "which project does this job belong to?" is a lookup by `_id`.
 
 #### 4.9 `jobs`
 **Purpose:** one document per piece of **background work**: making a storyboard (`plan`), applying a change request (`revise`), making the video (`generate`), re-rendering after a caption fix (`caption`), or publishing (`publish`). It stores the progress you see on screen ("Recording narration · scene 3 of 6") and lets a failed job **resume** without paying for finished steps again. It replaces the prototype's `manifest.json`.
