@@ -3,4 +3,5 @@ export { Card } from "./Card";
 export { Icon, PlayIcon, type IconName } from "./Icon";
 export { Chip } from "./Chip";
 export { Input } from "./Input";
+export { PasswordInput } from "./PasswordInput";
 export { cn } from "./cn";

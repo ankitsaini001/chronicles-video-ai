@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Button, Card, Chip, Input } from "@/components/ui";
+import { Button, Card, Chip, Input, PasswordInput } from "@/components/ui";
 
 // Developer-only style sheet: every basic building block with the Ember Gold tokens, to compare
 // against the approved Stitch designs. Not available in production builds.
@@ -103,7 +103,7 @@ export default function StyleGuidePage() {
           <div className="grid max-w-md gap-5">
             <Input id="sg-name" label="Name" placeholder="Your name" />
             <Input id="sg-email" label="Email" type="email" placeholder="you@example.com" />
-            <Input id="sg-password" label="Password" type="password" helper="8 to 128 characters" />
+            <PasswordInput id="sg-password" label="Password" helper="8 to 128 characters" />
             <Input
               id="sg-error"
               label="Email"
