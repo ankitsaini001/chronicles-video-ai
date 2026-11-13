@@ -372,7 +372,7 @@ Counters live in the `rateLimits` collection (fixed windows, TTL-expired). `fail
 
 ### 4.2 Error code → HTTP status
 
-Codes from ARCHITECTURE §12.4 are marked **§12.4**; the others were added for the REST API.
+Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §12.4; the others were added for the REST API. That ARCHITECTURE list was removed (ARCHITECTURE §12 now points here), so **this table is the only error list**. The marker only records where a code came from.
 
 | Code | HTTP | Meaning | Typical endpoints |
 |---|---|---|---|
@@ -1422,7 +1422,7 @@ Example: see §8.2 (running) and §8.3 (`needs_input`). Failed example:
 
 #### E2. `POST /api/v1/jobs/{jobId}/retry` — Retry / resume
 Purpose: **Retry** / **Try again** buttons. Resumes from the last good checkpoint; finished stages and paid artifacts are reused (ARCHITECTURE §13.2). Auth: creator. Rate: 30/hour. **Idempotency-Key required.** Body: `{}`.
-Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; a retry that plans from an edited idea counts 1 toward the per-project plan + revision limit (§12.4). Effect: state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
+Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; a retry that plans from an edited idea counts 1 toward the per-project plan + revision limit (§10.1). Effect: state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
 Success `202` → `Job`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
 ```json
 {}
