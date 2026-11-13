@@ -122,7 +122,7 @@ async function main(): Promise<void> {
   check("only the checked language chip is in the Tab order", radios.filter((x) => x.includes('tabindex="0"')).length === 1 && checked.every((x) => x.includes('tabindex="0"')));
   check("one primary button: Create storyboard", (html.match(/Create storyboard/g) ?? []).length === 1 && !html.includes("Create your first reel"));
   check("stepper: Idea is the current step of 4", /aria-current="step"[^>]*>.*?1 .*?Idea/.test(html) && ["Storyboard", "Video", "Publish"].every((s) => html.includes(s)));
-  check("no Brainstorm (F14) yet; a ▶ sample button per voice (F13)", !html.includes("Brainstorm") && html.includes('aria-label="Play female voice sample"') && html.includes('aria-label="Play male voice sample"'));
+  check("✨ Brainstorm with AI (F14) is a secondary button; a ▶ sample button per voice (F13)", html.includes("Brainstorm with AI") && html.includes('aria-label="Play female voice sample"') && html.includes('aria-label="Play male voice sample"'));
   check("projects today: 0 of 5", html.includes("Projects today: 0 of 5"));
   check("the F11 placeholder is gone", !html.includes("Step 1 Idea arrives in F12"));
 
