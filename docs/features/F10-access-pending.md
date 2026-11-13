@@ -2,7 +2,7 @@
 
 | 2026-11-13 | Built and checked. `next start` on port 3233 with `bytereel_test`: page answers 200 with the right heading and title, "Request access" is a mailto link to the contact email with the subject and message, "Back to home" links to `/`; sign-up with a not-invited email answers 403 `NOT_ALLOWLISTED`, which the sign-up form sends to this page. `bytereel_test` dropped afterwards; port 3000 not touched. 402 tests pass (4 new), typecheck and `next build` clean. Note: until we have a real address, `SITE.contactEmail` is the placeholder `contact@example.com`. Waiting for the founder's test. |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done |
 | **Phase** | A2 · Accounts and database |
 | **Depends on** | F08 |
 | **Design** | Stitch: ByteReel — Access pending |
@@ -33,9 +33,10 @@ The 'ByteReel — Access pending' screen.
 - [x] Not-invited sign-up lands here
 - [x] Both buttons work
 - [x] Code review passed (main session; small page, no auth or data changes)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ## Progress log
 | Date | What happened |
 |---|---|
 | | |
+| 2026-11-13 | Founder tested the not-invited sign-up, Request access and Back to home. Founder: "looks good" → ✅. |
