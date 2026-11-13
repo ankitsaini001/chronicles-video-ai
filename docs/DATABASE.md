@@ -71,7 +71,11 @@ A **validator** is a rule attached to a collection, for example "`state` must be
 ### 1.5 Indexes
 An **index** works the same as in MySQL: a sorted lookup list that makes a search fast. A **unique** index also forbids duplicates ("one account per email"). Two kinds you may not have used:
 - **Partial index**: applies only to some documents ("unique `igUserId`, but only among *active* connections").
-- **TTL index** (time to live): MongoDB deletes documents automatically after a time ("forget idempotency keys after 24 hours").
+- **TTL index** (time to live): MongoDB deletes documents automatically after a time ("forget idempotency keys after 24 hours"). Four things to know:
+  - The clean-up runs in the background **about every 60 seconds** and can fall behind when the server is busy, so an expired document may still be there for a minute or more.
+  - A TTL index works on **one date field** only.
+  - A document whose TTL field is **missing or not a date** is **never** deleted.
+  - Because of the delay, **our code still checks the expiry itself** ("is `expiresAt` in the past?") and treats an expired document as gone. TTL is only the tidy-up.
 
 ### 1.6 Transactions
 A **transaction** groups several writes so they **all happen or none happen**, like `DB::transaction()` in Laravel. Example: approving a storyboard must save the approval *and* create the video job *and* update the project. If one fails, all are undone. A change to **one** document is always all-or-nothing on its own; transactions are for changes to **several** documents. Full list in §7.
@@ -88,14 +92,19 @@ A **transaction** groups several writes so they **all happen or none happen**, l
 - **Service:** MongoDB Atlas, the company's cloud database.
 - **Plan:** the free **M0** cluster: **512 MB** of storage, no automatic backups (§10). A *cluster* is the database server Atlas runs for us; M0 is the free size.
 - **Owner:** **your own Atlas account**, created together in **F05**. You log in to Atlas and see every record yourself. No hidden or local database is used by the app.
-- **Region:** recommended **Mumbai (AWS `ap-south-1`)**, close to Indian users, if Atlas offers it for free clusters. Decided in F05.
+- **Region:** the database must sit **next to the server that talks to it**, not next to the users: every page load makes several database calls from the Vercel function, and each call travels between the two. So we pick the **Atlas region and the Vercel function region together**. Recommended: **Atlas Mumbai (AWS `ap-south-1`) + Vercel functions in Mumbai (`bom1`)**, if Atlas offers Mumbai for free clusters (otherwise the nearest free region, with Vercel set to match). Decided in **F05**; the Vercel side is set again in F38.
 - **Connection:** the app connects with a connection string (`MONGODB_URI`) that contains a database user and password created in F05. The connection is encrypted (TLS). Atlas also has a network access list (which computers may connect), set up in F05.
 
 ### 2.2 Database name
 - ARCHITECTURE only names the setting (`MONGODB_DB`, §26.2), not its value. **F05 uses `bytereel`**, so this document uses **`bytereel`**.
-- Whether production gets its own database or cluster later is open (**Q1**).
+- Production gets its own free cluster in a second Atlas project at F38 (**Q1**).
 
-### 2.3 What is NOT in MongoDB
+### 2.3 Local development uses the Atlas dev database
+- When you run the app on your computer, it connects to the **same Atlas dev database** (`bytereel` on your free M0), through `MONGODB_URI` in your `.env`. No MongoDB is installed on your computer.
+- Why not a local Docker MongoDB: a single local MongoDB server (a "standalone" `mongod`) **can't run transactions**, and ByteReel needs them (§7). Making a local one that can is extra setup for no gain. One database is also simplest: what you see in Atlas is exactly what the app wrote.
+- Automated tests may still use a throw-away in-memory MongoDB that runs as a replica set (ARCHITECTURE §26.4); that is for tests only, never for running the app.
+
+### 2.4 What is NOT in MongoDB
 
 | What | Where it lives | What MongoDB keeps |
 |---|---|---|
@@ -106,12 +115,12 @@ A **transaction** groups several writes so they **all happen or none happen**, l
 
 Why: video and audio files are large (a 75-second reel ≈ 18 MB). 512 MB of database would fill after about 25 videos. R2 has 10 GB free. Keeping files out keeps the database small and fast.
 
-### 2.4 How you can look at the data
+### 2.5 How you can look at the data
 - **Atlas website:** Database → **Browse Collections** (the *Data Explorer*). You can open every collection and read every document. We tour it in F05.
 - **MongoDB Compass:** MongoDB's free desktop app. Paste the same connection string and you get the same view, plus export to JSON/CSV (useful for the safety net in §10).
 - Rule for both: **look, don't edit by hand**, unless we agree on it. Editing a document by hand can skip rules our code enforces (approvals, versions).
 
-### 2.5 The big picture
+### 2.6 The big picture
 
 ```
   Creator's browser
@@ -177,6 +186,10 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 ### Accounts (phase A2, plus `verification` in A6)
 
+**Better Auth fields (4.1–4.4).** The core fields below come from Better Auth's documented core schema (`user`, `session`, `account`, `verification`). **To confirm against the real documents in F08** (Q17). Two rules for all four collections:
+- **All ids are ObjectId.** Better Auth calls its id `id`; in MongoDB it is stored as `_id`. Our code in `packages/db` converts between ObjectId (database) and string (API) in one place.
+- **F08 check:** if the adapter stores `userId` as a **string** instead of an ObjectId, a lookup with an ObjectId would find nothing. F08 checks a real `session`/`account` document and, if needed, makes `packages/db` convert consistently.
+
 #### 4.1 `user` (Better Auth)
 **Purpose:** one document per person with a ByteReel account. Better Auth (our login library) creates and manages it; we add a few extra fields. Unlike a Laravel `users` table, **the password is not here**: it's in `account` (4.3).
 
@@ -231,7 +244,10 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 {
   _id: ObjectId("67330c1b9f1e4b2a7c0d1f01"),
   userId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
+  token: "Qm9vX2V4YW1wbGVfdG9rZW5fbm90X3JlYWw",   // fake
   expiresAt: ISODate("2026-12-12T04:30:00.000Z"),
+  ipAddress: "203.0.113.24",
+  userAgent: "Mozilla/5.0 (Linux; Android 14) …",
   createdAt: ISODate("2026-11-12T04:30:00.000Z"),
   updatedAt: ISODate("2026-11-12T04:30:00.000Z")
 }
@@ -239,16 +255,20 @@ How to read each section: **Purpose** → **Example** (fake data) → **Fields**
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
-| `_id` | ObjectId | Session id | Auto |
+| `_id` (`id`) | ObjectId | Session id | Auto |
 | `userId` | ObjectId → `user` | Whose session | Auto |
+| `token` | string | The session token. Your cookie holds this token plus a signature | Auto |
 | `expiresAt` | date | 30 days after the last refresh (rolling: pushed forward at most once a day while you use the app) | Auto |
+| `ipAddress`, `userAgent` | string? | The browser's IP address and browser name when the session was made | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
-
-Better Auth also keeps a few housekeeping fields of its own here, such as the session token that matches your cookie and possibly the browser's IP address and user agent. The docs don't list them; we confirm the exact set when F08 runs (Q17).
 
 **Rules**
 - Deleted on logout; **all** of a user's sessions are deleted on password reset, suspension and account deletion. Changing your password deletes all your *other* sessions.
 - The cookie cache is off: every request reads this collection, so a deleted session stops working immediately.
+
+**Security notes (plain words)**
+- Better Auth stores the session **token in plain text** (the cookie is the token + a signature). So anyone who can **read the database** could copy a token and act as that user until the session ends. That's why the database user/password (`MONGODB_URI`) must be protected like a master key: only in `.env` and Vercel settings, never shared, never in git. Same reasoning as the reset tokens in Q15.
+- `ipAddress` and `userAgent` are **personal data** (DPDP). We keep them only as long as the session: the TTL index deletes expired sessions, and account deletion deletes all sessions.
 
 **Indexes (required, phase A2, created by us, see 4.1):** unique `token` (every request finds its session by token); `userId` (log a user out everywhere); **TTL on `expiresAt`** with `expireAfterSeconds: 0` (MongoDB deletes a session soon after it expires, see §1.5).
 
@@ -258,8 +278,9 @@ Better Auth also keeps a few housekeeping fields of its own here, such as the se
 ```js
 {
   _id: ObjectId("67330c1a9f1e4b2a7c0d1e11"),
-  userId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
+  accountId: "67330c1a9f1e4b2a7c0d1e01",
   providerId: "credential",
+  userId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
   password: "9f2c4e…:b71a0d…",   // scrypt hash, never the real password
   createdAt: ISODate("2026-11-12T04:30:00.000Z"),
   updatedAt: ISODate("2026-11-12T04:30:00.000Z")
@@ -268,13 +289,13 @@ Better Auth also keeps a few housekeeping fields of its own here, such as the se
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
-| `_id` | ObjectId | Account id | Auto |
-| `userId` | ObjectId → `user` | Whose credential | Auto |
+| `_id` (`id`) | ObjectId | Account id | Auto |
+| `accountId` | string | The id of the account at the provider. For `credential` it is the user's id | Auto |
 | `providerId` | string | Always `credential` in V1 (no Google/social login, decision D1) | Auto |
+| `userId` | ObjectId → `user` | Whose credential | Auto |
 | `password` | string | **scrypt hash** of the password (§6.1). Unreadable and irreversible | Auto |
+| `accessToken`, `refreshToken`, `idToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `scope` | | Better Auth fields for social logins. **Unused in V1** (missing or `null`) | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
-
-Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); confirmed in F08 (Q17).
 
 **Rules:** written only by Better Auth (sign-up, change password, reset password). Never returned by any endpoint, never logged.
 
@@ -288,16 +309,19 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
   _id: ObjectId("67331a009f1e4b2a7c0d0b01"),
   identifier: "reset-password:x7Qp2sVb9LmN4cRt8wYz1aBcDeFgHiJk3LmNoPqRsTu",
   value: "67330c1a9f1e4b2a7c0d1e01",
-  expiresAt: ISODate("2026-11-12T08:00:00.000Z")
+  expiresAt: ISODate("2026-11-12T08:00:00.000Z"),
+  createdAt: ISODate("2026-11-12T07:00:00.000Z"),
+  updatedAt: ISODate("2026-11-12T07:00:00.000Z")
 }
 ```
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
-| `_id` | ObjectId | Row id | Auto |
+| `_id` (`id`) | ObjectId | Row id | Auto |
 | `identifier` | string | `reset-password:<token>`. The token is 32 random bytes, shown once to the admin | Auto |
 | `value` | string | The user's id the link belongs to | Auto |
 | `expiresAt` | date | Created + **1 hour** | Auto |
+| `createdAt`, `updatedAt` | date | Timestamps | Auto |
 
 **Rules:** one live link per user (creating a new one deletes older unused ones); the row is deleted when used; after 1 hour it's invalid. The token is never logged or shown again (see Q15).
 
@@ -362,6 +386,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
   currentRenderId: null,
   activeJobId: null,
   stateVersion: 4,
+  planRequestCount: 2,
   lastError: null,
   createdAt: ISODate("2026-11-12T05:00:00.000Z"),
   updatedAt: ISODate("2026-11-12T05:12:40.000Z"),
@@ -383,6 +408,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | `currentRenderId` | ObjectId? → `renders` | "The video" (latest successful render) | No |
 | `activeJobId` | ObjectId? → `jobs` | The one job running for this project, or null | No |
 | `stateVersion` | int ≥ 1 | +1 on every change. Stops two browser tabs from overwriting each other (`STALE_VERSION`, §7.3) | Auto |
+| `planRequestCount` | int 0–limit | How many of the **20 plan + revision requests** this project has used: 1 at creation (C2), +1 per accepted revision (D5) and per plan retry from an edited idea (E2). Increased in the same transaction, and only if still below the limit (Q7) | Auto |
 | `lastError` | `{ code, message, at }`? | Plain-language error shown to the creator | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
 | `archivedAt` | date? | When it was archived (soft delete, §6.6) | No |
@@ -396,7 +422,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 **Indexes**
 - `{ ownerId: 1, updatedAt: -1 }`: the "My videos" list, newest first.
 - `{ ownerId: 1, state: 1 }`: the tabs (Drafts, Ready, Scheduled, Published).
-- `{ activeJobId: 1 }` (sparse = only documents that have it): find the project of a running job.
+- No index on `activeJobId`: ARCHITECTURE §8.3 listed a sparse one, but it isn't needed. A job already stores its `projectId`, so "which project does this job belong to?" is a lookup by `_id`.
 
 #### 4.9 `jobs`
 **Purpose:** one document per piece of **background work**: making a storyboard (`plan`), applying a change request (`revise`), making the video (`generate`), re-rendering after a caption fix (`caption`), or publishing (`publish`). It stores the progress you see on screen ("Recording narration · scene 3 of 6") and lets a failed job **resume** without paying for finished steps again. It replaces the prototype's `manifest.json`.
@@ -496,7 +522,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 - **Insert-only.** Never updated, never deleted (except account deletion).
 - A version is saved **even if it fails validation** (so no typing is lost); it just can't be approved until fixed.
 - `plan.ownerId`, `plan.projectId`, `plan.versionId` are set by code, never by the AI.
-- A copy of the plan is also written to R2 (`plans/{planVersionId}/plan.json`, ARCHITECTURE §9) for the render step; MongoDB is the record the app reads.
+- A copy of the plan is also written to R2 (`users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json`, ARCHITECTURE §9) for the render step; MongoDB is the record the app reads.
 
 **Indexes**
 - unique `{ projectId: 1, versionNumber: -1 }`: no two "version 3"s in one project; also lists versions newest first.
@@ -588,6 +614,8 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 
 **Limits it supports (API.md §10.1):** 5 projects per user per day, 3 videos (accepted `generate` jobs) per user per day, reset at midnight in the user's timezone. **Caption fixes never count** toward the 3/day. Retries and reusing an existing video don't count either.
 
+**In plain words: the voice limit is the one that really matters.** Each user may use **3,000 narration characters per month** (ARCHITECTURE §23: "ElevenLabs characters per user per month | 3,000"; API.md §10.1: "ElevenLabs characters per user per month | 3,000 | Reserved before each speech call"). One video needs about **1,000 characters** of narration (ARCHITECTURE §25.4: "ElevenLabs (~1,000 characters)"). So each user can make **about 3 voiced videos per month**, and the "3 videos per day" limit will rarely be reached. Re-using recorded narration (§4.18) and caption fixes don't use characters; re-recording after a narration edit uses characters only for the changed scenes.
+
 **Example and field list:** not defined yet. Also undecided: where the **20 plan + revision requests per project** and the **3,000 narration characters per month** are counted (Q2, Q7).
 
 #### 4.15 `providerUsage`
@@ -605,6 +633,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
   model: "eleven_multilingual_v2",
   units: { promptTokens: 0, outputTokens: 0, characters: 214, renderSeconds: 0 },
   estCostInr: 1.9,
+  status: "final",
   at: ISODate("2026-11-12T05:40:20.000Z")
 }
 ```
@@ -617,9 +646,10 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | `operation`, `model` | string | What was called | Yes |
 | `units` | `{ promptTokens, outputTokens, characters, renderSeconds }` | How much was used | Yes |
 | `estCostInr` | number | Estimated cost in rupees | Yes |
+| `status` | `reserved` \| `final` \| `failed` | `reserved` = written before the call with the estimate; `final` = the call finished, real units filled in; `failed` = the call failed (kept with the units the provider still billed, usually 0) | Yes |
 | `at` | date | When | Yes |
 
-**Rules:** written **before** the call (reserved) and finalized after, so a crash can't hide spending. Kept 12 months (ARCHITECTURE §22; see Q10 for account deletion).
+**Rules:** written **before** the call (`status: reserved`) and finalized after (`final` or `failed`), so a crash can't hide spending: a `reserved` row still counts toward the ceilings. Kept 12 months (ARCHITECTURE §22; see Q10 for account deletion).
 
 **Indexes:** `{ at: -1 }` (totals by time), `{ ownerId: 1, at: -1 }` (one user's usage), `{ provider: 1, at: -1 }` (per service).
 
@@ -633,7 +663,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
   actorId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
   action: "storyboard.approved",
   subject: { type: "planVersion", id: ObjectId("67330e019f1e4b2a7c0d2b02") },
-  data: { projectId: "67330d5e9f1e4b2a7c0d2a10" },
+  data: { projectId: ObjectId("67330d5e9f1e4b2a7c0d2a10") },
   at: ISODate("2026-11-12T05:40:00.000Z")
 }
 ```
@@ -644,7 +674,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | `actorId` | ObjectId → `user` | Who did it | Yes |
 | `action` | string | e.g. `storyboard.approved`, `post.published`, `instagram.connected`, `account.deleted` | Yes |
 | `subject` | `{ type, id }` | What it was done to | Yes |
-| `data` | object | Extra details, **redacted** (no tokens, passwords or secrets) | No |
+| `data` | object | Extra details, **redacted** (no tokens, passwords or secrets). Ids inside it are stored as ObjectId, like everywhere else | No |
 | `at` | date | When | Yes |
 
 **Rules:** append-only. No automatic expiry in V1. On account deletion the entries are **anonymized**, not deleted (§6.7).
@@ -656,7 +686,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 
 ```js
 {
-  _id: ObjectId("67330a009f1e4b2a7c0d0f01"),
+  _id: "global",
   version: 3,
   maintenance: { active: false, message: null },
   limits: { videosPerUserPerDay: 3, projectsPerUserPerDay: 5, planRequestsPerProject: 20, voiceCharactersPerUserPerMonth: 3000 },
@@ -670,6 +700,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
+| `_id` | string, always `"global"` | Fixed id: the app always reads `{ _id: "global" }`, so there can never be a second settings document | Auto |
 | `version` | int | +1 on every save; two admins can't overwrite each other | Auto |
 | `maintenance` | `{ active, message ≤ 300 }` | Pauses all changes (reads still work) | Yes |
 | `limits` | object | Per-user limits (ranges in API.md I12) | Yes |
@@ -719,7 +750,9 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | `status` | `pending` \| `ready` \| `failed` | Recording state | Yes |
 | `createdAt` | date | When | Auto |
 
-**Rules:** **reuse never crosses owners**: Priya's clip is never used in another user's video, even with identical text.
+**Rules**
+- **Reuse never crosses owners**: Priya's clip is never used in another user's video, even with identical text.
+- A **retry after a failed recording updates the same document** (`status: failed` → `pending` → `ready`) instead of adding a new one: the unique `{ ownerId, cacheKey }` index allows only one document per recording setup.
 
 **Indexes:** unique `{ ownerId, cacheKey }`: one clip per owner per exact recording setup.
 
@@ -786,7 +819,8 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
   projectId: ObjectId("67330d5e9f1e4b2a7c0d2a10"),
   schemaVersion: 1,
   basePlanVersionId: ObjectId("67330e019f1e4b2a7c0d2b02"),
-  overrides: [ { sceneId: "scene-flow", phraseIndex: 1, text: "to NPCI — the national switch" } ]
+  overrides: [ { sceneId: "scene-flow", phraseIndex: 1, text: "to NPCI — the national switch" } ],
+  createdAt: ISODate("2026-11-12T06:02:00.000Z")
 }
 ```
 
@@ -795,6 +829,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | `_id`, `ownerId`, `projectId` | ObjectId | Set id; owner; project | Auto |
 | `basePlanVersionId` | ObjectId → `planVersions` | The storyboard version the fixes belong to | Yes |
 | `overrides` | list of `{ sceneId, phraseIndex, text 1–200 }` | Replacement caption text per phrase | Yes |
+| `createdAt` | date | When the set was saved | Auto |
 
 **Rules:** each (scene, phrase) appears once per set; Hindi text must be Devanagari and Hinglish Roman. Caption fixes **don't count** toward the 3 videos/day. Kept across visual-only revisions (PIPELINE_DESIGN §5).
 
@@ -895,14 +930,14 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 **Rules (the hard rule: nothing publishes without approval)**
 - A post is created **only** by the creator through H2. Jobs, admins and the AI can never create an approval.
 - **Any change requested on the project** (revision, narration edit, voice switch, undo, caption fix), disconnecting or switching the Instagram account, Meta's deauthorize callback, suspending the user, or a new render moves a post that is **`scheduled` or `publish_failed`** to `approval_invalidated` **at the moment the change is requested**, in the same transaction (§7). Why `publish_failed` too: a failed post can be retried (H6, admin I9), and a retry must never publish with an approval that no longer matches. Archiving the project and deleting the account move both states to `cancelled` instead. Re-approving creates a new approval id, so a new `publishKey`.
-- The publish job uses **conditional updates** ("move to `publishing` only if the post is still `scheduled`"), so a change made at the last second can't slip through.
+- The publish job uses **conditional updates** ("move to `publishing` only if the post is still `scheduled`"), so a change made at the last second can't slip through. The real guard is the post's **`state`** plus the full re-check below, not `approval.renderId`: the approval snapshot never changes on a post, so checking it against itself proves nothing. Every change moves the post out of `scheduled`/`publish_failed` in the same transaction, so the `state` filter catches it.
 - **The full re-check** (right before posting, and in every retry, H6 and I9) also requires: the project is **not archived**, the owner's `user.status` is **`active`**, the project's `currentRenderId` is still `approval.renderId`, and the project's `currentPlanVersionId` and `approvedPlanVersionId` still equal that render's `planVersionId`. Any difference → no publish.
 - `captionHash` is computed by the server; `igUserId` is copied from the connection.
 
 **Indexes**
 - unique `publishKey`: the same approval can never post twice.
 - `{ ownerId: 1, createdAt: -1 }`: the user's posts, newest first.
-- `{ state: 1, scheduledAt: 1 }`: find scheduled posts that are due.
+- `{ state: 1, scheduledAt: 1 }`: find scheduled posts that are due. **Open item for F30/F31:** a post can be scheduled up to 75 days ahead, and the publish job waits with Inngest's `sleepUntil`. Check the Inngest **free plan's maximum sleep** before F31. If it is shorter than 75 days, a small cron uses this index to start posts that are due.
 - unique partial `projectId` where `state` is `scheduled`, `publishing` or `outcome_unknown`: **one live post per project** (API A-14; see Q5).
 
 #### 4.23 `publishAttempts`
@@ -941,6 +976,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 {
   _id: ObjectId("673310f19f1e4b2a7c0d9a01"),
   ownerId: ObjectId("67330c1a9f1e4b2a7c0d1e01"),
+  schemaVersion: 1,
   type: "video_ready",
   projectId: ObjectId("67330d5e9f1e4b2a7c0d2a10"),
   postId: null,
@@ -954,6 +990,7 @@ Better Auth adds its own housekeeping fields here too (e.g. an `accountId`); con
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id`, `ownerId` | ObjectId | Notification id; owner | Auto |
+| `schemaVersion` | int | Document shape version (§1.7) | Auto |
 | `type` | `storyboard_ready` \| `video_ready` \| `needs_input` \| `generate_failed` \| `post_published` \| `post_failed` \| `approval_invalidated` \| `instagram_reconnect` | Kind | Yes |
 | `projectId`, `postId` | ObjectId? | What it is about | No |
 | `title`, `message` | string | The text shown | Yes |
@@ -1046,7 +1083,7 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
 
 **References are like foreign keys, but not enforced.** A reference is just the other document's `_id` stored in a field (e.g. `posts.renderId`). Unlike MySQL foreign keys, **MongoDB does not check them**: it wouldn't stop us saving a post that points to a render that doesn't exist, and it won't cascade-delete. **Our code enforces them**: the repositories in `packages/db` always load the referenced document with the same `ownerId`, and account deletion removes every related document itself (§6.7).
 
-**Embedded vs referenced.** Some data lives *inside* its parent instead of in its own collection: the whole storyboard (`planVersions.plan`), job stages (`jobs.stages`), and the publish approval (`posts.approval`). We embed when the data is only ever read together with its parent and must never change separately. The storyboard approval (#1) is a separate collection because it must be unique per version.
+**Embedded vs referenced.** Some data lives *inside* its parent instead of in its own collection: the whole storyboard (`planVersions.plan`), job stages (`jobs.stages`), and the publish approval (`posts.approval`). We embed when the data is only ever read together with its parent and must never change separately. The storyboard approval (#1) is a separate collection because `planVersions` are **insert-only**: a version can't be edited after it is saved, so the approval can't be written into it later. A separate document (unique per version) records it instead.
 
 ---
 
@@ -1061,6 +1098,7 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
 - Encrypted with **AES-256-GCM** before saving (ARCHITECTURE §21.4). The database stores `{ ciphertext, iv, tag, keyVersion }`, never the plain token.
 - The **key is not in the database**. It lives in environment variables: `TOKEN_ENCRYPTION_KEYS` (a JSON map `{ version: base64Key }`) and `TOKEN_ENCRYPTION_ACTIVE_VERSION`, in `.env` locally and in Vercel settings in production. Never in git.
 - So someone who gets a copy of the database alone can't use the tokens.
+- A **new random IV** (the "starting value" for AES-GCM) is made for **every** encryption, including each time a refreshed token is saved. Re-using an IV with the same key would break the encryption's safety.
 - `keyVersion` allows changing the key later (decrypt with the old key, re-encrypt with the new one).
 - If the key is lost, the stored tokens can't be decrypted and creators must reconnect Instagram. Videos and projects are unaffected.
 
@@ -1068,7 +1106,7 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
 - Every repository method takes the signed-in user's `ownerId` and adds it to **every** filter: `projects.get(ownerId, projectId)`. There is no "find by id" without an owner (ARCHITECTURE §10.3).
 - Another user's item is answered with **`404 NOT_FOUND`**, never `403`, so nobody can even learn that an id exists.
 - Background jobs receive `{ ownerId, projectId, jobId }` and re-check ownership before acting.
-- R2 links (presigned URLs) are created only after this check, and expire after 15 minutes.
+- R2 links (presigned URLs) are created only after this check, and expire after 15 minutes. One exception: the link Instagram uses to **fetch the video** for publishing lasts **2 hours** (ARCHITECTURE §9, decision D5) and is used only for that one upload.
 - Admin endpoints are the only exception, and admins see metadata only (no plan text, captions, videos or tokens).
 - Enforced by the typed repository API, a code-review/lint rule (no raw collection access outside `packages/db`), and tests that user A can't read or change user B's data.
 
@@ -1089,22 +1127,26 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId`, which every user
 ### 6.6 Archive is not delete
 - **Archiving** a project (C5, the "delete" on a project card) is a **soft delete**: `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. The project disappears from My videos.
 - **Nothing is deleted**: not in MongoDB, **not in R2**. A running job is asked to stop, and a `scheduled` or `publish_failed` post is `cancelled` (so it can never be published or retried).
-- Archiving is refused while a post is being published right now.
+- Archiving is refused while a post is being published right now (`publishing`) **or** its outcome is still being checked (`outcome_unknown`).
 - Real deletion of data happens only through account deletion (6.7).
 
 ### 6.7 Account deletion (India DPDP Act)
+> **Recommended — founder to confirm (Q10).** Steps 1 and 3 come from API.md B3; the exact list in step 2 (especially the `providerUsage`, `allowlist` and `deletionRequests` rules) is our recommendation until you confirm Q10.
+
 The creator deletes their account in Settings (B3, F33) with their password and by typing `DELETE`.
 
 1. **Immediately, in one transaction (§7):** user `status = deleting`, **all sessions deleted** (logged out everywhere), `scheduled` and `publish_failed` posts `cancelled`, running jobs asked to stop, a `deletionRequests` record created.
 2. **Then, in the background** (the `delete-account` job, a few moments later):
    - deletes the R2 folder `users/{ownerId}/` (all videos, audio, thumbnails);
    - deletes the Instagram token and connection;
-   - deletes every document with that `ownerId`: `projects`, `planVersions`, `revisions`, `storyboardApprovals`, `jobs`, `speechArtifacts`, `renders`, `captionOverrides`, `posts`, `publishAttempts`, `notifications`, and the user's usage records (see Q10 for `providerUsage`);
+   - deletes every document with that `ownerId`: `projects`, `planVersions`, `revisions`, `storyboardApprovals`, `jobs`, `speechArtifacts`, `renders`, `captionOverrides`, `posts`, `publishAttempts`, `notifications`, `idempotencyKeys`, `usageCounters`;
+   - deletes the person's **`allowlist` entry** (their email), so coming back needs a new invite;
+   - `rateLimits`: the counters hold only a **hash** of the IP, email or user id (never the raw value) and delete themselves within their short window (TTL), so there is nothing personal to clean up; counters for the user's id and email are deleted anyway by re-computing the hash;
+   - **anonymizes** `providerUsage` (not deleted): `ownerId`, `projectId` and `jobId` are removed, the provider, units, cost and date stay. Reason: the spend ceilings and the monthly totals must stay correct; deleting the rows would make it look as if that money was never spent;
    - **anonymizes** `auditLogs` (the entries stay, but no longer point to the person);
-   - **finally** removes the Better Auth rows (`user`, `account`, `session`, `verification`).
+   - **finally** removes the Better Auth rows (`user`, `account`, `session`, `verification`);
+   - the `deletionRequests` record (`kind: "account"`) keeps only `{ kind, status, requestedAt, completedAt }`: its `ownerId` is removed when it completes.
 3. The background job can be repeated safely if it is interrupted (it just deletes whatever is left).
-
-Open details (allow-list entry, `providerUsage` 12-month retention, what the `deletionRequests` record keeps): Q10.
 
 ### 6.8 Meta data-deletion request
 When someone removes ByteReel in their Instagram settings, Meta calls us (J2, F37). We create a `deletionRequests` record (`kind: meta_data`), then delete the Instagram connection document (token, username, picture), remove Instagram-derived fields on that user's posts (`igContainerId`, `igMediaId`, `permalink`; `approval.igUserId` is replaced by a hash), delete the `publishAttempts` request/response payloads, and invalidate `scheduled` and `publish_failed` posts. The ByteReel account and videos stay (they aren't Meta's data).
@@ -1118,24 +1160,30 @@ Many actions change several documents at once. If the server crashed halfway, we
 
 The checks (is this still the current version? is the job slot free? quota left?) are done **inside** the same transaction, so nothing can change between "check" and "write".
 
+**How the code does it (beginner note).** We use the driver's `session.withTransaction(async () => { … })`. If MongoDB reports a temporary conflict, `withTransaction` **runs the whole callback again**. So the callback must only contain database reads and writes. **Never send an Inngest event or call an outside service (Gemini, ElevenLabs, Meta, R2) inside it**: a re-run would send it twice, and a rolled-back transaction would have sent something for changes that never happened. Events are sent **after** the commit; if that send fails, the sweeper re-sends it (Q11). Calls to outside services happen before the transaction (e.g. the Instagram token exchange in G3) or in a background step.
+
 ### 7.2 The operations that use a transaction
 
 | # | Action | Endpoint · feature | Changes together | What would go wrong without it |
 |---|---|---|---|---|
-| 1 | Create project | C2 · F12/F15 | insert `projects` (`planning`) + insert `plan` job + set `activeJobId` + projects counter +1 | A project stuck in "planning" with no job, or a used quota with no project |
+| 1 | Create project | C2 · F12/F15 | insert `projects` (`planning`, `planRequestCount: 1`) + insert `plan` job + set `activeJobId` + `usageCounters` projects +1 | A project stuck in "planning" with no job, or a used quota with no project |
 | 2 | Edit idea after a failed storyboard | C4 · F15 | `projects` idea text, title, `stateVersion` (one document: atomic anyway) | — |
 | 3 | Edit narration / switch voice | D3, D4 · F17, F19 | insert `planVersions` + project pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, state, `stateVersion`) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | A new storyboard while an old publish approval stays live |
-| 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | Same as 3; or a revision with no job |
+| 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + `planRequestCount` +1 (only if below the limit) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | Same as 3; or a revision with no job, or a counted change with no revision |
 | 5 | Undo / restore a version | D7 · F17 | project pointers + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (ARCHITECTURE §17.5) | Same as 3 |
-| 6 | **Approve storyboard** (approval #1) | D8 · F20 | insert `storyboardApprovals` + insert `generate` job + project `generating`, `approvedPlanVersionId`, `activeJobId` + videos counter +1. Re-approving a version that already has a video instead points the project back to that render (no job, no quota) | Approval with no job, or a counted video with no job |
+| 6 | **Approve storyboard** (approval #1) | D8 · F20 | insert `storyboardApprovals` + insert `generate` job + project `generating`, `approvedPlanVersionId`, `activeJobId` + `usageCounters` videos +1. Re-approving a version that already has a video instead points the project back to that render (no job, no quota) | Approval with no job, or a counted video with no job |
 | 7 | Caption fix | F4 · F25 | insert `captionOverrides` + insert `caption` job + project `generating`, `activeJobId` + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (**no** quota counter) | A caption change while the old approval stays live |
-| 8 | **Publish now / schedule** (approval #2) | H2 · F30, F31 | insert `posts` (approval snapshot with a new approval id, `publishKey`) + insert `publish` job + project `publishing`/`scheduled` + audit `post.approved` | A post without a job (never published), or a job without its approval record |
-| 9 | Archive project | C5 · F21 | running job `cancelRequestedAt` + `scheduled`/`publish_failed` post `cancelled` + project `archived` | An archived project whose post still publishes or can be retried |
-| 10 | Disconnect Instagram | G4 · F28 | connection token removed, `status = revoked`, `revokedAt` + all `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit | Scheduled posts aimed at an account that is gone |
-| 11 | Suspend a user (admin) | I6 · F34 | user `suspended` + all sessions deleted + jobs asked to stop + `scheduled`/`publish_failed` posts → `approval_invalidated` | A suspended user still logged in, or their post still publishing |
-| 12 | **Delete account** | B3 · F33 | user `deleting` + all sessions deleted + `scheduled`/`publish_failed` posts `cancelled` + jobs asked to stop + insert `deletionRequests` | A half-deleted account that can still log in or post |
-
-(Connecting Instagram (G3) and Meta's deauthorize callback (J1) also change several documents, but API.md doesn't mark them as transactions; see Q12.)
+| 8 | Retry a job | E2 (and admin I9) · F15, F23 | job `queued`, `attempt` +1 + project back to `planning`/`generating`, `activeJobId`, `lastError` cleared + `planRequestCount` +1 when a plan retry uses an edited idea | A queued job the project doesn't know about, or a counted retry that never runs |
+| 9 | **Publish now / schedule** (approval #2) | H2 · F30, F31 | insert `posts` (approval snapshot with a new approval id, `publishKey`) + insert `publish` job + project `publishing`/`scheduled` + audit `post.approved` | A post without a job (never published), or a job without its approval record |
+| 10 | Cancel a scheduled post | H5 · F31 | post → `cancelled` + job cancelled + project → `video_ready` | A cancelled post whose job still wakes up, or a project stuck in "scheduled" |
+| 11 | Retry a failed publish | H6 (and admin I9) · F30 | post → `publishing`, `attempts` +1 + publish job re-queued (after the full re-check, §4.22) | A post marked "publishing" with no job behind it |
+| 12 | Archive project | C5 · F21 | running job `cancelRequestedAt` + `scheduled`/`publish_failed` post `cancelled` + project `archived` | An archived project whose post still publishes or can be retried |
+| 13 | Connect Instagram | G3 · F28 | upsert `instagramConnections` (encrypted token) + if it is a *different* account: `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit `instagram.connected` (the calls to Meta happen first, outside) | A new account connected while posts approved for the old one stay live |
+| 14 | Disconnect Instagram | G4 · F28 | connection token removed, `status = revoked`, `revokedAt` + all `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit | Scheduled posts aimed at an account that is gone |
+| 15 | Meta deauthorize callback | J1 · F37 | connection `revoked`, token removed + `scheduled`/`publish_failed` posts → `approval_invalidated` + notification `instagram_reconnect` + audit | Same as 14 |
+| 16 | Suspend a user (admin) | I6 · F34 | user `suspended` + all sessions deleted + jobs asked to stop + `scheduled`/`publish_failed` posts → `approval_invalidated` | A suspended user still logged in, or their post still publishing |
+| 17 | **Delete account** | B3 · F33 | user `deleting` + all sessions deleted + `scheduled`/`publish_failed` posts `cancelled` + jobs asked to stop + insert `deletionRequests` | A half-deleted account that can still log in or post |
+| 18 | **A job finishes** (the last step of every background job, and the stuck-job sweeper) | Inngest functions · F15 onwards | job final state (`succeeded`/`failed`/`needs_input`/`cancelled`) + project state + clear `activeJobId` + project pointers (e.g. `currentPlanVersionId`, `currentRenderId`) + notification. A short transaction: only these few writes | A finished job while the project still shows "working" forever, or a new video the project doesn't point to |
 
 ### 7.3 Other safety tools (no transaction needed)
 - **One-document changes are always atomic.** Updating several fields of one project at once is all-or-nothing by itself.
@@ -1165,7 +1213,6 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `rateLimits` | window end (TTL) | No | Old counters delete themselves | API §3.7 (field: Q2) |
 | `projects` | `{ ownerId, updatedAt: -1 }` | No | My videos list, newest first | ARCH §8.3 |
 | `projects` | `{ ownerId, state }` | No | The tabs | ARCH §8.3 |
-| `projects` | `{ activeJobId }` sparse | No | Find a job's project | ARCH §8.3 |
 | `planVersions` | `{ projectId, versionNumber: -1 }` | Yes | No duplicate version numbers; history order | ARCH §8.4 |
 | `planVersions` | `{ ownerId, projectId }` | No | Owner-scoped lookups | ARCH §8.4 |
 | `revisions` | `{ projectId, createdAt: -1 }` | No | Revision chat history | ARCH §8.5 |
@@ -1218,6 +1265,10 @@ Per user, the account records (`user`, `account`, `session`s, `allowlist`, `inst
 - 512 MB ≈ **5,000 typical projects** (≈ 1,700 if every project used all 20 changes).
 - At the full beta pace in ARCHITECTURE §25.2 (~22 videos a day), that's ~65 MB a month, so we'd reach ARCHITECTURE's **upgrade trigger of 300 MB** after roughly 4–5 months. Early beta use will be much lower.
 - We'll replace these guesses with real numbers after F15 and F23 (Atlas shows each collection's size).
+
+**Other free-tier (M0) limits besides size.** M0 also limits the number of **open connections**, the **operations per second** and the **data transfer** per week. The exact numbers change over time, so we read them on Atlas's current M0 page in **F05** and don't write them here as fact. What we do about them:
+- **Cache the MongoDB client globally.** On Vercel each server function can start many times; if every start opened a new connection, we would run out of connections. `packages/db` keeps one client in a global variable and reuses it (the usual Next.js pattern).
+- **Polling is the main load.** While a job runs, the browser asks for the status **every 2 seconds** (C6, decision D2): about 30 small reads per minute per open tab. That, not storage, is what pushes against the operations limit. Keep each status read to one or two small indexed queries, and stop polling when nothing is running (`pollAfterMs: null`).
 
 **What happens when it's full:** Atlas stops accepting new writes on the free cluster, while reads keep working. ByteReel would fail to save new projects or progress. To avoid it: watch the size in Atlas, and at 300 MB either clean up (e.g. `providerUsage` older than 12 months, old finished jobs) or upgrade to a paid tier. **Upgrading costs money, so it's your decision when we get there.**
 
@@ -1285,7 +1336,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | **Reference** | One document storing another's `_id`; like a foreign key, but not checked by the database |
 | **Embedded** | Data stored inside its parent document (e.g. the storyboard inside a plan version) |
 | **Index** | A sorted lookup list that makes searches fast |
-| **Unique / compound / partial / sparse / TTL index** | No duplicates / on several fields / only for some documents / only documents that have the field / deletes documents after a time |
+| **Unique / compound / partial / sparse / TTL index** | No duplicates / on several fields / only for documents matching a filter / skips documents where the field is **missing** (careful: a field set to `null` is still indexed, so `activeJobId: null` would be in a sparse index; a partial index is the precise tool) / deletes documents after a time (§1.5) |
 | **Validator** | A rule MongoDB checks on every write to a collection |
 | **Transaction** | Several writes that all happen or none happen |
 | **Replica set** | Several copies of the database kept in sync; required for transactions; Atlas always uses one |
