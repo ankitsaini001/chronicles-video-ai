@@ -1349,7 +1349,7 @@ Success `200` → `{ items: Revision[], nextCursor }`. Errors: `404` · `400 INV
 
 #### D7. `POST /api/v1/projects/{projectId}/plan-versions/{planVersionId}/restore` — Undo / restore
 Purpose: **Undo** returns to the previous version (the UI passes `parentVersionId` of the current one) or any older version from history. No data is deleted; the restored version keeps its id and hash, so an **existing approval of that exact version stays valid** (it's the same plan). Auth: creator.
-Body: `expectedStateVersion` ✓. Same allowed states as D3. Effect: `currentPlanVersionId = planVersionId`; `approvedPlanVersionId` = that id if it has an approval, else null; state `storyboard_ready`; `scheduled` post → `approval_invalidated`.
+Body: `expectedStateVersion` ✓. Same allowed states as D3. Effect: `currentPlanVersionId = planVersionId`; `approvedPlanVersionId` = that id if it has an approval, else null; state `storyboard_ready` (approving it again with D8 reuses its existing video if one was already made, see D8 "Re-approval"); `scheduled` post → `approval_invalidated`.
 Success `200` → `Project`. Errors: `404` · `409 STALE_VERSION` · `409 INVALID_STATE` (already current; active job) · `409 JOB_ALREADY_RUNNING`.
 ```json
 { "expectedStateVersion": 5 }
@@ -1362,7 +1362,10 @@ Success `200` → `Project`. Errors: `404` · `409 STALE_VERSION` · `409 INVALI
 Purpose: the creator approves the **exact** plan version and starts generation. Auth: creator. Rate: 10/hour. **Idempotency-Key required.**
 Body: `planVersionId` id ✓ · `planHash` `sha256:…` ✓ · `expectedStateVersion` ✓.
 Checks (§9) + quota **3 videos/day** + ElevenLabs character budget (estimated from the plan) + spend ceilings. Effect (transaction): `storyboardApprovals` insert, `jobs` (`generate`, key `gen:{planVersionId}`), project `generating`, `approvedPlanVersionId`, `activeJobId`, `usageCounters.videos +1`; Inngest `video.generate.requested` (event id = `gen:{planVersionId}`). If this version was already approved and its generate job is `failed`/`cancelled`, the same job is re-queued (no second approval, no second quota count).
-Success `202` → `{ approval: StoryboardApproval, job: Job, project: Project }`.
+
+**Re-approval of a version that already has a video (e.g. after undo, D7).** If a `generate` job for this **exact** plan version (`gen:{planVersionId}`, same `planHash`) has already **succeeded**, approving returns that existing result instead of starting work: **no new job, no quota use, no ElevenLabs/spend checks, no Inngest event**. Effect (transaction): the existing approval is reused (no second `storyboardApprovals` row), `project.currentRenderId` = the newest `ready` render of that plan version (including caption fixes made on it), state → `video_ready`, `stateVersion + 1`. Answer `200` → `{ approval, job: <the succeeded generate job>, project }` (`project.state = video_ready`); the UI goes straight to ③ Video.
+
+Success `202` → `{ approval: StoryboardApproval, job: Job, project: Project }` (new or re-queued job) · `200` (same shape) when an existing video is reused.
 Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 APPROVAL_STALE` (not the current version / hash differs) · `422 PLAN_INVALID` (`details.issues`) · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `429 QUOTA_EXCEEDED` (`videos_per_day` or `voice_characters_per_month`) · `503 SPEND_CEILING`.
 ```http
 POST /api/v1/projects/67330d5e9f1e4b2a7c0d2a10/storyboard-approval
@@ -1891,7 +1894,7 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 | A-7 | Caption corrections create a `captionOverrides` set and a `caption` job; they **don't** create a plan version, so the plan source `caption_edit` (ARCHITECTURE §8.4) is reserved and unused in V1. |
 | A-8 | ✅ *Decided (#24):* the quota "3 videos per user per day" counts accepted `generate` jobs only; caption fixes don't count. Retries and reused renders don't count. Resets at midnight in the user's timezone. |
 | A-9 | Narration edits that break an event anchor are saved as an **invalid** version (approval blocked with `PLAN_INVALID`) rather than rejected, so no typing is lost. The AI revision chat can fix it ("fix scene 3"). |
-| A-10 | Restoring (undo) an older version that already had an approval keeps that approval valid, because the plan and hash are identical. |
+| A-10 | Restoring (undo) an older version that already had an approval keeps that approval valid, because the plan and hash are identical. Approving that version again when its `generate` job already succeeded reuses the existing render: no new job, no quota use, the project moves to `video_ready` (D8 "Re-approval"). |
 | A-11 | Cancelling a generate job returns the project to `storyboard_ready` with the approval kept; approving the same version again resumes the same job (no new quota count). |
 | A-12 | Notifications (in-app, ARCHITECTURE §19) need a store and two endpoints (B5, B6) plus a `notifications` collection; not listed in ARCHITECTURE §8. |
 | A-13 | One `published` post per project in V1 (one video per project). Re-publishing the same video elsewhere/again is out of scope. |

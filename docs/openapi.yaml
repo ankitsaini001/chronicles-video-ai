@@ -1161,6 +1161,9 @@ paths:
         **Idempotency-Key and expectedStateVersion required.** Quota 3 videos/day (429 QUOTA_EXCEEDED).
         409: STALE_VERSION, APPROVAL_STALE, INVALID_STATE, JOB_ALREADY_RUNNING. 422 PLAN_INVALID.
         503 SPEND_CEILING. Rate limit 10/hour.
+        Re-approval: if a generate job for this exact plan version already succeeded (e.g. after undo), no new
+        job is started and no quota is used; the answer is 200 with that job, and the project moves to
+        video_ready with currentRenderId = the newest ready render of that version.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1174,6 +1177,15 @@ paths:
               $ref: '#/components/schemas/ApproveStoryboardRequest'
             example: { planVersionId: 67330e019f1e4b2a7c0d2b02, planHash: 'sha256:5d7a0c9e1f3b4a6d8c2e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c', expectedStateVersion: 5 }
       responses:
+        '200':
+          description: Re-approval of a plan version whose generate job already succeeded; the existing render is reused (no new job, no quota use, project video_ready).
+          headers:
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResult'
         '202':
           description: Approved; generate job queued.
           headers:
