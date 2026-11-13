@@ -1086,7 +1086,7 @@ Response: the `Project` with `"state": "plan_failed"`, the new `input.text` and 
 ```
 
 #### C5. `DELETE /api/v1/projects/{projectId}` — Archive (soft delete)
-Auth: creator. Header `If-Match: "<stateVersion>"` (required). Allowed in any state **except `publishing`/`outcome_unknown` post in flight** (ARCHITECTURE §7.2). Effect (transaction): active pipeline job gets `cancelRequestedAt`; a `scheduled` post → `cancelled`; project `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. Nothing is deleted from R2 (DATABASE.md §8.1).
+Auth: creator. Header `If-Match: "<stateVersion>"` (required). Allowed in any state **except `publishing`/`outcome_unknown` post in flight** (ARCHITECTURE §7.2). Effect (transaction): active pipeline job gets `cancelRequestedAt`; a `scheduled` post → `cancelled`; project `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. Nothing is deleted from R2 (DATABASE.md §6.6).
 Success `200` → `Project` (`state: archived`). Errors: `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (publishing; already archived).
 ```http
 DELETE /api/v1/projects/67330d5e9f1e4b2a7c0d2a10
