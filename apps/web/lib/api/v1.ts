@@ -27,6 +27,8 @@ export type ApiErrorCode =
   | "IDEMPOTENCY_IN_PROGRESS"
   | "QUOTA_EXCEEDED"
   | "RATE_LIMITED"
+  | "PROVIDER_BUSY"
+  | "PROVIDER_REJECTED"
   | "INTERNAL";
 
 /** Default messages (API.md §3.6, §3.8, §4.3, §10.3, openapi.yaml responses). */
@@ -40,6 +42,9 @@ export const API_MESSAGES = {
   IDEMPOTENCY_KEY_REUSED: "This request key was already used for a different request.",
   IDEMPOTENCY_IN_PROGRESS: "Still working on your previous click. Please wait a moment.",
   RATE_LIMITED: "You're going a bit fast. Please wait a minute.",
+  /** C7 brainstorm (API.md §4.3): no project exists, so no "Your idea is saved". */
+  BRAINSTORM_BUSY: "Our AI is very busy right now. Please try again in a few minutes.",
+  BRAINSTORM_REJECTED: "We can't suggest ideas for this subject. Please try a different one.",
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
 
