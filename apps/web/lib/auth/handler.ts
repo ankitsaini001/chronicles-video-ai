@@ -115,13 +115,34 @@ async function signIn(request: Request, deps: AuthHandlerDeps): Promise<Response
 async function readJsonBody(request: Request): Promise<{ value: unknown } | Response> {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) return authError(413, "PAYLOAD_TOO_LARGE", AUTH_MESSAGES.INVALID_INPUT);
-  const text = await request.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) return authError(413, "PAYLOAD_TOO_LARGE", AUTH_MESSAGES.INVALID_INPUT);
+  // Read chunk by chunk and stop as soon as the limit is passed, so a body sent without (or with a
+  // false) Content-Length is never read into memory in full.
+  const text = await readTextUpTo(request, MAX_BODY_BYTES);
+  if (text === null) return authError(413, "PAYLOAD_TOO_LARGE", AUTH_MESSAGES.INVALID_INPUT);
   try {
     return { value: JSON.parse(text) as unknown };
   } catch {
     return authError(400, "INVALID_INPUT", AUTH_MESSAGES.INVALID_INPUT);
   }
+}
+
+/** The body as UTF-8 text, or null once it is over `maxBytes` (reading stops there). */
+async function readTextUpTo(request: Request, maxBytes: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total).toString("utf8");
 }
 
 /** A copy of the request with a new JSON body. */

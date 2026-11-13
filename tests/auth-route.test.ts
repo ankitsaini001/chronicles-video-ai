@@ -305,6 +305,41 @@ describe("sign-in (A2)", () => {
   });
 });
 
+describe("body size without Content-Length (F09 review)", () => {
+  /** A chunked body: no Content-Length; counts how many chunks were pulled. */
+  function chunked(path: string, chunk: string, count: number) {
+    let pulled = 0;
+    const bytes = new TextEncoder().encode(chunk);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= count) return controller.close();
+        pulled++;
+        controller.enqueue(bytes);
+      },
+    });
+    const request = new Request(`${APP}${path}`, { method: "POST", headers: { origin: APP, "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
+    return { request, pulled: () => pulled };
+  }
+
+  it.each(["/api/auth/sign-in/email", "/api/auth/sign-up/email"])("%s: stops reading above 64 KB and answers 413", async (path) => {
+    const { d, forwarded } = deps();
+    const big = chunked(path, "x".repeat(16 * 1024), 1000);
+    expect(big.request.headers.get("content-length")).toBeNull();
+    const res = await handleAuthRequest(big.request, d);
+    expect(res.status).toBe(413);
+    expect(forwarded).toHaveLength(0);
+    expect(big.pulled()).toBeLessThan(10);
+  });
+
+  it("a small chunked body is read normally", async () => {
+    const { d, forwarded } = deps();
+    const text = JSON.stringify(signIn);
+    const small = chunked("/api/auth/sign-in/email", text, 1);
+    expect((await handleAuthRequest(small.request, d)).status).toBe(200);
+    expect(await forwarded[0]?.json()).toEqual(signIn);
+  });
+});
+
 describe("checkSignInBody", () => {
   it.each([
     [{ ...signIn, email: "not-an-email" }, "INVALID_EMAIL"],
