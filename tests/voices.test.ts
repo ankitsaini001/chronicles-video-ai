@@ -1,13 +1,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { VOICE_PRESET_LIST, VOICE_TEXT_LANG, voicePresetFor } from "../packages/db/src/voices";
+import { VOICE_PRESET_LIST, VOICE_TEXT_LANG, voicePresetFor, type VoicePresetId } from "../packages/db/src/voices";
 import { LANGUAGES, VOICE_PRESETS, VOICE_PRESETS_BY_LANGUAGE } from "../packages/pipeline/src/contracts";
 import { VOICE_ID_ENV_BY_PRESET } from "../packages/pipeline/src/config/config";
 import { API_RATE_LIMITS, type RateLimitRule } from "../packages/db/src/rate-limit";
 import { handleApiRequest, type ApiDeps, type ApiEndpoint } from "../apps/web/lib/api/v1";
 import type { SessionUser } from "../apps/web/lib/auth/session";
-import { listVoices } from "../apps/web/lib/voices";
+import { findAvailableSamples, listVoices } from "../apps/web/lib/voices";
+import { mkdir, writeFile } from "node:fs/promises";
+import { withTempDir } from "./helpers";
 
 // F13: the shared voice preset list (API.md B4, §11.1) stays equal to the pipeline's presets.
 
@@ -89,8 +91,13 @@ describe("B4 GET /api/v1/voices", () => {
     logError: () => undefined,
     newRequestId: () => "req_TEST0000000000",
   });
-  const endpoint: ApiEndpoint = { rateLimit: API_RATE_LIMITS.readsPerUser, handle: async ({ request }) => listVoices(new URL(request.url)) };
-  const get = (query = "", signedIn = true) => handleApiRequest(new Request(`${APP}/api/v1/voices${query}`), endpoint, deps(signedIn));
+  const ALL = new Set(VOICE_PRESET_LIST.map((p) => p.preset));
+  const endpointWith = (available: ReadonlySet<VoicePresetId>): ApiEndpoint => ({
+    rateLimit: API_RATE_LIMITS.readsPerUser,
+    handle: async ({ request }) => listVoices(new URL(request.url), available),
+  });
+  const get = (query = "", signedIn = true, available: ReadonlySet<VoicePresetId> = ALL) =>
+    handleApiRequest(new Request(`${APP}/api/v1/voices${query}`), endpointWith(available), deps(signedIn));
 
   it("lists all 6 presets with enabled: true and no voice ids", async () => {
     const response = await get();
@@ -126,7 +133,43 @@ describe("B4 GET /api/v1/voices", () => {
     });
   });
 
+  it("answers sampleUrl: null for a preset whose MP3 isn't recorded (Hindi/Hinglish until before F23)", async () => {
+    const englishOnly = new Set<VoicePresetId>(["indian-english-female", "indian-english-male"]);
+    const body = (await (await get("", true, englishOnly)).json()) as { items: { preset: string; sampleUrl: string | null; enabled: boolean }[] };
+    expect(body.items.map((i) => [i.preset, i.sampleUrl])).toEqual([
+      ["indian-english-female", "/voices/indian-english-female.mp3"],
+      ["indian-english-male", "/voices/indian-english-male.mp3"],
+      ["hindi-female", null],
+      ["hindi-male", null],
+      ["hinglish-female", null],
+      ["hinglish-male", null],
+    ]);
+    expect(body.items.every((i) => i.enabled)).toBe(true);
+  });
+
   it("needs a signed-in creator", async () => {
     expect((await get("", false)).status).toBe(401);
+  });
+});
+
+describe("findAvailableSamples (which ▶ buttons show)", () => {
+  it("counts only presets whose MP3 exists and is not empty", async () => {
+    await withTempDir(async (dir) => {
+      expect([...findAvailableSamples(dir)]).toEqual([]);
+      await writeFile(`${dir}/indian-english-female.mp3`, new Uint8Array([0xff, 0xfb, 1]));
+      await writeFile(`${dir}/indian-english-male.mp3`, new Uint8Array([0xff, 0xfb, 1]));
+      await writeFile(`${dir}/hindi-female.mp3`, ""); // empty: not a sample
+      await mkdir(`${dir}/hindi-male.mp3`); // a folder, not a file
+      await writeFile(`${dir}/hinglish-female.mp3.part`, "x"); // half-written by the recorder
+      expect([...findAvailableSamples(dir)].sort()).toEqual(["indian-english-female", "indian-english-male"]);
+    });
+  });
+
+  it("a missing folder means no samples (no error)", () => {
+    expect(findAvailableSamples("/nonexistent/voices").size).toBe(0);
+  });
+
+  it("matches the committed files: exactly the 2 English samples for now", () => {
+    expect([...findAvailableSamples(path.join(__dirname, "../apps/web/public/voices"))].sort()).toEqual(["indian-english-female", "indian-english-male"]);
   });
 });

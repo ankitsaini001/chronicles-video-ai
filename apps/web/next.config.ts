@@ -20,6 +20,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Workspace packages ship TypeScript source, so Next compiles them.
   transpilePackages: ["@bytereel/db"],
+  // F13: B4 and the Idea page check which voice sample MP3s exist (lib/voices.ts). On a host that
+  // serves public/ from a CDN (Vercel), those files aren't next to the server code unless included.
+  outputFileTracingIncludes: {
+    "/api/v1/voices": ["./public/voices/*.mp3"],
+    "/projects/new": ["./public/voices/*.mp3"],
+  },
 };
 
 export default nextConfig;

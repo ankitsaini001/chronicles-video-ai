@@ -4,10 +4,12 @@ import { ProjectStepper } from "@/components/app/ProjectStepper";
 import { IdeaForm } from "@/components/project/IdeaForm";
 import { getUsage } from "@/lib/account/me";
 import { requireUser } from "@/lib/auth/session";
+import { availableSamples } from "@/lib/voices";
 
 // ① Idea (Stitch "ByteReel — Step 1 Idea", ARCHITECTURE §11 `/projects/new`).
 // F12: topic/notes, Language, Voice and "Create storyboard" (saves the project, C2).
-// F13: ▶ voice samples (static MP3s, components/project/VoicePicker.tsx).
+// F13: ▶ voice samples (static MP3s, components/project/VoicePicker.tsx), only for presets whose
+// MP3 is recorded (checked here on the server; Hindi/Hinglish wait until before F23).
 // Not yet: ✨ Brainstorm with AI (F14), the AI storyboard (F15).
 // Language and voice start at the user's defaults (English + Female for new accounts).
 
@@ -32,6 +34,7 @@ export default async function NewProjectPage() {
           defaultVoiceGender={user.defaultVoiceGender}
           projectsToday={usage.projectsToday}
           timezone={user.timezone}
+          samplePresets={[...availableSamples()]}
         />
       </div>
     </div>

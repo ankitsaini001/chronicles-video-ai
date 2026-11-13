@@ -1,5 +1,6 @@
 "use client";
 
+import type { VoicePresetId } from "@bytereel/db/voices";
 import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaInputType, ideaProblem } from "@bytereel/db/idea-text";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
@@ -50,6 +51,8 @@ type IdeaFormProps = {
   projectsToday: Usage;
   /** The user's timezone, for the time the daily limit resets. */
   timezone: string;
+  /** Presets whose ▶ sample MP3 exists (checked on the server, F13). */
+  samplePresets: readonly VoicePresetId[];
 };
 
 type ApiErrorBody = { error?: { code?: string; message?: string; details?: { issues?: { path?: string; message?: string }[]; resetsAt?: string } } };
@@ -71,7 +74,7 @@ function resetTimeText(resetsAt: string | undefined, timezone: string): string {
   }
 }
 
-export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, timezone }: IdeaFormProps) {
+export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, timezone, samplePresets }: IdeaFormProps) {
   const [text, setText] = useState("");
   const [language, setLanguage] = useState<Language>(defaultLanguage);
   const [voiceGender, setVoiceGender] = useState<VoiceGender>(defaultVoiceGender);
@@ -209,7 +212,15 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         disabled={busy}
         className="mb-6"
       />
-      <VoicePicker language={language} value={voiceGender} onChange={setVoiceGender} preview={preview} disabled={busy} className="mb-10" />
+      <VoicePicker
+        language={language}
+        value={voiceGender}
+        onChange={setVoiceGender}
+        preview={preview}
+        samplePresets={samplePresets}
+        disabled={busy}
+        className="mb-10"
+      />
 
       {formError && (
         <div role="alert" className="mb-5 rounded-2xl border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-text">

@@ -1,6 +1,6 @@
 "use client";
 
-import { VOICE_TEXT_LANG, voicePresetFor, type VoiceLanguage } from "@bytereel/db/voices";
+import { VOICE_TEXT_LANG, voicePresetFor, type VoiceLanguage, type VoicePresetId } from "@bytereel/db/voices";
 import { cn } from "@/components/ui";
 import type { VoiceGender } from "@/lib/auth/session";
 import { useVoicePreview } from "./useVoicePreview";
@@ -12,7 +12,10 @@ import { useVoicePreview } from "./useVoicePreview";
 // one). ▶ plays the sample for the CHOSEN LANGUAGE and that gender from the static MP3 (B4 list,
 // packages/db/src/voices.ts); it never calls ElevenLabs. Labels come from the same list, so Hindi
 // shows "महिला आवाज़ (Female)", wrapped in lang="hi".
-// The parent owns the player (`preview`), so it can stop the sample when the language changes.
+// ▶ is shown only for presets whose MP3 exists (`samplePresets`, checked on the server by the page):
+// the Hindi/Hinglish samples wait for a voice-plan decision before F23, and appear by themselves
+// once recorded. The parent owns the player (`preview`), so it can stop the sample when the
+// language changes.
 
 const GENDERS: readonly VoiceGender[] = ["female", "male"];
 
@@ -21,11 +24,13 @@ type VoicePickerProps = {
   value: VoiceGender;
   onChange: (value: VoiceGender) => void;
   preview: ReturnType<typeof useVoicePreview>;
+  /** Presets that have a recorded sample; the others get no ▶. */
+  samplePresets: readonly VoicePresetId[];
   disabled?: boolean;
   className?: string;
 };
 
-export function VoicePicker({ language, value, onChange, preview, disabled = false, className }: VoicePickerProps) {
+export function VoicePicker({ language, value, onChange, preview, samplePresets, disabled = false, className }: VoicePickerProps) {
   const lang = VOICE_TEXT_LANG[language];
   const playingPreset = GENDERS.map((g) => voicePresetFor(language, g)).find((p) => p.sampleUrl === preview.playing);
   const failed = GENDERS.some((g) => voicePresetFor(language, g).sampleUrl === preview.failed);
@@ -59,21 +64,23 @@ export function VoicePicker({ language, value, onChange, preview, disabled = fal
                 />
                 <span lang={language === "hi" ? lang : undefined}>{preset.label}</span>
               </label>
-              <button
-                type="button"
-                onClick={() => preview.toggle(preset.sampleUrl)}
-                disabled={disabled}
-                aria-label={`${isPlaying ? "Stop" : "Play"} ${gender} voice sample`}
-                className={cn(
-                  "inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full border transition",
-                  "disabled:pointer-events-none disabled:opacity-50",
-                  isPlaying ? "border-amber bg-progress-bg text-amber" : "border-line bg-surface-2 text-amber hover:border-amber/40",
-                )}
-              >
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="size-3.5 fill-current">
-                  {isPlaying ? <rect x="6" y="6" width="12" height="12" rx="1.5" /> : <polygon points="7,4 20,12 7,20" />}
-                </svg>
-              </button>
+              {samplePresets.includes(preset.preset) && (
+                <button
+                  type="button"
+                  onClick={() => preview.toggle(preset.sampleUrl)}
+                  disabled={disabled}
+                  aria-label={`${isPlaying ? "Stop" : "Play"} ${gender} voice sample`}
+                  className={cn(
+                    "inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full border transition",
+                    "disabled:pointer-events-none disabled:opacity-50",
+                    isPlaying ? "border-amber bg-progress-bg text-amber" : "border-line bg-surface-2 text-amber hover:border-amber/40",
+                  )}
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="size-3.5 fill-current">
+                    {isPlaying ? <rect x="6" y="6" width="12" height="12" rx="1.5" /> : <polygon points="7,4 20,12 7,20" />}
+                  </svg>
+                </button>
+              )}
             </div>
           );
         })}
