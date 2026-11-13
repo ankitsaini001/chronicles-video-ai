@@ -12,6 +12,8 @@ export const IDEA_MAX_CHARS = 5000;
 export const IDEA_TOPIC_MAX_CHARS = 300;
 /** A topic needs at least 3 characters. */
 export const IDEA_MIN_CHARS = 3;
+/** C7 brainstorm subject: 2–100 characters, cleaned the same way (API.md C7, F14). */
+export const BRAINSTORM_SUBJECT_LIMITS = { min: 2, max: 100 } as const;
 
 /** Control characters (Unicode Cc) other than tab, line feed and carriage return. */
 const CONTROL_CHARS = /(?![\t\n\r])\p{Cc}/gu;
@@ -32,4 +34,23 @@ export function ideaProblem(clean: string): "empty" | "too_short" | "too_long" |
   if (clean.length < IDEA_MIN_CHARS) return "too_short";
   if (clean.length > IDEA_MAX_CHARS) return "too_long";
   return null;
+}
+
+/** Brainstorm idea text limits (C2 `inputType: "brainstorm"`): the chosen idea's title + hook. */
+export const BRAINSTORM_TEXT_MAX_CHARS = 300;
+
+/**
+ * The idea-box text for a picked brainstorm idea (F14): "Title. Hook" (no extra full stop after
+ * ., ?, ! or the Hindi danda ।), or only the title when both together would be over 300 characters.
+ */
+export function brainstormIdeaText(title: string, hook: string): string {
+  const t = cleanIdeaText(title);
+  const h = cleanIdeaText(hook);
+  const joined = /[.?!।]$/u.test(t) ? `${t} ${h}` : `${t}. ${h}`;
+  return joined.length <= BRAINSTORM_TEXT_MAX_CHARS ? joined : t;
+}
+
+/** True when this cleaned text can still be sent as the picked brainstorm idea (3–300 characters). */
+export function fitsBrainstormText(clean: string): boolean {
+  return clean.length >= IDEA_MIN_CHARS && clean.length <= BRAINSTORM_TEXT_MAX_CHARS;
 }

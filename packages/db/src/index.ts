@@ -85,7 +85,17 @@ export {
   type ProjectStep,
   type VoiceGender,
 } from "./projects";
-export { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaInputType, ideaProblem } from "./idea-text";
+export {
+  BRAINSTORM_TEXT_MAX_CHARS,
+  brainstormIdeaText,
+  cleanIdeaText,
+  fitsBrainstormText,
+  IDEA_MAX_CHARS,
+  IDEA_MIN_CHARS,
+  IDEA_TOPIC_MAX_CHARS,
+  ideaInputType,
+  ideaProblem,
+} from "./idea-text";
 export {
   VOICE_PRESET_LIST,
   VOICE_TEXT_LANG,

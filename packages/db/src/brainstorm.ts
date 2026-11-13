@@ -1,6 +1,6 @@
 import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
-import { cleanIdeaText } from "./idea-text";
+import { BRAINSTORM_SUBJECT_LIMITS, cleanIdeaText } from "./idea-text";
 import { LANGUAGES } from "./projects";
 import { USAGE_COUNTERS_COLLECTION, usageCounterPeriod, type UsageCounterDocument } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
@@ -10,9 +10,9 @@ import { USAGE_LIMITS } from "./usage";
 // AND 30 per day in the user's timezone (a `brainstorms` usageCounter, here). A refused request
 // never reaches the AI.
 
-/** The subject: 2–100 characters after the idea-text cleaning (control characters, NFC, trim). */
-export const BRAINSTORM_SUBJECT_LIMITS = { min: 2, max: 100 } as const;
+export { BRAINSTORM_SUBJECT_LIMITS };
 
+/** The subject: 2–100 characters after the idea-text cleaning (control characters, NFC, trim). */
 const subject = z
   .string({ error: "must be text" })
   .transform(cleanIdeaText)

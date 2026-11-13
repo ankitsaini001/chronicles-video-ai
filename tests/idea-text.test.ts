@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CreateProjectBodySchema } from "@bytereel/db";
-import { cleanIdeaText, IDEA_MAX_CHARS, ideaInputType, ideaProblem } from "@bytereel/db/idea-text";
+import { BRAINSTORM_TEXT_MAX_CHARS, brainstormIdeaText, cleanIdeaText, fitsBrainstormText, IDEA_MAX_CHARS, ideaInputType, ideaProblem } from "@bytereel/db/idea-text";
 
 // F12 review: the Idea screen and the server count the same characters (control characters out,
 // NFC, trim), so Hindi nukta letters and pasted control characters can't make them disagree.
@@ -57,5 +57,34 @@ describe("limits and topic/notes on the cleaned text", () => {
     expect(r.success).toBe(false); // "ab" is 2 characters, below the minimum of 3
     const ok = CreateProjectBodySchema.safeParse({ inputType: "topic", text: "UPI\u0000 basics\u001b", language: "en", voiceGender: "female" });
     expect(ok.success && ok.data.text).toBe("UPI basics");
+  });
+});
+
+describe("brainstorm idea text (F14)", () => {
+  it("is 'Title. Hook' with no doubled punctuation (., ?, !, ।)", () => {
+    expect(brainstormIdeaText("Why the monsoon reaches Kerala first", "Every June, Kerala gets wet first.")).toBe("Why the monsoon reaches Kerala first. Every June, Kerala gets wet first.");
+    expect(brainstormIdeaText("Why does Kerala get rain first?", "A giant sea breeze.")).toBe("Why does Kerala get rain first? A giant sea breeze.");
+    expect(brainstormIdeaText("मानसून पहले केरल क्यों आता है।", "हर जून…")).toBe("मानसून पहले केरल क्यों आता है। हर जून…");
+  });
+
+  it("falls back to the title alone when both are over 300 characters (C2 brainstorm text 3–300)", () => {
+    const title = "T".repeat(120);
+    expect(brainstormIdeaText(title, "h".repeat(178))).toHaveLength(300);
+    expect(brainstormIdeaText(title, "h".repeat(179))).toBe(title);
+  });
+
+  it("fitsBrainstormText: 3–300 cleaned characters", () => {
+    expect(BRAINSTORM_TEXT_MAX_CHARS).toBe(300);
+    expect(fitsBrainstormText("ab")).toBe(false);
+    expect(fitsBrainstormText("abc")).toBe(true);
+    expect(fitsBrainstormText("x".repeat(300))).toBe(true);
+    expect(fitsBrainstormText("x".repeat(301))).toBe(false);
+  });
+
+  it("C2 accepts what the Idea screen sends for a picked idea (longest title + hook)", () => {
+    const idea = { title: "T".repeat(120), hook: "H".repeat(200) };
+    const text = brainstormIdeaText(idea.title, idea.hook);
+    const r = CreateProjectBodySchema.safeParse({ inputType: "brainstorm", text, language: "en", voiceGender: "female", brainstormChoice: { subject: "Indian monsoon", ...idea } });
+    expect(r.success).toBe(true);
   });
 });
