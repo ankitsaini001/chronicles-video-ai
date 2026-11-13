@@ -4,11 +4,11 @@
 |---|---|
 | **Version** | 1.0 · 2026-11-12 |
 | **Status** | Draft for founder review |
-| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #21) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts` |
+| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #25) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts` |
 | **Machine-readable spec** | [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1): same endpoints, schemas and examples |
 | **Companion** | [`DATABASE.md`](DATABASE.md): collections, validators, indexes, transactions |
 
-> **Decision applied (PRD decisions log #21, 2026-11-12):** all application mutations and reads are **REST JSON route handlers under `/api/v1`** (not Next.js Server Actions), so the API is described by OpenAPI and can be tested with any HTTP client. **Better Auth** stays mounted at **`/api/auth/*`**. CSRF protection = **SameSite=Lax session cookie + an `Origin` check on every mutating request** (§3.6).
+> **Decision applied (PRD decisions log #22, 2026-11-12):** all application mutations and reads are **REST JSON route handlers under `/api/v1`** (not Next.js Server Actions), so the API is described by OpenAPI and can be tested with any HTTP client. **Better Auth** stays mounted at **`/api/auth/*`**. CSRF protection = **SameSite=Lax session cookie + an `Origin` check on every mutating request** (§3.6).
 
 ---
 
@@ -1894,7 +1894,7 @@ Success `200` → `{ confirmationCode, status: "pending" | "completed" | "failed
 
 | # | Assumption |
 |---|---|
-| A-1 | Success bodies are the plain resource (`{ items, nextCursor }` for lists); the `{ ok, data }` wrapper from ARCHITECTURE §12 is replaced by HTTP status codes + the error envelope (part of decision #21). |
+| A-1 | Success bodies are the plain resource (`{ items, nextCursor }` for lists); the `{ ok, data }` wrapper from ARCHITECTURE §12 is replaced by HTTP status codes + the error envelope (part of decision #22). |
 | A-2 | Better Auth endpoints keep Better Auth's native error body `{ code, message }`; our hooks add the codes `NOT_ALLOWLISTED`, `TOO_MANY_ATTEMPTS`, `ACCOUNT_SUSPENDED`. Account lockout returns the same `429 TOO_MANY_ATTEMPTS` as the rate limit so it doesn't reveal that an email exists. |
 | A-3 | `user.status` gains a third value **`deleting`** (account deletion in progress). ARCHITECTURE §8.1 lists `active \| suspended` only. |
 | A-4 | Instagram/Meta routes move under `/api/v1` (`/api/v1/instagram/connect`, `/api/v1/instagram/callback`, `/api/v1/meta/deauthorize`, `/api/v1/meta/data-deletion`); the redirect URI configured in the Meta app is `https://<domain>/api/v1/instagram/callback`. ARCHITECTURE §12 and §17 were updated accordingly. |

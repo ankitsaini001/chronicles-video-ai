@@ -7,7 +7,7 @@ info:
     Machine-readable mirror of `docs/API.md` (version 1.0, 2026-11-12, status: **Draft for founder review**).
     `docs/API.md` is the source of truth for behaviour, flows and user-facing messages.
 
-    - All application endpoints are REST JSON route handlers under `/api/v1` (PRD decisions log #21).
+    - All application endpoints are REST JSON route handlers under `/api/v1` (PRD decisions log #22).
     - Better Auth is mounted at `/api/auth/*`; its errors use Better Auth's own body `{ code, message }`.
       Only the 6 auth operations listed here are exposed; every other Better Auth default endpoint
       (update-user, delete-user, list/revoke sessions, change-email, request/forget password, …) is disabled

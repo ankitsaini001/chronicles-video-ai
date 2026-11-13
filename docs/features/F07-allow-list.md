@@ -7,7 +7,7 @@
 | **Depends on** | F06 |
 | **Design** | — |
 | **Data (MongoDB / storage)** | `allowlist` |
-| **API endpoints** (docs/API.md) | (admin endpoints I1–I3 come in F35) |
+| **API endpoints** (docs/API.md) | (admin endpoints I1–I3 come in F34) |
 
 ## Goal
 Only invited emails can sign up. Store the invite list in MongoDB.
@@ -21,7 +21,7 @@ Nothing in the UI yet. You add your email with one simple command and see it in 
 - Emails saved in lowercase
 
 ## Not in this feature
-- Admin screen (that's F35)
+- Admin screen (that's F34)
 
 ## Steps
 _We break this into small steps together when we start this feature._

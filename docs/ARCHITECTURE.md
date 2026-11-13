@@ -446,7 +446,8 @@ users/{ownerId}/projects/{projectId}/renders/{renderId}/qa.json
   1. a typed repository API (`projects.get(ownerId, projectId)`),
   2. a lint rule / code-review checklist item forbidding raw collection access outside `packages/db`,
   3. integration tests asserting user A can't read or modify user B's data (every route).
-- **Server actions** call `requireUser()` first; IDs from the client are treated as untrusted and always re-checked with the owner.
+- **Another user's resource is answered with `404 NOT_FOUND`, never `403`**, so a caller can't even learn that the id exists (`403 FORBIDDEN` is only for "not an admin" and the Origin check). The repository's owner-scoped lookups make this automatic: a foreign id simply isn't found.
+- **REST route handlers under `/api/v1`** (PRD decision #22; API.md) call `requireUser()` first; IDs from the client are treated as untrusted and always re-checked with the owner.
 - **Inngest functions** receive `{ ownerId, projectId, jobId }` in the event, and re-load and verify ownership before acting.
 - **Presigned URLs** are generated only after an ownership check, and expire quickly.
 
