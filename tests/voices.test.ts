@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 import { VOICE_PRESET_LIST, VOICE_TEXT_LANG, voicePresetFor } from "../packages/db/src/voices";
 import { LANGUAGES, VOICE_PRESETS, VOICE_PRESETS_BY_LANGUAGE } from "../packages/pipeline/src/contracts";
 import { VOICE_ID_ENV_BY_PRESET } from "../packages/pipeline/src/config/config";
+import { API_RATE_LIMITS, type RateLimitRule } from "../packages/db/src/rate-limit";
+import { handleApiRequest, type ApiDeps, type ApiEndpoint } from "../apps/web/lib/api/v1";
+import type { SessionUser } from "../apps/web/lib/auth/session";
+import { listVoices } from "../apps/web/lib/voices";
 
 // F13: the shared voice preset list (API.md B4, §11.1) stays equal to the pipeline's presets.
 
@@ -57,5 +61,72 @@ describe("VOICE_PRESET_LIST", () => {
     expect(VOICE_ID_ENV_BY_PRESET["hinglish-female"]).toBe(VOICE_ID_ENV_BY_PRESET["hindi-female"]);
     expect(voicePresetFor("hinglish", "female").sampleText).toBe("Hello doston! Aaj hum samjhenge ki rainbow kaise banta hai.");
     expect(VOICE_TEXT_LANG).toEqual({ en: "en-IN", hi: "hi", hinglish: "hi-Latn" });
+  });
+});
+
+// ---------- B4 GET /api/v1/voices, through the shared /api/v1 pipeline (fakes, no database) ----------
+
+describe("B4 GET /api/v1/voices", () => {
+  const APP = "http://localhost:3000";
+  const user: SessionUser = {
+    id: "67330c1a9f1e4b2a7c0d1e01",
+    name: "Ananya Iyer",
+    email: "ananya.iyer@example.in",
+    role: "creator",
+    timezone: "Asia/Kolkata",
+    defaultLanguage: "en",
+    defaultVoiceGender: "female",
+    createdAt: "2026-11-12T04:30:00.000Z",
+  };
+  const rules: RateLimitRule[] = [];
+  const deps = (signedIn = true): ApiDeps => ({
+    appOrigins: [APP],
+    getUser: async () => (signedIn ? user : null),
+    hitRateLimit: async (rule) => {
+      rules.push(rule);
+      return { allowed: true, count: 1, limit: rule.limit, resetsAt: new Date(), retryAfterSeconds: 60 };
+    },
+    logError: () => undefined,
+    newRequestId: () => "req_TEST0000000000",
+  });
+  const endpoint: ApiEndpoint = { rateLimit: API_RATE_LIMITS.readsPerUser, handle: async ({ request }) => listVoices(new URL(request.url)) };
+  const get = (query = "", signedIn = true) => handleApiRequest(new Request(`${APP}/api/v1/voices${query}`), endpoint, deps(signedIn));
+
+  it("lists all 6 presets with enabled: true and no voice ids", async () => {
+    const response = await get();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as { items: Record<string, unknown>[] };
+    expect(body.items.map((i) => i.preset)).toEqual(VOICE_PRESET_LIST.map((p) => p.preset));
+    for (const item of body.items) {
+      expect(Object.keys(item).sort()).toEqual(["enabled", "gender", "label", "language", "preset", "sampleText", "sampleUrl"]);
+      expect(item.enabled).toBe(true);
+    }
+    expect(JSON.stringify(body)).not.toMatch(/voiceId|ELEVENLABS/i);
+    expect(rules.at(-1)).toEqual(API_RATE_LIMITS.readsPerUser);
+  });
+
+  it("filters by language (hi → the API.md example)", async () => {
+    const body = (await (await get("?language=hi")).json()) as { items: { preset: string }[] };
+    expect(body.items.map((i) => i.preset)).toEqual(["hindi-female", "hindi-male"]);
+    const hinglish = (await (await get("?language=hinglish")).json()) as { items: { preset: string }[] };
+    expect(hinglish.items.map((i) => i.preset)).toEqual(["hinglish-female", "hinglish-male"]);
+  });
+
+  it.each(["?language=fr", "?language=", "?language=EN", "?language=en&language=hi"])("refuses %s with 400 INVALID_INPUT", async (query) => {
+    const response = await get(query);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "INVALID_INPUT",
+        message: "Please check the highlighted fields.",
+        details: { issues: [{ path: "language", message: "must be one of en, hi, hinglish" }] },
+        requestId: "req_TEST0000000000",
+      },
+    });
+  });
+
+  it("needs a signed-in creator", async () => {
+    expect((await get("", false)).status).toBe(401);
   });
 });
