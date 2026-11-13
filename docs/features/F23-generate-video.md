@@ -45,3 +45,5 @@ _We break this into small steps together when we start this feature._
 | Date | What happened |
 |---|---|
 | | |
+
+> **Update 2026-11-13:** the voice decision covers the English voices too. The founder's chosen English voices, Ranbir (male) and Riya Rao (female), are also Voice Library voices that need a paid plan; testing uses the free US voices Eric and Matilda.
