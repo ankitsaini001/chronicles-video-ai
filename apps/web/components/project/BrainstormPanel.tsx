@@ -1,6 +1,7 @@
 "use client";
 
 import { BRAINSTORM_LIMITS, BRAINSTORM_SUBJECT_LIMITS, cleanIdeaText } from "@bytereel/db/idea-text";
+import { ENABLED_LANGUAGES } from "@bytereel/db/languages";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button, cn } from "@/components/ui";
 import type { Language } from "@/lib/auth/session";
@@ -227,7 +228,8 @@ export function BrainstormPanel({ language, ideaText, picked, onPick, timezone, 
           </p>
         ) : (
           <p id={`${subjectId}-help`} className="mt-2 text-xs text-muted">
-            We&apos;ll suggest 5 short video ideas in the language you choose below.
+            {/* One language switched on (languages.ts): no Language row below to point at. */}
+            We&apos;ll suggest 5 short video ideas{ENABLED_LANGUAGES.length > 1 ? " in the language you choose below" : ""}.
           </p>
         )}
 

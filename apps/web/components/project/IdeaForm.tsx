@@ -1,6 +1,7 @@
 "use client";
 
 import type { VoicePresetId } from "@bytereel/db/voices";
+import { ENABLED_LANGUAGES, enabledLanguageOr } from "@bytereel/db/languages";
 import { brainstormIdeaText, cleanIdeaText, fitsBrainstormText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaProblem } from "@bytereel/db/idea-text";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
@@ -32,7 +33,9 @@ const MAX_CHARS = IDEA_MAX_CHARS;
 /** Only a safety stop for huge pastes; the real limit is checked on the cleaned text. */
 const SAFETY_MAX_LENGTH = 4 * IDEA_MAX_CHARS;
 
-const LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
+// Only the languages switched on (packages/db/src/languages.ts). With just one (English for now),
+// the whole Language row is hidden and that language is sent.
+const ALL_LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
   { value: "en", label: "English" },
   {
     value: "hi",
@@ -44,6 +47,7 @@ const LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
   },
   { value: "hinglish", label: "Hinglish" },
 ];
+const LANGUAGE_OPTIONS = ALL_LANGUAGE_OPTIONS.filter((o) => ENABLED_LANGUAGES.includes(o.value));
 
 const MESSAGES = {
   EMPTY: "Type a topic or paste your notes first.",
@@ -84,7 +88,7 @@ function resetTimeText(resetsAt: string | undefined, timezone: string): string {
 
 export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, timezone, samplePresets }: IdeaFormProps) {
   const [text, setText] = useState("");
-  const [language, setLanguage] = useState<Language>(defaultLanguage);
+  const [language, setLanguage] = useState<Language>(enabledLanguageOr(defaultLanguage));
   const [voiceGender, setVoiceGender] = useState<VoiceGender>(defaultVoiceGender);
   const [textError, setTextError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -229,18 +233,20 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         {announcement}
       </p>
 
-      <ChoiceChips
-        label="Language"
-        options={LANGUAGE_OPTIONS}
-        value={language}
-        onChange={(next) => {
-          // A sample of the old language must not keep playing (F13).
-          preview.stop();
-          setLanguage(next);
-        }}
-        disabled={busy}
-        className="mb-6"
-      />
+      {LANGUAGE_OPTIONS.length > 1 && (
+        <ChoiceChips
+          label="Language"
+          options={LANGUAGE_OPTIONS}
+          value={language}
+          onChange={(next) => {
+            // A sample of the old language must not keep playing (F13).
+            preview.stop();
+            setLanguage(next);
+          }}
+          disabled={busy}
+          className="mb-6"
+        />
+      )}
       <VoicePicker
         language={language}
         value={voiceGender}

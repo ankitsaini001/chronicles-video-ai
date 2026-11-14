@@ -1,4 +1,4 @@
-import { allowedActionsFor, currentStepOf, displayStateOf, getDb, IDEA_LIMITS, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
+import { allowedActionsFor, currentStepOf, displayStateOf, getDb, IDEA_LIMITS, isLanguageEnabled, LANGUAGE_NAMES, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -16,7 +16,8 @@ import { loadProjectWithJobs } from "@/lib/plan/jobs";
 // Leaving and coming back keeps the progress: the job runs on the server (Inngest) and this page
 // reads it again. Only the owner sees it: another user's project, a missing one and a malformed id
 // all get the same 404 page, so nobody can tell whether a project exists (ARCHITECTURE §10.3).
-// An archived project (F21) still opens from a saved link, on the step it was on, read-only: no
+// A Hindi/Hinglish project (switched off, packages/db/src/languages.ts) has no Try again / Edit
+// idea, only a note. An archived project (F21) still opens from a saved link, on the step it was on, read-only: no
 // Try again / Edit idea, and a note that it is archived.
 
 export const metadata: Metadata = { title: "Your project" };
@@ -85,6 +86,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
               requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
               queuedAt={activeJob ? activeJob.queuedAt.toISOString() : null}
               idea={{ text: project.input.text, ...IDEA_LIMITS[project.input.type] }}
+              unavailableNote={
+                isLanguageEnabled(project.language) ? null : `${LANGUAGE_NAMES[project.language]} storyboards can't be made right now. Start a new project in English.`
+              }
             />
           </div>
         )}

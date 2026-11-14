@@ -1,5 +1,6 @@
 "use client";
 
+import { isLanguageEnabled, LANGUAGE_NAMES as LANGUAGE_WORDS } from "@bytereel/db/languages";
 import { VOICE_TEXT_LANG, type VoiceLanguage, type VoicePresetId } from "@bytereel/db/voices";
 import type { PlanVersionResource, ProjectResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
@@ -95,6 +96,9 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
   const languageName = LANGUAGE_NAMES[language];
   const changed = new Set(version.changedSceneIds);
   const canEdit = project.allowedActions.includes("edit_storyboard");
+  // Language switch (packages/db/src/languages.ts): a Hindi/Hinglish storyboard stays viewable and
+  // editable by hand, but has no voice switch (no voice exists yet) and no AI changes.
+  const languageOn = isLanguageEnabled(language);
 
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -198,9 +202,11 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
               <span lang={languageName.lang}>{languageName.text}</span>
               {languageName.english && <span className="text-muted">{languageName.english}</span>}
             </li>
-            <li>
-              <VoiceMenu language={language} current={project.voiceGender} samplePresets={samplePresets} disabled={locked || editing !== null} onChoose={(g) => void switchVoice(g)} />
-            </li>
+            {languageOn && (
+              <li>
+                <VoiceMenu language={language} current={project.voiceGender} samplePresets={samplePresets} disabled={locked || editing !== null} onChoose={(g) => void switchVoice(g)} />
+              </li>
+            )}
             <li className={`${chip} font-mono`}>
               <span aria-hidden="true">≈ {seconds}s</span>
               <span className="sr-only">about {seconds} seconds</span>
@@ -306,6 +312,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             canRequest={project.allowedActions.includes("request_revision")}
             canRetry={project.allowedActions.includes("retry_job")}
             requestsUsedUp={requestsUsedUp}
+            unavailableNote={languageOn ? null : `AI changes aren't available for ${LANGUAGE_WORDS[language]} videos right now. You can still edit the narration yourself.`}
             disabled={busy || editing !== null}
             announce={announce}
           />

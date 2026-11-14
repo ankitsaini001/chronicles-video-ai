@@ -26,6 +26,8 @@ export type PlanJobPanelProps = {
   /** When the current job was started or retried (ISO), for the "taking longer" line. */
   queuedAt: string | null;
   idea: { text: string; min: number; max: number };
+  /** Shown when AI is off for this project's language (packages/db/src/languages.ts). */
+  unavailableNote?: string | null;
 };
 
 const POLL_MS = 2000;
@@ -143,7 +145,7 @@ function Progress({ projectId, progress, queuedAt }: PlanJobPanelProps) {
   );
 }
 
-function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, requestsUsedUp, idea }: PlanJobPanelProps) {
+function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, requestsUsedUp, idea, unavailableNote }: PlanJobPanelProps) {
   const router = useRouter();
   const textId = useId();
   const [editing, setEditing] = useState(false);
@@ -235,6 +237,7 @@ function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, req
         {failureText(lastError?.code, lastError?.message)}
       </p>
       {requestsUsedUp && <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>}
+      {unavailableNote && <p className="text-sm text-muted">{unavailableNote}</p>}
 
       {editing ? (
         <div className="flex flex-col gap-3">

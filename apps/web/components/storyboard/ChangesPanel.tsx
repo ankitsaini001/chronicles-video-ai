@@ -33,6 +33,8 @@ type ChangesPanelProps = {
   canRequest: boolean;
   canRetry: boolean;
   requestsUsedUp: boolean;
+  /** Shown instead of the box when AI changes are off for this project's language (languages.ts). */
+  unavailableNote?: string | null;
   /** Something else is happening on the screen (a save, an approval): don't start a change now. */
   disabled: boolean;
   announce: (text: string) => void;
@@ -234,7 +236,9 @@ export function ChangesPanel(props: ChangesPanelProps) {
         </button>
       )}
 
-      {props.requestsUsedUp ? (
+      {props.unavailableNote ? (
+        <p className="text-sm text-muted">{props.unavailableNote}</p>
+      ) : props.requestsUsedUp ? (
         <p className="text-sm text-muted">This project has used all its 20 AI changes. You can still edit the narration yourself, or start a new project.</p>
       ) : (
         <form
