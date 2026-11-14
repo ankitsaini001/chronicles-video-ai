@@ -283,6 +283,41 @@ async function main(): Promise<void> {
   done = await waitDone(a.cookie, lostId.toHexString());
   check("queued job whose event never reached Inngest → sent again on the next poll → storyboard_ready", done.status.state === "storyboard_ready", done.status.state);
 
+  // --- 10b. Language switch (packages/db/src/languages.ts): Hindi/Hinglish are off. Checked before
+  // the quota: user a already used its 5 projects today, yet gets 422 (not 429), and nothing counts.
+  const projectsBefore = await db.collection("projects").countDocuments({ ownerId: a.id });
+  const todayBefore = await projectsToday(a.id);
+  for (const language of ["hi", "hinglish"]) {
+    r = await send(a.cookie, "POST", "/api/v1/projects", { inputType: "topic", text: "बचत खाता बनाम FD", language, voiceGender: "female" }, { "idempotency-key": key() });
+    check(
+      `C2 ${language} → 422 LANGUAGE_UNAVAILABLE "Only English is available right now.", no project, not counted`,
+      r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && r.json.error.message === "Only English is available right now." && (await db.collection("projects").countDocuments({ ownerId: a.id })) === projectsBefore && (await projectsToday(a.id)) === todayBefore,
+      `${r.status} ${r.json.error?.code}`,
+    );
+  }
+  // An existing Hindi project whose storyboard failed: no Try again (E2 422), no Edit idea, a note.
+  const hiId = new ObjectId();
+  const hiInput = { type: "topic", text: "बचत खाता बनाम FD", brainstormChoice: null };
+  const hiJob = { ...newPlanJob({ ownerId: a.id, projectId: hiId, project: { input: hiInput, language: "hi", voiceGender: "female" }, now }), state: "failed", error: { code: "PROVIDER_BUSY", message: "busy", retryable: true } };
+  await db.collection("jobs").insertOne(hiJob);
+  await db.collection("projects").insertOne({
+    _id: hiId, ownerId: a.id, schemaVersion: 1, title: "बचत खाता बनाम FD", language: "hi", voiceGender: "female", input: hiInput, state: "plan_failed",
+    currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: null, stateVersion: 2, planRequestCount: 1,
+    lastError: { code: "PROVIDER_BUSY", message: "busy", at: now }, createdAt: now, updatedAt: now, archivedAt: null,
+  });
+  r = await send(a.cookie, "GET", `/api/v1/projects/${hiId.toHexString()}`);
+  check("Hindi plan_failed project: allowedActions only rename, archive", r.json.allowedActions?.join() === "rename,archive", r.json.allowedActions?.join());
+  r = await retry(a.cookie, hiJob._id.toHexString());
+  const hiAfter = await db.collection("projects").findOne({ _id: hiId });
+  const hiJobAfter = await db.collection("jobs").findOne({ _id: hiJob._id });
+  check(
+    "Hindi project: E2 Try again → 422 LANGUAGE_UNAVAILABLE; job not re-queued, nothing counted",
+    r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && hiJobAfter?.state === "failed" && hiJobAfter.attempt === 1 && hiAfter?.state === "plan_failed" && hiAfter.planRequestCount === 1 && hiAfter.stateVersion === 2,
+    `${r.status} ${r.json.error?.code}`,
+  );
+  const hiPage = (await (await fetch(`${base}/projects/${hiId.toHexString()}`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
+  check("Hindi project page: viewable, the note, no Try again / Edit idea", hiPage.includes("Hindi storyboards can") && hiPage.includes("Start a new project in English.") && !hiPage.includes(">Try again<") && !hiPage.includes(">Edit idea<"));
+
   // --- 11. No secrets or provider details in page scripts.
   const scripts = [...failedPage.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]!);
   let leaks = 0;

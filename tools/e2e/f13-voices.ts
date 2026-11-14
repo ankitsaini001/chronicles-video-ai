@@ -90,12 +90,14 @@ async function main(): Promise<void> {
   r = await get("/projects/new", cookie);
   const html = (await r.text()).replace(/<!-- -->/g, "");
   check("Idea page (English default): one ▶ per voice with a clear label", html.includes('aria-label="Play female voice sample"') && html.includes('aria-label="Play male voice sample"'));
+  // Language switch (packages/db/src/languages.ts): Hindi is off, so an old Hindi default opens the
+  // Idea page in English, with no Language row. (Re-enabled: the Hindi voices with ▶ only when the
+  // Hindi MP3s are recorded.)
   await db.collection("user").updateOne({ email }, { $set: { defaultLanguage: "hi" } });
   const hiHtml = (await (await get("/projects/new", cookie)).text()).replace(/<!-- -->/g, "");
-  const hindiRecorded = onDisk.has("hindi-female.mp3") || onDisk.has("hindi-male.mp3");
   check(
-    "Idea page (Hindi default): ▶ only when the Hindi MP3s are recorded; the voices are still there",
-    hiHtml.includes('<span lang="hi">महिला आवाज़ (Female)</span>') && (hindiRecorded || !hiHtml.includes("voice sample")),
+    "Idea page (old Hindi default, Hindi switched off): English voices with ▶, no Language row, no Hindi labels",
+    hiHtml.includes('aria-label="Play female voice sample"') && !hiHtml.includes("महिला आवाज़") && !hiHtml.includes('role="radiogroup"') && !hiHtml.includes(">Language</p>"),
   );
   check("no 'Couldn't play' message on a normal page", !html.includes("play this sample") && !hiHtml.includes("play this sample"));
   await db.collection("user").updateOne({ email }, { $set: { defaultLanguage: "en" } });

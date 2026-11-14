@@ -273,6 +273,37 @@ async function main(): Promise<void> {
   check("project unchanged by the other user", (await projectOf(pid))?.stateVersion === sv);
   check("signed out: D2 → 401", (await send("", "GET", `/api/v1/projects/${pid}/plan-versions/current`)).status === 401);
   check("no Origin: D3 → 403", (await fetch(`${base}/api/v1/projects/${pid}/narration-edits`, { method: "POST", headers: { cookie: a.cookie, "content-type": "application/json", origin: "https://evil.example" }, body: "{}" })).status === 403);
+
+  // ---------- Language switch (packages/db/src/languages.ts): an existing Hindi storyboard ----------
+  // Hindi/Hinglish are off: the project stays viewable and editable by hand, but nothing that costs
+  // AI or voice (D5, E2) is allowed, and the voice switch is hidden.
+  const hiPid = await newStoryboard(a.cookie, "How do rainbows form?");
+  await db.collection("projects").updateOne({ _id: oid(hiPid) }, { $set: { language: "hi" } });
+  ({ project, version } = await current(a.cookie, hiPid));
+  check("Hindi project: allowedActions without request_revision (narration edit, approve, rename, archive stay)", project.allowedActions?.join() === "rename,edit_storyboard,approve_storyboard,archive", project.allowedActions?.join());
+  const hiBefore = await projectOf(hiPid);
+  const countFor = (c: string) => db.collection(c).countDocuments({ projectId: oid(hiPid) });
+  const [revisionsBefore, jobsBefore] = [await countFor("revisions"), await countFor("jobs")];
+  r = await send(a.cookie, "POST", `/api/v1/projects/${hiPid}/revisions`, { stage: "storyboard", scope: "project", message: "make it shorter", basePlanVersionId: version.id, expectedStateVersion: project.stateVersion }, { "idempotency-key": key() });
+  let hiAfter = await projectOf(hiPid);
+  check(
+    "Hindi project: D5 → 422 LANGUAGE_UNAVAILABLE; no revision, no job, nothing counted, project unchanged",
+    r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && r.json.error.message === "Only English is available right now." && (await countFor("revisions")) === revisionsBefore && (await countFor("jobs")) === jobsBefore && hiAfter?.planRequestCount === hiBefore?.planRequestCount && hiAfter?.stateVersion === hiBefore?.stateVersion && hiAfter?.activeJobId === null,
+    `${r.status} ${r.json.error?.code}`,
+  );
+  // A failed change request on it (copied from a real revise job): Try again is refused too.
+  const template = await db.collection("jobs").findOne({ projectId: oid(pid), type: "revise" });
+  const failedReviseId = new ObjectId();
+  await db.collection("jobs").insertOne({ ...template!, _id: failedReviseId, projectId: oid(hiPid), idempotencyKey: `rev:${failedReviseId.toHexString()}`, state: "failed", attempt: 1, error: { code: "PROVIDER_BUSY", message: "busy", retryable: true }, inputRef: { ...template!.inputRef, planVersionId: oid(version.id), revisionId: null } });
+  r = await send(a.cookie, "POST", `/api/v1/jobs/${failedReviseId.toHexString()}/retry`, {}, { "idempotency-key": key() });
+  const failedAfter = await db.collection("jobs").findOne({ _id: failedReviseId });
+  hiAfter = await projectOf(hiPid);
+  check("Hindi project: E2 Try again on a change request → 422; job stays failed, nothing counted", r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && failedAfter?.state === "failed" && failedAfter.attempt === 1 && hiAfter?.activeJobId === null && hiAfter.planRequestCount === hiBefore?.planRequestCount, `${r.status} ${r.json.error?.code}`);
+  page = (await (await fetch(`${base}/projects/${hiPid}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
+  check("Hindi storyboard page: viewable, no voice switch, a note instead of the change box", page.includes("Scene 01") && !page.includes("change the voice") && page.includes("available for Hindi videos right now") && !page.includes("Send change request"));
+  const hiScene = version.plan.scenes[0];
+  r = await send(a.cookie, "POST", `/api/v1/projects/${hiPid}/narration-edits`, { basePlanVersionId: version.id, sceneId: hiScene.id, blocks: [{ narrationId: hiScene.narration[0].id, text: `${hiScene.narration[0].text} Really.` }], expectedStateVersion: project.stateVersion });
+  check("Hindi project: the free narration edit (D3) still works → 201", r.status === 201, `status ${r.status}`);
 }
 
 main()
