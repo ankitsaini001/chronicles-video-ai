@@ -1,5 +1,6 @@
 import { type Db, ObjectId } from "mongodb";
-import { STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalDocument } from "./storyboard-approvals";
+import { PLAN_VERSIONS_COLLECTION, STORYBOARD_APPROVALS_COLLECTION } from "./collections";
+import type { StoryboardApprovalDocument } from "./storyboard-approvals";
 
 // Storyboard versions (docs/DATABASE.md §4.10 `planVersions`, insert-only). The AI's first plan is
 // version 1 (F15); narration edits and voice switches (F17, F19) and AI revisions (F18) add new
@@ -9,7 +10,7 @@ import { STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalDocument } from
 // package doesn't depend on the pipeline, so it is stored as a plain object here.
 // F16: the API shapes `PlanVersionSummary` (D1) and `PlanVersion` (D2), API.md §11.3.
 
-export const PLAN_VERSIONS_COLLECTION = "planVersions";
+export { PLAN_VERSIONS_COLLECTION };
 export const PLAN_VERSION_SCHEMA_VERSION = 1;
 
 export type PlanVersionSource = "ai_plan" | "ai_revision" | "user_edit" | "caption_edit";

@@ -1,7 +1,8 @@
 import { type ClientSession, type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
-import { PLAN_VERSIONS_COLLECTION, type PlanVersionDocument } from "./plan-versions";
+import { AUDIT_LOGS_COLLECTION, PLAN_VERSIONS_COLLECTION, STORYBOARD_APPROVALS_COLLECTION } from "./collections";
+import type { PlanVersionDocument } from "./plan-versions";
 import { ProjectActionError, PROJECTS_COLLECTION, type ProjectDocument, type ProjectState } from "./projects";
 
 // Approval #1, the storyboard (docs/DATABASE.md §4.12 `storyboardApprovals`, insert-only; API.md §9).
@@ -9,7 +10,7 @@ import { ProjectActionError, PROJECTS_COLLECTION, type ProjectDocument, type Pro
 // only by the signed-in creator through D8 (F20); background jobs, admins and the AI never create
 // one. A new storyboard version has no approval, so any change needs a new approval.
 
-export const STORYBOARD_APPROVALS_COLLECTION = "storyboardApprovals";
+export { AUDIT_LOGS_COLLECTION, STORYBOARD_APPROVALS_COLLECTION };
 export const STORYBOARD_APPROVAL_SCHEMA_VERSION = 1;
 
 export interface StoryboardApprovalDocument {
@@ -46,7 +47,6 @@ export function toStoryboardApprovalResource(doc: StoryboardApprovalDocument): S
 
 // ---------- D8: approve (F20) ----------
 
-export const AUDIT_LOGS_COLLECTION = "auditLogs";
 
 /** States in which a storyboard can be approved (API.md §9). */
 export const APPROVABLE_STATES: readonly ProjectState[] = ["storyboard_ready", "generate_failed"];
