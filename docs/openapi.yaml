@@ -534,6 +534,10 @@ paths:
         C1. Tabs: drafts (draft, planning, plan_failed, storyboard_ready, generating, generate_failed), ready
         (video_ready, publish_failed), scheduled (scheduled, publishing), published. Omitted = all non-archived.
         Sorted by updatedAt desc. Cursor pagination.
+        As built (F21): only the signed-in user's projects, never archived ones; sorted updatedAt desc then _id desc
+        (index projects.ownerId_updatedAt_id); the cursor is made for one tab (another tab, or a tampered cursor:
+        400 INVALID_INPUT on `cursor`); unknown or repeated `tab` → 400. Items are ProjectListItem (ProjectSummary
+        plus stateVersion and storyboardApproved, additive). Rate: the shared 300 reads/min.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -555,7 +559,7 @@ paths:
                 $ref: '#/components/schemas/ProjectSummaryPage'
               example:
                 items:
-                  - { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work, language: en, voiceGender: female, state: video_ready, currentStep: video, thumbnailUrl: 'https://bytereel-prod.r2.example-account.r2.cloudflarestorage.com/users/67330c1a9f1e4b2a7c0d1e01/projects/67330d5e9f1e4b2a7c0d2a10/renders/67330f109f1e4b2a7c0d6f01/thumbnail.jpg?X-Amz-Expires=900&X-Amz-Signature=3f1c', latestPost: null, activeJobType: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:46:12.000Z' }
+                  - { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work, language: en, voiceGender: female, state: video_ready, currentStep: video, thumbnailUrl: 'https://bytereel-prod.r2.example-account.r2.cloudflarestorage.com/users/67330c1a9f1e4b2a7c0d1e01/projects/67330d5e9f1e4b2a7c0d2a10/renders/67330f109f1e4b2a7c0d6f01/thumbnail.jpg?X-Amz-Expires=900&X-Amz-Signature=3f1c', latestPost: null, activeJobType: null, stateVersion: 9, storyboardApproved: true, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:46:12.000Z' }
                 nextCursor: null
         '400':
           $ref: '#/components/responses/InvalidInput'
@@ -647,6 +651,7 @@ paths:
       description: |
         C3. Project with activeJob and allowedActions. ETag = stateVersion. Archived projects are still returned.
         As built (F16): owner only (404 otherwise); the stuck-job rule is applied first (like C6); ETag "<stateVersion>". allowedActions on a storyboard: edit_storyboard, request_revision (under 20 AI requests), approve_storyboard (until the current version is approved), retry_job (last change request failed and is retryable).
+        F21: `rename` first and `archive` last whenever no job runs (archive not while publishing); nothing on an archived project (state archived, currentStep = the step it was on).
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -682,8 +687,10 @@ paths:
         Then retry the failed plan job (POST /api/v1/jobs/{jobId}/retry), which plans from the edited idea.
         Does not count toward the 5 projects/day quota. 409 INVALID_STATE (archived, or text outside
         plan_failed), STALE_VERSION, JOB_ALREADY_RUNNING.
-        **F15 builds the edit-idea part only:** `text` is required (rename alone arrives with F21) and
-        `expectedStateVersion` goes in the body (the If-Match header isn't read yet).
+        As built (F15 edit idea, F21 rename): `expectedStateVersion` goes in the body (If-Match isn't read on C4).
+        The title is cleaned (control/invisible characters removed, NFC), spaces and line breaks collapsed to one
+        space, trimmed, then 1–120. Rename is also refused while a job runs (409 JOB_ALREADY_RUNNING: a storyboard
+        job would otherwise overwrite the title with the plan's topic). Rename counts toward no limit.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -731,7 +738,9 @@ paths:
     delete:
       operationId: archiveProject
       summary: Archive a project (soft delete)
-      description: C5. **If-Match required.** Blocked while a post is publishing or outcome_unknown (409 INVALID_STATE). Cancels the active job and a scheduled or publish_failed post (so it can never be published or retried). Nothing is deleted from R2.
+      description: |
+        C5. **If-Match required.** Blocked while a post is publishing or outcome_unknown (409 INVALID_STATE). Cancels the active job and a scheduled or publish_failed post (so it can never be published or retried). Nothing is deleted from R2.
+        As built (F21): one conditional update (owner, stateVersion, no active job): state archived, archivedAt, stateBeforeArchive, stateVersion + 1. **Refused while a job runs (409 JOB_ALREADY_RUNNING)** instead of cancelling it (there is no job cancel yet, E3). No posts exist yet; F30 must add the post cancellation (one transaction). Missing/malformed If-Match → 400 INVALID_INPUT (`headers.If-Match`). Already archived → 409 INVALID_STATE. Rate: 60/min shared with C4. The archived project still opens by direct link (C3, pages), read-only.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -754,7 +763,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: STALE_VERSION or INVALID_STATE (publishing, already archived).
+          description: STALE_VERSION, JOB_ALREADY_RUNNING (F21) or INVALID_STATE (publishing, already archived).
           content:
             application/json:
               schema:
@@ -3355,6 +3364,20 @@ components:
           $ref: '#/components/schemas/Timestamp'
         updatedAt:
           $ref: '#/components/schemas/Timestamp'
+    ProjectListItem:
+      description: One C1 card (F21) = ProjectSummary plus two additive fields.
+      allOf:
+        - $ref: '#/components/schemas/ProjectSummary'
+        - type: object
+          required: [stateVersion, storyboardApproved]
+          properties:
+            stateVersion:
+              type: integer
+              minimum: 1
+              description: Sent back by the card's Rename (C4 expectedStateVersion) and Archive (C5 If-Match).
+            storyboardApproved:
+              type: boolean
+              description: The storyboard on screen (currentPlanVersionId) is the approved one; the card says "Approved".
     ProjectInput:
       type: object
       required: [type, text, brainstormChoice]
@@ -4311,6 +4334,7 @@ components:
       properties:
         title:
           type: string
+          description: Cleaned (control/invisible characters removed, NFC), spaces and line breaks collapsed, trimmed, then 1–120 characters.
           minLength: 1
           maxLength: 120
         text:
@@ -4667,7 +4691,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectSummary'
+            $ref: '#/components/schemas/ProjectListItem'
         nextCursor:
           $ref: '#/components/schemas/NextCursor'
     PlanVersionSummaryPage:

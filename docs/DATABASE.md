@@ -446,6 +446,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 **Indexes**
 - `{ ownerId: 1, updatedAt: -1 }`: the "My videos" list, newest first.
 - `{ ownerId: 1, state: 1 }`: the tabs (Drafts, Ready, Scheduled, Published).
+- `{ ownerId: 1, updatedAt: -1, _id: -1 }` (**F21**): the My videos pages (API.md C1) sort by `updatedAt` and then `_id` (the tie-breaker, so pages never skip or repeat a card). This index serves that whole sort; the tabs filter on `state` on the way. Create it with `npm run db -- indexes --feature F21 --apply`.
 - No index on `activeJobId`: an earlier version of ARCHITECTURE §8.3 listed a sparse one, but it isn't needed. A job already stores its `projectId`, so "which project does this job belong to?" is a lookup by `_id`.
 
 #### 4.9 `jobs`
@@ -1274,6 +1275,7 @@ Source: the `Notification` shape in API.md §11.3 (+ `ownerId` and `schemaVersio
 - **Archiving** a project (C5, the "delete" on a project card) is a **soft delete**: `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. The project disappears from My videos.
 - **Nothing is deleted**: not in MongoDB, **not in R2**. A running job is asked to stop, and a `scheduled` or `publish_failed` post is `cancelled` (so it can never be published or retried).
 - Archiving is refused while a post is being published right now (`publishing`) **or** its outcome is still being checked (`outcome_unknown`).
+- **As built (F21):** one conditional update on the project (owner, `stateVersion`, no running job). It is **refused while a job runs** (409 `JOB_ALREADY_RUNNING`) instead of asking the job to stop, because no job honours a cancel yet (E3). No posts exist yet; **F30 MUST** make it one transaction that also cancels a `scheduled` / `publish_failed` post (§7.2 #12). An archived project still opens by direct link for its owner, read-only, on the step it was on (`stateBeforeArchive`).
 - Real deletion of data happens only through account deletion (6.7).
 
 ### 6.7 Account deletion (India DPDP Act): final rule
@@ -1326,7 +1328,7 @@ The checks (is this still the current version? is the job slot free? quota left?
 | 9 | **Publish now / schedule** (approval #2) | H2 · F30, F31 | insert `posts` (approval snapshot with a new approval id, `publishKey`) + insert `publish` job + project `publishing`/`scheduled` + audit `post.approved` | A post without a job (never published), or a job without its approval record |
 | 10 | Cancel a scheduled post | H5 · F31 | post → `cancelled` + job cancelled + project → `video_ready` | A cancelled post whose job still wakes up, or a project stuck in "scheduled" |
 | 11 | Retry a failed publish | H6 (and admin I9) · F30 | post → `publishing`, `attempts` +1 + publish job re-queued (after the full re-check, §4.22) | A post marked "publishing" with no job behind it |
-| 12 | Archive project | C5 · F21 | running job `cancelRequestedAt` + `scheduled`/`publish_failed` post `cancelled` + project `archived` | An archived project whose post still publishes or can be retried |
+| 12 | Archive project | C5 · F21 | running job `cancelRequestedAt` + `scheduled`/`publish_failed` post `cancelled` + project `archived` | An archived project whose post still publishes or can be retried. **As built (F21):** no posts yet and a running job refuses the archive, so it is one conditional update; F30 makes it this transaction |
 | 13 | Connect Instagram | G3 · F28 | upsert `instagramConnections` (encrypted token) + if it is a *different* account: `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit `instagram.connected` (the calls to Meta happen first, outside) | A new account connected while posts approved for the old one stay live |
 | 14 | Disconnect Instagram | G4 · F28 | connection token removed, `status = revoked`, `revokedAt` + all `scheduled`/`publish_failed` posts → `approval_invalidated` + notifications + audit | Scheduled posts aimed at an account that is gone |
 | 15 | Meta deauthorize callback | J1 · F37 | connection `revoked`, token removed + `scheduled`/`publish_failed` posts → `approval_invalidated` + notification `instagram_reconnect` + audit | Same as 14 |
@@ -1362,6 +1364,7 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `rateLimits` | `expiresAt` TTL (`expireAfterSeconds: 0`); lookups use `_id` | No | Old counters delete themselves | API §3.7 + Q2/Q13 |
 | `projects` | `{ ownerId, updatedAt: -1 }` | No | My videos list, newest first | ARCH §8.3 |
 | `projects` | `{ ownerId, state }` | No | The tabs | ARCH §8.3 |
+| `projects` | `{ ownerId, updatedAt: -1, _id: -1 }` | No | My videos pages, newest first, with the tie-breaker | API C1 (F21) |
 | `planVersions` | `{ projectId, versionNumber: -1 }` | Yes | No duplicate version numbers; history order | ARCH §8.4 |
 | `planVersions` | `{ ownerId, projectId }` | No | Owner-scoped lookups | ARCH §8.4 |
 | `revisions` | `{ projectId, createdAt: -1 }` | No | Revision chat history | ARCH §8.5 |
@@ -1470,7 +1473,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F17, F19 | More `planVersions` (`user_edit`) |
 | F18 | `revisions`; `jobs` of type `revise`; `providerUsage` rows with `operation: "revise"`. Indexes: `npm run db -- indexes --feature F18 --apply` |
 | F20 | `storyboardApprovals`, `auditLogs` (no generate job and no videos counter yet: F23). Indexes: `npm run db -- indexes --feature F20 --apply` |
-| F21 | Archived projects (no new collection) |
+| F21 | Archived projects (`state: "archived"`, `archivedAt`, `stateBeforeArchive`; no new collection). Index: `npm run db -- indexes --feature F21 --apply` |
 | F22 | Nothing in MongoDB: your R2 bucket |
 | F23 | `speechArtifacts`, `renders` (files in R2) |
 | F25 | `captionOverrides` |

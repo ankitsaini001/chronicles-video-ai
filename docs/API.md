@@ -652,7 +652,7 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
 | C7 brainstorm, H1 caption suggestions | 10 / hour each (C7 also 30 / day, §10.1) |
 | C2 create project | 10 / hour (plus the daily quota) |
-| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min (one shared counter per user; F15 counts C4) |
+| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea, C5 archive | 60 / min (one shared counter per user; F15 counts C4, F21 adds C5) |
 | D5 revision | 20 / hour |
 | D8 approve, F4 caption overrides | 10 / hour |
 | H2 publish/schedule, H5, H6 | 10 / hour |
@@ -738,6 +738,7 @@ Usage = { used: number; limit: number; resetsAt: string | null }
 
 ProjectSummary = { id; title; language; voiceGender; state: ProjectState; currentStep: ProjectStep; thumbnailUrl: string | null;
                    latestPost: PostSummary | null; activeJobType: JobType | null; createdAt; updatedAt }
+ProjectListItem = ProjectSummary & { stateVersion: number; storyboardApproved: boolean }   // C1 items (F21, additive)
 Project = ProjectSummary & {
   input: { type: InputType; text: string; brainstormChoice: { subject: string; title: string; hook: string } | null };
   stateVersion: number; currentPlanVersionId: string | null; approvedPlanVersionId: string | null;
@@ -865,7 +866,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | `/reset-password?token=…` | — | A6 |
 | `/access-pending` | — | none (mailto / external form) |
 | App shell (every signed-in page) | A4, B1 | A3 logout, B5/B6 notifications bell, toasts from B5 (`unreadOnly=true`) |
-| `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new` |
+| `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new`. **As built (F21):** the page reads C1's first page and B1 on the server (same functions); "Load more" calls C1. With no project in My videos (none, or all archived) it shows the first-visit page (How it works, today / this month / Instagram cards from B1, "Create your first video") instead of the tabs |
 | `/projects/new` ① Idea | B1 (defaults), B4 (voices) | C7 brainstorm, C2 create storyboard → poll C6 |
 | ① Idea of an existing project in `plan_failed` (storyboard failed) | C3 (idea text + `lastError`) | **Edit idea** = C4 with `text` (and optional `title`), then **Try again** = E2 on the failed plan job → poll C6 |
 | `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob`. **As built (F16–F20):** the page reads C3/D2/D6 data on the server; `/projects/[id]` redirects here when `currentStep` is `storyboard`; no E3 Cancel yet; D8 approves only (video job F23) |
@@ -996,8 +997,15 @@ Auth: creator. Body: exactly one of `ids` (array of 1–100 notification ids) or
 
 #### C1. `GET /api/v1/projects` — Library
 Purpose: dashboard cards. Auth: creator. Query: `tab` optional — `drafts` (`draft`, `planning`, `plan_failed`, `storyboard_ready`, `generating`, `generate_failed`) · `ready` (`video_ready`, `publish_failed`) · `scheduled` (`scheduled`, `publishing`) · `published` (`published`); omitted = all non-archived. `limit` 1–50 (20), `cursor`. Sort: `updatedAt` desc, `_id` desc. Archived projects are never listed.
-Success `200` → `{ items: ProjectSummary[], nextCursor }`. `thumbnailUrl` is a 15-minute presigned URL (or null).
+Success `200` → `{ items: ProjectListItem[], nextCursor }` (§11.3). `thumbnailUrl` is a 15-minute presigned URL (or null).
 Errors: `400 INVALID_INPUT`.
+
+**As built (F21).**
+- Only the signed-in user's projects (`ownerId` from the session, never from the request); `state = archived` is never listed. The cursor is base64url JSON `{ u: updatedAt, i: _id, t: tab | "all" }`: a cursor used with another tab, or tampered, → `400 INVALID_INPUT` (`cursor`). An unknown or repeated `tab`, a bad `limit` → `400`. Rate: the shared 300 reads/min.
+- Tab mapping as above (this table is the one source; code: `LIBRARY_TABS` in `packages/db/src/project-library.ts`). There is no Archived tab.
+- Each item is `ProjectSummary` plus two **additive** fields: `stateVersion` (sent back by the card's Rename, C4, and Archive, C5) and `storyboardApproved` (the storyboard on screen is the approved one, so the card says "Approved"). `thumbnailUrl` and `latestPost` stay `null` until F23 / F30. `activeJobType` is the type of the project's running job (one extra query for the page).
+- Index: `projects { ownerId: 1, updatedAt: -1, _id: -1 }` (F21; serves the sort including the tie-breaker).
+- The My videos page reads the first page with the same function (`listProjects`) on the server; "Load more" calls C1.
 ```http
 GET /api/v1/projects?tab=ready&limit=20
 ```
@@ -1014,6 +1022,8 @@ GET /api/v1/projects?tab=ready&limit=20
       "thumbnailUrl": "https://bytereel-prod.r2.example-account.r2.cloudflarestorage.com/users/67330c1a9f1e4b2a7c0d1e01/projects/67330d5e9f1e4b2a7c0d2a10/renders/67330f109f1e4b2a7c0d6f01/thumbnail.jpg?X-Amz-Expires=900&X-Amz-Signature=3f1c",
       "latestPost": null,
       "activeJobType": null,
+      "stateVersion": 9,
+      "storyboardApproved": true,
       "createdAt": "2026-11-12T05:00:00.000Z",
       "updatedAt": "2026-11-12T05:46:12.000Z"
     }
@@ -1095,7 +1105,7 @@ Errors: `404 NOT_FOUND`.
   "input": { "type": "topic", "text": "How UPI payments work — from scanning the QR code to money reaching the shop", "brainstormChoice": null },
   "stateVersion": 4, "currentPlanVersionId": "67330e019f1e4b2a7c0d2b02", "approvedPlanVersionId": null, "currentRenderId": null,
   "activeJobId": null, "activeJob": null, "lastError": null,
-  "allowedActions": ["rename", "archive", "edit_storyboard", "request_revision", "approve_storyboard"],
+  "allowedActions": ["rename", "edit_storyboard", "request_revision", "approve_storyboard", "archive"],
   "archivedAt": null, "createdAt": "2026-11-12T05:00:00.000Z", "updatedAt": "2026-11-12T05:12:40.000Z"
 }
 ```
@@ -1103,7 +1113,8 @@ Errors: `404 NOT_FOUND`.
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM1G6H7J" } }
 ```
 
-**As built (F16).** Owner only (another user's project, a missing one or a malformed id → the same 404). The stuck-job rule (§8.5) is applied first, like C6. `activeJob` is filled while a job runs. `allowedActions` on a storyboard: `edit_storyboard` (D3, D4, D7), `request_revision` (D5, while under the 20 AI requests), `approve_storyboard` (D8, in `storyboard_ready`/`generate_failed` until the current version is the approved one), `retry_job` (E2, when the newest change request failed with a retryable error and the storyboard is still the version it was made on). Nothing while a job runs. `rename`/`archive` arrive with F21. Rate: the shared 300 reads/min.
+**As built (F16).** Owner only (another user's project, a missing one or a malformed id → the same 404). The stuck-job rule (§8.5) is applied first, like C6. `activeJob` is filled while a job runs. `allowedActions` on a storyboard: `edit_storyboard` (D3, D4, D7), `request_revision` (D5, while under the 20 AI requests), `approve_storyboard` (D8, in `storyboard_ready`/`generate_failed` until the current version is the approved one), `retry_job` (E2, when the newest change request failed with a retryable error and the storyboard is still the version it was made on). Nothing while a job runs. Rate: the shared 300 reads/min.
+**F21:** `rename` (first) and `archive` (last) whenever no job runs (`archive` not while `publishing`). An archived project answers with `state: "archived"`, `currentStep` = the step it was on (`stateBeforeArchive`) and `allowedActions: []` (read-only).
 
 #### C4. `PATCH /api/v1/projects/{projectId}` — Rename, or edit the idea after the storyboard failed
 Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `text` string (the idea; same length rules as C2 for the project's `inputType`) · plus `expectedStateVersion` int (required).
@@ -1111,7 +1122,8 @@ Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `te
 - **Edit idea** (`text`, optionally with `title`): allowed **only in `plan_failed`** with no active job (the "Edit idea" button after a failed storyboard, §4.3). Effect (transaction): `project.input.text` replaced (`inputType` and `brainstormChoice` unchanged), `title` = the sent `title`, else the first 120 chars of the new text (as in C2), `stateVersion + 1`; the project stays `plan_failed` with its `lastError`, and `allowedActions` includes `retry_job`. The creator then presses **Try again** (E2 on the failed `plan` job), which plans from the edited idea. Editing the idea and trying again **does not count toward the 5 projects/day quota** (no new project is created), but each retry that plans from an edited idea **counts 1 toward the 20 plan + revision requests per project** (it is a paid AI call; founder, 2026-11-13). At the limit, E2 returns `429 QUOTA_EXCEEDED` (`plan_requests_per_project`). Language and voice are not editable here (language: create a new project, PRD decision #25; voice: D4 once a storyboard exists).
 Success `200` → `Project`. Errors: `400 INVALID_INPUT` (no field, text length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived; `text` sent outside `plan_failed`) · `409 JOB_ALREADY_RUNNING`.
 
-**As built (F15): the edit-idea part only.** `text` is required (a body with only `title` → `400`; rename alone arrives with F21) and `expectedStateVersion` goes in the body (the `If-Match` header isn't read yet). One conditional update (single document). The text is cleaned like C2 (control and invisible format characters removed, NFC, trimmed) and checked against the project's own `inputType` limits. `allowedActions` after a failure: `edit_idea`, plus `retry_job` while E2 would accept the job (retryable error, or the idea was edited since) and the project is under its 20 storyboard requests.
+**As built (F15 edit idea, F21 rename).** A body with `title` only renames; with `text` it edits the idea (and `title` if sent); neither → `400`. `expectedStateVersion` goes in the body (the `If-Match` header isn't read on C4).
+- **Rename (F21):** the title is cleaned like the idea (control and invisible format characters removed, NFC), spaces and line breaks collapsed to one space, trimmed, then 1–120 characters. One conditional update (owner, `stateVersion`, no active job): `title`, `updatedAt` (the card moves to the top of My videos), `stateVersion + 1`. Plans, approvals and the idea are untouched; no limit is counted. **Also refused while a job runs** (`409 JOB_ALREADY_RUNNING`): a storyboard job sets the title to the plan's topic when it finishes and would overwrite the new name. Archived → `409 INVALID_STATE`. One conditional update (single document). The text is cleaned like C2 (control and invisible format characters removed, NFC, trimmed) and checked against the project's own `inputType` limits. `allowedActions` after a failure: `edit_idea`, plus `retry_job` while E2 would accept the job (retryable error, or the idea was edited since) and the project is under its 20 storyboard requests.
 ```json
 { "title": "UPI in 2 seconds", "expectedStateVersion": 4 }
 ```
@@ -1129,6 +1141,13 @@ Response: the `Project` with `"state": "plan_failed"`, the new `input.text` and 
 #### C5. `DELETE /api/v1/projects/{projectId}` — Archive (soft delete)
 Auth: creator. Header `If-Match: "<stateVersion>"` (required). Allowed in any state **except `publishing`/`outcome_unknown` post in flight** (ARCHITECTURE §7.2). Effect (transaction): active pipeline job gets `cancelRequestedAt`; a `scheduled` or `publish_failed` post → `cancelled` (so it can never be published or retried); project `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. Nothing is deleted from R2 (DATABASE.md §6.6).
 Success `200` → `Project` (`state: archived`). Errors: `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (publishing; already archived).
+**As built (F21).**
+- `If-Match: "<stateVersion>"` is required (a quoted whole number); missing or malformed → `400 INVALID_INPUT` (`headers.If-Match`).
+- One conditional update (owner, `stateVersion`, no active job): `state = archived`, `stateBeforeArchive`, `archivedAt`, `updatedAt`, `stateVersion + 1`. Nothing else changes or is deleted (plans, approvals, the idea; nothing in R2).
+- **Spec change: refused while a job runs** (`409 JOB_ALREADY_RUNNING`, "We're still working on this video. Please try again when this step finishes.") instead of setting the job's `cancelRequestedAt`: no job honours a cancel yet (E3 is not built), so a running storyboard job would finish and move the archived project back to `storyboard_ready`. The card hides the ⋯ menu while a job runs. When E3 exists, this can go back to cancelling.
+- No posts exist yet, so there is nothing to cancel. **F30 MUST** cancel a `scheduled` / `publish_failed` post in the same transaction (DATABASE.md §7.2 #12) and refuse while a post is `publishing` / `outcome_unknown`.
+- Rate: 60/min, shared with C4, D3, D4, D7 (`edit-project`). Not idempotent by key: a repeat gets `409 INVALID_STATE` (already archived) or `409 STALE_VERSION`.
+- After archiving, the project disappears from C1 and My videos, but its pages (`/projects/[id]`, `/projects/[id]/storyboard`) and C3 still open for the owner by direct link, read-only ("Archived" note; no edit, change, approve, Try again or Edit idea; D-endpoints answer `409`). Other users still get `404`.
 ```http
 DELETE /api/v1/projects/67330d5e9f1e4b2a7c0d2a10
 Origin: https://bytereel.app

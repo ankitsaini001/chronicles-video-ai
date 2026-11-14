@@ -64,7 +64,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | ✅ Done |
 | F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | ✅ Done |
 | F20 | [Approve storyboard (approval #1)](F20-approve-storyboard.md) | F18 | ✅ Done |
-| F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | 🔄 In progress |
+| F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | 🧪 Testing |
 
 ### A4 · Generate and review video
 
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F21 (My videos: project cards and tabs), the last feature of phase A3. Phases A1 and A2 done; F12–F20 done.
+**Next up:** F21 (My videos: project cards and tabs) is 🧪 Testing: code review, then the founder tests it. It is the last feature of phase A3. Phases A1 and A2 done; F12–F20 done.
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
