@@ -40,6 +40,12 @@ export const API_RATE_LIMITS = {
   createProjectPerUser: { name: "create-project", limit: 10, windowSeconds: 60 * 60 },
   /** C7 brainstorm: 10 per hour per user (plus 30 per day, USAGE_LIMITS.brainstormsPerDay; F14). */
   brainstormPerUser: { name: "brainstorm", limit: BRAINSTORM_LIMITS.perHour, windowSeconds: 60 * 60 },
+  /** "Polling reads" C6 project status and E1 job status (later H4): 120 per minute, one shared counter (F15). */
+  pollPerUser: { name: "v1-poll-user", limit: 120, windowSeconds: 60 },
+  /** C4 edit idea (later rename, D3, D4, D7): 60 per minute (F15). */
+  editProjectPerUser: { name: "edit-project", limit: 60, windowSeconds: 60 },
+  /** E2 retry (later E3 cancel): 30 per hour, one shared counter (F15). */
+  jobActionsPerUser: { name: "job-actions", limit: 30, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08" | "F12" | "F14";
+  feature: "F07" | "F08" | "F12" | "F14" | "F15";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -39,6 +39,11 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "providerUsage", name: "at", keys: { at: -1 }, options: {}, feature: "F14", why: "AI spend totals by time" },
   { collection: "providerUsage", name: "ownerId_at", keys: { ownerId: 1, at: -1 }, options: {}, feature: "F14", why: "One user's AI usage" },
   { collection: "providerUsage", name: "provider_at", keys: { provider: 1, at: -1 }, options: {}, feature: "F14", why: "AI spend per service" },
+  { collection: "jobs", name: "idempotencyKey_unique", keys: { idempotencyKey: 1 }, options: { unique: true }, feature: "F15", why: "No duplicate jobs from double-clicks" },
+  { collection: "jobs", name: "projectId_createdAt", keys: { projectId: 1, createdAt: -1 }, options: {}, feature: "F15", why: "A project's jobs, newest first" },
+  { collection: "jobs", name: "state_updatedAt", keys: { state: 1, updatedAt: 1 }, options: {}, feature: "F15", why: "Find stuck jobs" },
+  { collection: "planVersions", name: "projectId_versionNumber_unique", keys: { projectId: 1, versionNumber: -1 }, options: { unique: true }, feature: "F15", why: "No duplicate version numbers; history order" },
+  { collection: "planVersions", name: "ownerId_projectId", keys: { ownerId: 1, projectId: 1 }, options: {}, feature: "F15", why: "Owner-scoped lookups" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */

@@ -15,6 +15,11 @@ export const USAGE_LIMITS = {
   voiceCharactersPerMonth: 3000,
   /** C7 "Brainstorm with AI" requests per user per day (plus 10 per hour, API_RATE_LIMITS; F14). */
   brainstormsPerDay: BRAINSTORM_LIMITS.perDay,
+  /**
+   * AI storyboard requests per project, never reset: C2 counts 1, every plan retry (E2) 1, and
+   * later every revision (D5) 1 (`projects.planRequestCount`; enforced since F15).
+   */
+  planRequestsPerProject: 20,
 } as const;
 
 /** Every user starts in this timezone (API.md §2); also the fallback for an unknown zone. */

@@ -2,13 +2,15 @@ import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS } from "./idea-text";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
+import { canRetryPlanJob, JOBS_COLLECTION, newPlanJob, planInputHash, toJobResource, type JobDocument, type JobResource, type JobType } from "./jobs";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
 
-// Video projects (docs/DATABASE.md §4.8 `projects`, docs/API.md C2 and §11.3 `Project`).
-// F12 builds "① Idea → Create storyboard" WITHOUT the AI: C2 saves the project in state `draft`
-// with no job. F15 changes C2 to the full spec (state `planning` + a queued `plan` job in the same
-// transaction, planRequestCount 1, answer 202 with the job). See API.md C2 "Until F15".
+// Video projects (docs/DATABASE.md §4.8 `projects`, docs/API.md C2, C4 and §11.3 `Project`).
+// C2 "Create storyboard" (F12, full spec since F15): ONE transaction counts the project for the day,
+// saves it in state `planning` with planRequestCount 1, and inserts its queued `plan` job; the
+// route then hands the job to Inngest (`plan.requested`). Projects saved by F12 before F15 stay in
+// state `draft` with no job.
 
 export const PROJECTS_COLLECTION = "projects";
 export const PROJECT_SCHEMA_VERSION = 1;
@@ -144,14 +146,14 @@ export type ProjectResource = {
   currentStep: ProjectStep;
   thumbnailUrl: string | null;
   latestPost: null;
-  activeJobType: null;
+  activeJobType: JobType | null;
   input: { type: InputType; text: string; brainstormChoice: BrainstormChoice | null };
   stateVersion: number;
   currentPlanVersionId: string | null;
   approvedPlanVersionId: string | null;
   currentRenderId: string | null;
   activeJobId: string | null;
-  activeJob: null;
+  activeJob: JobResource | null;
   lastError: { code: string; message: string; at: string } | null;
   allowedActions: string[];
   archivedAt: string | null;
@@ -161,12 +163,36 @@ export type ProjectResource = {
 
 const hexOrNull = (id: ObjectId | null) => (id ? id.toHexString() : null);
 
+/** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
+export type AllowedAction = "edit_idea" | "retry_job";
+
 /**
- * Database document → API resource. Jobs, posts and thumbnails don't exist yet (F15, F23, F30), so
- * those fields are null. `allowedActions` is empty until the endpoints behind them exist (rename
- * and archive: F21; the job actions: F15).
+ * What the creator may do now (API.md §11.1, "the server owns state"). F15: after a failed
+ * storyboard, `edit_idea` (C4), and `retry_job` (E2) while the last plan job may be retried and the
+ * project is under its 20 storyboard requests. Rename and archive arrive with F21, cancel with E3.
  */
-export function toProjectResource(doc: ProjectDocument): ProjectResource {
+export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined): AllowedAction[] {
+  if (doc.state !== "plan_failed" || doc.activeJobId) return [];
+  const actions: AllowedAction[] = ["edit_idea"];
+  if (latestPlanJob && doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject && canRetryPlanJob(latestPlanJob, planInputHash(doc))) actions.push("retry_job");
+  return actions;
+}
+
+export interface ProjectRelated {
+  /** The job in `activeJobId`, when the caller loaded it. */
+  activeJob?: JobDocument | null;
+  /** False: `activeJob` stays null in the answer (C2 returns the job next to the project). */
+  embedActiveJob?: boolean;
+  /** The project's newest plan job (for `retry_job`). */
+  latestPlanJob?: JobDocument | null;
+}
+
+/**
+ * Database document → API resource. Posts and thumbnails don't exist yet (F23, F30), so those
+ * fields are null.
+ */
+export function toProjectResource(doc: ProjectDocument, related: ProjectRelated = {}): ProjectResource {
+  const activeJob = related.activeJob && doc.activeJobId && related.activeJob._id.equals(doc.activeJobId) ? related.activeJob : null;
   const state = doc.state === "archived" && doc.stateBeforeArchive ? doc.stateBeforeArchive : doc.state;
   return {
     id: doc._id.toHexString(),
@@ -177,25 +203,25 @@ export function toProjectResource(doc: ProjectDocument): ProjectResource {
     currentStep: currentStepOf(state),
     thumbnailUrl: null,
     latestPost: null,
-    activeJobType: null,
+    activeJobType: activeJob ? activeJob.type : doc.activeJobId ? "plan" : null,
     input: { type: doc.input.type, text: doc.input.text, brainstormChoice: doc.input.brainstormChoice },
     stateVersion: doc.stateVersion,
     currentPlanVersionId: hexOrNull(doc.currentPlanVersionId),
     approvedPlanVersionId: hexOrNull(doc.approvedPlanVersionId),
     currentRenderId: hexOrNull(doc.currentRenderId),
     activeJobId: hexOrNull(doc.activeJobId),
-    activeJob: null,
+    activeJob: activeJob && related.embedActiveJob !== false ? toJobResource(activeJob) : null,
     lastError: doc.lastError ? { code: doc.lastError.code, message: doc.lastError.message, at: doc.lastError.at.toISOString() } : null,
-    allowedActions: [],
+    allowedActions: allowedActionsFor(doc, related.latestPlanJob),
     archivedAt: doc.archivedAt ? doc.archivedAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
 }
 
-/** The C2 answer until F15: 201 with the project and no job. */
-export const CREATE_PROJECT_STATUS = 201;
-export type CreateProjectResponse = { project: ProjectResource; job: null };
+/** The C2 answer (API.md C2): 202 Accepted with the project and its queued plan job. */
+export const CREATE_PROJECT_STATUS = 202;
+export type CreateProjectResponse = { project: ProjectResource; job: JobResource };
 
 /** The 5 projects/day limit is reached (API.md §10.1). Nothing was saved. */
 export class ProjectQuotaExceededError extends Error {
@@ -210,39 +236,50 @@ export class ProjectQuotaExceededError extends Error {
 }
 
 /**
- * C2 without AI (F12). In ONE transaction (DATABASE.md §7.2 #1): +1 on today's projects counter
- * (only while within 5), insert the project, and, when the request carried an Idempotency-Key,
- * save the answer on its record. So a crash can never leave a counted project that doesn't exist,
- * a project that wasn't counted, or a saved project whose click would run again on retry.
+ * C2 (DATABASE.md §7.2 #1). In ONE transaction: +1 on today's projects counter (only while within
+ * 5), insert the project (`planning`, planRequestCount 1, activeJobId = the job), insert its queued
+ * `plan` job, and, when the request carried an Idempotency-Key, save the answer on its record. So a
+ * crash can never leave a counted project that doesn't exist, a project without its job, or a
+ * saved project whose click would run again on retry. The Inngest event is sent by the caller
+ * AFTER this returns (never inside a transaction); if that send fails, the job stays `queued` and
+ * the stuck-job rule sends it again (plan-jobs.ts).
  * Throws ProjectQuotaExceededError (nothing saved) when the limit is reached, and
  * IdempotencyLockLostError (nothing saved) when a repeat of the same click took the record over.
  */
 export async function createProject(
   db: Db,
   input: { ownerId: string; timezone: string; body: CreateProjectBody; idempotencyLock?: IdempotencyLock | null; now?: Date },
-): Promise<CreateProjectResponse> {
+): Promise<{ response: CreateProjectResponse; job: JobDocument }> {
   const now = input.now ?? new Date();
+  const projectId = new ObjectId();
+  const ownerId = new ObjectId(input.ownerId);
+  const job = newPlanJob({
+    ownerId,
+    projectId,
+    project: { input: { type: input.body.inputType, text: input.body.text, brainstormChoice: input.body.brainstormChoice ?? null }, language: input.body.language, voiceGender: input.body.voiceGender },
+    now,
+  });
   const doc: ProjectDocument = {
-    _id: new ObjectId(),
-    ownerId: new ObjectId(input.ownerId),
+    _id: projectId,
+    ownerId,
     schemaVersion: PROJECT_SCHEMA_VERSION,
     title: projectTitle(input.body),
     language: input.body.language,
     voiceGender: input.body.voiceGender,
     input: { type: input.body.inputType, text: input.body.text, brainstormChoice: input.body.brainstormChoice ?? null },
-    state: "draft",
+    state: "planning",
     currentPlanVersionId: null,
     approvedPlanVersionId: null,
     currentRenderId: null,
-    activeJobId: null,
+    activeJobId: job._id,
     stateVersion: 1,
-    planRequestCount: 0,
+    planRequestCount: 1,
     lastError: null,
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
   };
-  const response: CreateProjectResponse = { project: toProjectResource(doc), job: null };
+  const response: CreateProjectResponse = { project: toProjectResource(doc, { activeJob: job, embedActiveJob: false }), job: toJobResource(job) };
 
   const session = db.client.startSession();
   try {
@@ -256,6 +293,7 @@ export async function createProject(
       });
       if (!counted.ok) throw new ProjectQuotaExceededError(counted.limit, counted.used, counted.resetsAt);
       await db.collection<ProjectDocument>(PROJECTS_COLLECTION).insertOne(doc, { session });
+      await db.collection<JobDocument>(JOBS_COLLECTION).insertOne(job, { session });
       // Last write: if another request took this click over meanwhile, this throws and nothing
       // (counter, project) is kept.
       if (input.idempotencyLock) await finishIdempotencyInTransaction(db, input.idempotencyLock, CREATE_PROJECT_STATUS, response, session);
@@ -263,7 +301,7 @@ export async function createProject(
   } finally {
     await session.endSession();
   }
-  return response;
+  return { response, job };
 }
 
 /**
@@ -273,4 +311,79 @@ export async function createProject(
 export async function getOwnedProject(db: Db, ownerId: string, projectId: string): Promise<ProjectDocument | null> {
   if (!/^[0-9a-f]{24}$/.test(projectId) || !/^[0-9a-f]{24}$/.test(ownerId)) return null;
   return db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: new ObjectId(projectId), ownerId: new ObjectId(ownerId) });
+}
+
+/**
+ * A refused project action, mapped to an API error by the route (API.md §4.2): the project or job
+ * doesn't exist for this owner, the state doesn't allow it, another tab changed it, a job is
+ * already running, or the per-project storyboard limit is reached. Nothing was changed.
+ */
+export class ProjectActionError extends Error {
+  constructor(
+    readonly code: "NOT_FOUND" | "INVALID_STATE" | "STALE_VERSION" | "JOB_ALREADY_RUNNING" | "QUOTA_EXCEEDED" | "INVALID_INPUT",
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "ProjectActionError";
+  }
+}
+
+/** C4 body in F15: edit the idea after a failed storyboard (API.md C4). Rename alone arrives with F21. */
+export const EditIdeaBodySchema = z.strictObject({
+  text: cleanText,
+  title: textBetween(1, TITLE_MAX).optional(),
+  expectedStateVersion: z.number({ error: "must be a whole number" }).int({ error: "must be a whole number" }).min(1, { error: "must be at least 1" }),
+});
+export type EditIdeaBody = z.output<typeof EditIdeaBodySchema>;
+
+/**
+ * C4 "Edit idea" (API.md C4, DATABASE.md §7.2 #2): only in `plan_failed` with no job running.
+ * Replaces the idea text (type and picked brainstorm idea stay), sets the title (the sent one, else
+ * from the new text), +1 stateVersion. One document, so one conditional update is all-or-nothing:
+ * if another tab changed the project meanwhile, nothing is written and the reason is reported.
+ * Doesn't count toward the 5 projects/day (no new project); the Try again that follows (E2) counts
+ * 1 toward the project's 20 storyboard requests.
+ */
+export async function editProjectIdea(
+  db: Db,
+  input: { ownerId: string; projectId: string; body: EditIdeaBody; now?: Date },
+): Promise<ProjectDocument> {
+  const now = input.now ?? new Date();
+  const project = await getOwnedProject(db, input.ownerId, input.projectId);
+  if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this project.");
+  const check = () => {
+    if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
+    if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");
+    if (project.stateVersion !== input.body.expectedStateVersion) {
+      throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", {
+        expectedStateVersion: input.body.expectedStateVersion,
+        currentStateVersion: project.stateVersion,
+      });
+    }
+    if (project.state !== "plan_failed") throw new ProjectActionError("INVALID_STATE", "The idea can only be edited after a storyboard couldn't be made.", { state: project.state });
+  };
+  check();
+  const { min, max } = IDEA_LIMITS[project.input.type];
+  const text = input.body.text;
+  if (text.length < min || text.length > max) {
+    throw new ProjectActionError("INVALID_INPUT", "Please check the highlighted fields.", {
+      issues: [{ path: "text", message: text.length < min ? `must be at least ${min} characters` : `must be at most ${max} characters` }],
+    });
+  }
+  const updated = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOneAndUpdate(
+    { _id: project._id, ownerId: project.ownerId, state: "plan_failed", activeJobId: null, stateVersion: input.body.expectedStateVersion },
+    { $set: { "input.text": text, title: input.body.title ?? titleFromIdea(text), updatedAt: now }, $inc: { stateVersion: 1 } },
+    { returnDocument: "after" },
+  );
+  if (updated) return updated;
+  // Changed between our read and the write: report the reason from the current document.
+  const current = await getOwnedProject(db, input.ownerId, input.projectId);
+  if (!current) throw new ProjectActionError("NOT_FOUND", "We couldn't find this project.");
+  Object.assign(project, current);
+  check();
+  throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", {
+    expectedStateVersion: input.body.expectedStateVersion,
+    currentStateVersion: current.stateVersion,
+  });
 }
