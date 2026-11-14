@@ -3,10 +3,11 @@
 import { VOICE_TEXT_LANG, type VoiceLanguage, type VoicePresetId } from "@bytereel/db/voices";
 import type { PlanVersionResource, ProjectResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Button } from "@/components/ui";
 import { sceneNotes, sceneNumber, type SceneLike } from "@/lib/storyboard/view";
 import { ChangesPanel } from "./ChangesPanel";
-import { apiSend, CLIENT_MESSAGES } from "./client";
+import { apiSend, CLIENT_MESSAGES, newIdempotencyKey } from "./client";
 import { NarrationEditor } from "./NarrationEditor";
 import { Note } from "./Note";
 import { SceneCard } from "./SceneCard";
@@ -133,7 +134,32 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
     router.refresh();
   }
 
+  /** D8: approve this exact version (id + plan hash). F20: the video job comes with F23. */
+  const approveKey = useRef<string | null>(null);
+  const [approving, setApproving] = useState(false);
+  async function approve() {
+    setBusy(true);
+    setApproving(true);
+    setProblem(null);
+    approveKey.current ??= newIdempotencyKey();
+    const answer = await apiSend("POST", `/api/v1/projects/${project.id}/storyboard-approval`, { planVersionId: version.id, planHash: version.planHash, expectedStateVersion: project.stateVersion }, { "Idempotency-Key": approveKey.current });
+    if (!answer.ok) {
+      if (answer.status >= 400 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") approveKey.current = null;
+      setApproving(false);
+      if (answer.code === "APPROVAL_STALE") {
+        setBusy(false);
+        return setProblem({ message: answer.message, stale: true });
+      }
+      return fail(answer);
+    }
+    announce(`Storyboard approved (version ${version.versionNumber}).`);
+    router.refresh();
+  }
+
   const locked = busy || !canEdit;
+  const approved = project.approvedPlanVersionId === version.id;
+  const changeRunning = project.activeJob !== null;
+  const canApprove = project.allowedActions.includes("approve_storyboard") && version.valid && !busy && editing === null;
 
   return (
     <div className="flex flex-col">
@@ -257,10 +283,26 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface px-4 py-3.5 sm:px-8">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-          <p className="font-mono text-xs tracking-wide text-muted">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <p className="hidden font-mono text-xs tracking-wide text-muted sm:block">
             ≈ {seconds}s · {version.stats.sceneCount} scenes · Version {version.versionNumber}
           </p>
+          {approved ? (
+            <div className="flex min-w-0 flex-1 flex-col items-end gap-0.5 text-right sm:flex-none">
+              <p className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
+                <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
+              </p>
+              <p className="text-xs text-muted">Making the video comes in a later update. Any change to the storyboard needs a new approval.</p>
+            </div>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
+              {!version.valid && <p className="text-xs text-danger">Fix the scenes marked in red first.</p>}
+              {version.valid && changeRunning && <p className="text-xs text-muted">Wait for your change to finish.</p>}
+              <Button type="button" onClick={() => void approve()} disabled={!canApprove} className="whitespace-nowrap">
+                {approving ? "Approving…" : "Approve & generate video"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>
