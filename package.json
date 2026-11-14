@@ -13,6 +13,7 @@
   },
   "scripts": {
     "dev": "npm run dev -w @bytereel/web",
+    "inngest": "npx --yes inngest-cli@1.49.0 dev --no-discovery -u http://localhost:3000/api/inngest",
     "pipeline": "tsx tools/cli/index.ts",
     "db": "tsx tools/cli/db.ts",
     "voices:samples": "tsx tools/cli/index.ts voice-samples",
