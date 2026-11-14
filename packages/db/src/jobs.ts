@@ -18,8 +18,15 @@ export const JOB_SCHEMA_VERSION = 1;
 export type JobType = "plan" | "revise" | "generate" | "caption" | "publish";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "needs_input" | "cancelled";
 export type StageStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
-/** Error codes a plan job can end with (API.md §4.2). */
+/** Error codes a plan or revise job can end with (API.md §4.2). */
 export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "QUOTA_EXCEEDED" | "INTERNAL";
+
+/** Why a job stopped to ask the creator for something (API.md §8.2 `needsInput`). */
+export interface JobNeedsInput {
+  reason: "duration_out_of_range" | "alignment_uncertain" | "clarification_needed";
+  message: string;
+  sceneId: string | null;
+}
 
 export const TERMINAL_JOB_STATES: readonly JobState[] = ["succeeded", "failed", "needs_input", "cancelled"];
 /** API.md §8.1: the UI polls every 2 s while a job is active. */
@@ -98,17 +105,19 @@ export interface JobDocument {
   projectId: ObjectId;
   schemaVersion: number;
   type: JobType;
+  /** What the job works on. Revise jobs (F18): the base version and the revision. */
   inputRef: { planVersionId?: ObjectId; revisionId?: ObjectId; postId?: ObjectId };
-  /** sha256 of the idea the job plans from (part of the idempotency key). */
+  /** Plan jobs: sha256 of the idea the job plans from (part of the key). Revise jobs: of the request. */
   inputHash: string;
   state: JobState;
   attempt: number;
   stages: JobStage[];
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
-  needsInput: null;
-  result: { planVersionId?: ObjectId } | null;
-  /** `plan:{projectId}:{inputHash}` (unique). */
+  needsInput: JobNeedsInput | null;
+  /** Revise jobs carry `revisionId` from the start (API.md §8.2). */
+  result: { planVersionId?: ObjectId; revisionId?: ObjectId } | null;
+  /** `plan:{projectId}:{inputHash}` or `rev:{revisionId}` (unique). */
   idempotencyKey: string;
   inngestRunId: string | null;
   cancelRequestedAt: Date | null;
@@ -133,8 +142,8 @@ export type JobResource = {
   stages: { name: string; status: StageStatus; startedAt: string | null; endedAt: string | null; attempts: number; error: { code: string; message: string } | null }[];
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
-  needsInput: null;
-  result: { planVersionId?: string } | null;
+  needsInput: JobNeedsInput | null;
+  result: { planVersionId?: string; revisionId?: string } | null;
   cancelRequestedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -159,8 +168,13 @@ export function toJobResource(doc: JobDocument): JobResource {
     stages: doc.stages.map((s) => ({ name: s.name, status: s.status, startedAt: iso(s.startedAt), endedAt: iso(s.endedAt), attempts: s.attempts, error: s.error })),
     progress: doc.progress,
     error: doc.error,
-    needsInput: null,
-    result: doc.result ? { ...(doc.result.planVersionId ? { planVersionId: doc.result.planVersionId.toHexString() } : {}) } : null,
+    needsInput: doc.needsInput ?? null,
+    result: doc.result
+      ? {
+          ...(doc.result.planVersionId ? { planVersionId: doc.result.planVersionId.toHexString() } : {}),
+          ...(doc.result.revisionId ? { revisionId: doc.result.revisionId.toHexString() } : {}),
+        }
+      : null,
     cancelRequestedAt: iso(doc.cancelRequestedAt),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -253,6 +267,11 @@ export async function getJob(db: Db, jobId: ObjectId, session?: ClientSession): 
 /** The project's newest plan job (the one the Try again button retries), or null. */
 export async function getLatestPlanJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
   return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "plan" }, { sort: { createdAt: -1 } });
+}
+
+/** The project's newest revise job (F18: Try again after a failed change request), or null. */
+export async function getLatestReviseJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
+  return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "revise" }, { sort: { createdAt: -1 } });
 }
 
 /** Remember that the start event was (or could not be) handed to Inngest. */

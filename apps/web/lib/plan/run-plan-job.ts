@@ -58,8 +58,38 @@ export interface PlanJobStore {
   finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; units: { promptTokens: number; outputTokens: number }; latencyMs: number }): Promise<void>;
 }
 
+/** What one Gemini request of this job is about: the first prompt, the code-owned plan fields and the language. */
+export interface PreparedRequest {
+  prompt: string;
+  owned: { ownerId: string; projectId: string; versionId: string; parentVersionId: string | null; language: Language; voicePreset: VoicePreset; sources: ReturnType<typeof ideaSources> };
+  language: Language;
+  /** Progress lines for this request (default: the job's `messages`). */
+  messages?: PlanJobMessages;
+}
+
+/** Progress lines shown while the job runs (plan job: "Writing your storyboard…"; revise job: "Updating…"). */
+export interface PlanJobMessages {
+  first: string;
+  retrying: string;
+  repairing: string;
+  saving: string;
+}
+
+export const PLAN_JOB_MESSAGES: PlanJobMessages = {
+  first: "Writing your storyboard…",
+  retrying: "Our AI is busy, trying again…",
+  repairing: "Fixing a few details in your storyboard…",
+  saving: "Checking your storyboard…",
+};
+
 export interface PlanJobDeps {
   store: PlanJobStore;
+  /**
+   * Builds the request from the loaded job (F18). Default: the F15 storyboard from the creator's
+   * idea. Null = the job's data is missing (the step ends without an AI call).
+   */
+  prepare?: (ctx: PlanJobContext) => PreparedRequest | null;
+  messages?: PlanJobMessages;
   /** The planner, or the reason it isn't set up (missing key, test switch where not allowed). */
   provider: () => { ok: true; provider: PlannerProvider } | { ok: false; problem: string };
   retryLater: RetryLater;
@@ -86,15 +116,23 @@ function unitsOf(usage: TokenUsage | null): { promptTokens: number; outputTokens
   return { promptTokens: usage?.promptTokens ?? 0, outputTokens: (usage?.outputTokens ?? 0) + (usage?.thinkingTokens ?? 0) };
 }
 
-function ownedFields(job: PlanJobContext["job"], ctx: { language: Language; voicePreset: VoicePreset; idea: CreatorIdea }) {
+/** F15: the first storyboard, planned from the creator's idea (all creator text as delimited data). */
+export function prepareIdeaRequest({ job, project }: PlanJobContext): PreparedRequest {
+  const language = project.language as Language;
+  const idea: CreatorIdea = { type: project.input.type, text: project.input.text, brainstormChoice: project.input.brainstormChoice };
+  const voicePreset = LANGUAGE_PRESET(project.language, project.voiceGender);
   return {
-    ownerId: job.ownerId.toHexString(),
-    projectId: job.projectId.toHexString(),
-    versionId: job.planner!.planVersionId.toHexString(),
-    parentVersionId: null,
-    language: ctx.language,
-    voicePreset: ctx.voicePreset,
-    sources: ideaSources(ctx.idea),
+    prompt: planJobPrompt(idea, language, voicePreset),
+    language,
+    owned: {
+      ownerId: job.ownerId.toHexString(),
+      projectId: job.projectId.toHexString(),
+      versionId: job.planner!.planVersionId.toHexString(),
+      parentVersionId: null,
+      language,
+      voicePreset,
+      sources: ideaSources(idea),
+    },
   };
 }
 
@@ -104,6 +142,8 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
   const log = deps.log ?? ((level, message) => console[level](message));
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const prepare = deps.prepare ?? prepareIdeaRequest;
+  const messages = deps.messages ?? PLAN_JOB_MESSAGES;
 
   // 1. The job becomes running for this attempt (or there is nothing to do).
   const started = await step.run("start", async () => {
@@ -116,17 +156,15 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
   const load = async () => {
     const ctx = await store.load({ jobId: event.jobId, attempt: event.attempt });
     if (!ctx?.job.planner) return null;
-    const { job, project } = ctx;
-    const language = project.language as Language;
-    const idea: CreatorIdea = { type: project.input.type, text: project.input.text, brainstormChoice: project.input.brainstormChoice };
-    return { job, language, idea, voicePreset: LANGUAGE_PRESET(project.language, project.voiceGender) };
+    const prepared = prepare(ctx);
+    return prepared ? { job: ctx.job, ...prepared } : null;
   };
 
   const ask = async (n: 1 | 2): Promise<AskResult> => {
     const ctx = await load();
     if (!ctx) return { status: "stale" };
-    const { job, language, idea, voicePreset } = ctx;
-    const owned = ownedFields(job, ctx);
+    const { job, language, owned, prompt } = ctx;
+    const lines = ctx.messages ?? messages;
     const saved = job.planner!.answers.find((a) => a.n === n);
     if (saved) return { status: saved.valid ? "valid" : "invalid" }; // this step ran before: no new request
 
@@ -136,7 +174,6 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
       return { status: "setup" };
     }
     const provider = setup.provider;
-    const prompt = planJobPrompt(idea, language, voicePreset);
     let turns: PlannerTurn[] = [{ role: "user", text: prompt }];
     if (n === 2) {
       const first = job.planner!.answers.find((a) => a.n === 1);
@@ -151,7 +188,7 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
       jobId: job._id,
       attempt: event.attempt,
       maxRequests: PLAN_JOB_MAX_REQUESTS,
-      message: n === 2 ? "Fixing a few details in your storyboard…" : retry > 0 ? "Our AI is busy, trying again…" : "Writing your storyboard…",
+      message: n === 2 ? lines.repairing : retry > 0 ? lines.retrying : lines.first,
       percent: n === 2 ? 60 : 10,
     });
     if (reserved !== "ok") return { status: reserved };
@@ -178,7 +215,7 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
         log("warn", `Storyboard job ${event.jobId}: Gemini still busy after ${retry} retr${retry === 1 ? "y" : "ies"}: ${message}`);
         return { status: "busy" };
       }
-      await store.setProgress({ jobId: job._id, attempt: event.attempt, stage: "plan", percent: n === 2 ? 60 : 10, message: "Our AI is busy, trying again…" });
+      await store.setProgress({ jobId: job._id, attempt: event.attempt, stage: "plan", percent: n === 2 ? 60 : 10, message: lines.retrying });
       throw deps.retryLater(`Gemini busy (answer ${n}, retry ${retry + 1}): ${message}`, wait);
     }
     const latencyMs = now() - sentAt;
@@ -236,8 +273,8 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
     const { job } = ctx;
     const valid = job.planner!.answers.find((a) => a.valid);
     if (!valid) return "stale";
-    await store.setProgress({ jobId: job._id, attempt: event.attempt, stage: "validate", percent: 90, message: "Checking your storyboard…" });
-    const evaluated = evaluatePlannerResponse(valid, ownedFields(job, ctx));
+    await store.setProgress({ jobId: job._id, attempt: event.attempt, stage: "validate", percent: 90, message: (ctx.messages ?? messages).saving });
+    const evaluated = evaluatePlannerResponse(valid, ctx.owned);
     if (!evaluated.ok) return "stale";
     const checked = validatePlan(evaluated.plan);
     const answers = job.planner!.answers;

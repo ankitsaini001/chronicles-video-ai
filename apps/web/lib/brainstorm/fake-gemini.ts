@@ -11,6 +11,10 @@ import path from "node:path";
 // Storyboard planner (F15, prompts with a <<<CREATOR IDEA block): "e2e busy" → 503 every time,
 // "e2e unsafe" → safety block, "e2e invalid" → an invalid plan every time, "e2e repair" → invalid,
 // then valid after the repair message; anything else → the valid water-cycle plan from fixtures/.
+// Storyboard revision (F18, prompts with a <<<CHANGE REQUEST block): "e2e busy" / "e2e unsafe" /
+// "e2e invalid" / "e2e repair" as above; "e2e nochange" → the current storyboard unchanged; anything
+// else → the current storyboard with " Simple as that." added to the first narration block of the
+// requested scene (scene 2 for the whole storyboard).
 
 type GeminiRequestBody = { contents?: { role?: string; parts?: { text?: string }[] }[] };
 
@@ -39,6 +43,19 @@ function planAnswer(idea: string, isRepair: boolean): Response {
   return answer(JSON.stringify(plan));
 }
 
+function revisionAnswer(prompt: string, request: string, isRepair: boolean): Response {
+  if (request.includes("e2e busy")) return Response.json({ error: { code: 503, message: "The model is overloaded.", status: "UNAVAILABLE" } }, { status: 503 });
+  if (request.includes("e2e unsafe")) return sse({ promptFeedback: { blockReason: "SAFETY" }, modelVersion: "fake-gemini-e2e" });
+  const current = JSON.parse(/<<<CURRENT STORYBOARD\n([\s\S]*?)\nCURRENT STORYBOARD>>>/.exec(prompt)?.[1] ?? "{}") as { scenes: { id: string; narration: { text: string }[] }[] };
+  if (request.includes("e2e invalid") || (request.includes("e2e repair") && !isRepair)) return answer(JSON.stringify({ ...current, scenes: current.scenes.slice(0, 1) }));
+  if (!request.includes("e2e nochange")) {
+    const sceneId = /The request is about scene \d+ \(id "([^"]+)"\)/.exec(prompt)?.[1];
+    const scene = current.scenes.find((s) => s.id === sceneId) ?? current.scenes[1]!;
+    scene.narration[0]!.text = `${scene.narration[0]!.text} Simple as that.`;
+  }
+  return answer(JSON.stringify(current));
+}
+
 function sse(chunk: unknown): Response {
   return new Response(`data: ${JSON.stringify(chunk)}\r\n\r\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
@@ -64,6 +81,8 @@ function ideas(count: number, subject: string, prompt: string): string {
 export const fakeGeminiFetch: typeof fetch = async (_input, init) => {
   const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as GeminiRequestBody;
   const prompt = body.contents?.[0]?.parts?.[0]?.text ?? "";
+  const change = /<<<CHANGE REQUEST\n([\s\S]*?)\nCHANGE REQUEST>>>/.exec(prompt)?.[1];
+  if (change !== undefined) return revisionAnswer(prompt, change, (body.contents?.length ?? 0) > 1);
   const idea = /<<<CREATOR IDEA\n([\s\S]*?)\nCREATOR IDEA>>>/.exec(prompt)?.[1];
   if (idea !== undefined) return planAnswer(idea, (body.contents?.length ?? 0) > 1);
   const subject = /<<<SUBJECT\n([\s\S]*?)\nSUBJECT>>>/.exec(prompt)?.[1] ?? "";

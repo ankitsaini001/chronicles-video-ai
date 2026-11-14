@@ -22,6 +22,9 @@ export const INNGEST_APP_ID = "reel-app";
 /** Event that starts the storyboard job (API.md C2, E2). Carries ids only (ARCHITECTURE §13.2). */
 export const PLAN_REQUESTED = "plan.requested";
 
+/** Event that starts a storyboard change (API.md D5, E2; F18). Carries ids only. */
+export const REVISION_REQUESTED = "revision.requested";
+
 export type InngestSetup = { ok: true; dev: boolean; client: Inngest } | { ok: false; problem: string };
 
 const LOCAL_DEV_SERVER = /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}\/?$/;

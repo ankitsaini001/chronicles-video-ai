@@ -1,4 +1,4 @@
-import { isTerminal, POLL_AFTER_MS, ProjectActionError, toJobResource, toProjectResource, currentStepOf, allowedActionsFor, type JobResource, type ProjectResource } from "@bytereel/db";
+import { isTerminal, POLL_AFTER_MS, ProjectActionError, toJobResource, toProjectResource, currentStepOf, type JobResource, type ProjectResource } from "@bytereel/db";
 import { getInngest } from "../../inngest/client";
 import { ApiProblem, type ApiErrorCode } from "../api/v1";
 import { plannerProviderFromEnv } from "./provider";
@@ -49,15 +49,15 @@ export type ProjectStatusResource = {
 };
 
 /** C3 `Project` (API.md §11.3) with its active job embedded. */
-export function toProjectResourceOf({ project, activeJob, latestPlanJob }: ProjectWithJobs): ProjectResource {
+export function toProjectResourceOf({ project, activeJob, latestPlanJob, latestReviseJob }: ProjectWithJobs): ProjectResource {
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
-  return toProjectResource(project, { activeJob: active, latestPlanJob });
+  return toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null });
 }
 
 /** C6 `ProjectStatus` (API.md §11.3): polling stops when `pollAfterMs` is null (no active job). */
-export function toProjectStatus({ project, activeJob, latestPlanJob }: ProjectWithJobs): ProjectStatusResource {
+export function toProjectStatus({ project, activeJob, latestPlanJob, latestReviseJob }: ProjectWithJobs): ProjectStatusResource {
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
-  const resource = toProjectResource(project, { activeJob: active, latestPlanJob });
+  const resource = toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null });
   return {
     projectId: resource.id,
     state: project.state,
@@ -68,7 +68,7 @@ export function toProjectStatus({ project, activeJob, latestPlanJob }: ProjectWi
     activeJob: active ? toJobResource(active) : null,
     lastError: resource.lastError,
     latestPost: null,
-    allowedActions: allowedActionsFor(project, latestPlanJob),
+    allowedActions: resource.allowedActions,
     updatedAt: resource.updatedAt,
     pollAfterMs: active && !isTerminal(active.state) ? POLL_AFTER_MS : project.activeJobId ? POLL_AFTER_MS : null,
   };

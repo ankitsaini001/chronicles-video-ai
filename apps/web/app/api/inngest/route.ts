@@ -1,5 +1,6 @@
 import { serve } from "inngest/next";
 import { createPlanVideoFunction } from "@/inngest/functions/plan-video";
+import { createRevisePlanFunction } from "@/inngest/functions/revise-plan";
 import { getInngest } from "@/inngest/client";
 
 // /api/inngest (ARCHITECTURE §13, §26.3): Inngest calls this address to run our background jobs
@@ -19,7 +20,7 @@ function handlers(): { GET: Handler; POST: Handler; PUT: Handler } | null {
     console.error(`Inngest is not set up: ${setup.problem}`);
     return null;
   }
-  return serve({ client: setup.client, functions: [createPlanVideoFunction(setup.client)] }) as unknown as { GET: Handler; POST: Handler; PUT: Handler };
+  return serve({ client: setup.client, functions: [createPlanVideoFunction(setup.client), createRevisePlanFunction(setup.client)] }) as unknown as { GET: Handler; POST: Handler; PUT: Handler };
 }
 
 let served: ReturnType<typeof handlers> | undefined;

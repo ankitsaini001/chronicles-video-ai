@@ -171,24 +171,35 @@ export type ProjectResource = {
 const hexOrNull = (id: ObjectId | null) => (id ? id.toHexString() : null);
 
 /** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
-export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard";
+export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision";
 
 /**
  * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs.
  * - F15, after a failed storyboard: `edit_idea` (C4), and `retry_job` (E2) while the last plan job
  *   may be retried and the project is under its 20 storyboard requests.
  * - F17, with a storyboard: `edit_storyboard` (D3 narration edit, D4 voice, D7 undo/restore).
+ * - F18: `request_revision` (D5) while under the 20 AI requests; `retry_job` (E2) when the last
+ *   change request failed with a retryable error and the storyboard is still the one it was made on.
  * Rename and archive arrive with F21.
  */
-export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined): AllowedAction[] {
+export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
   if (doc.activeJobId) return [];
+  const underLimit = doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject;
   if (doc.state === "plan_failed") {
     const actions: AllowedAction[] = ["edit_idea"];
-    if (latestPlanJob && doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject && canRetryPlanJob(latestPlanJob, planInputHash(doc))) actions.push("retry_job");
+    if (latestPlanJob && underLimit && canRetryPlanJob(latestPlanJob, planInputHash(doc))) actions.push("retry_job");
     return actions;
   }
-  if (STORYBOARD_EDIT_STATES.includes(doc.state) && doc.currentPlanVersionId) return ["edit_storyboard"];
-  return [];
+  if (!STORYBOARD_EDIT_STATES.includes(doc.state) || !doc.currentPlanVersionId) return [];
+  const actions: AllowedAction[] = ["edit_storyboard"];
+  if (underLimit) actions.push("request_revision");
+  const reviseRetry =
+    latestReviseJob?.type === "revise" &&
+    latestReviseJob.state === "failed" &&
+    latestReviseJob.error?.retryable === true &&
+    latestReviseJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true;
+  if (reviseRetry && underLimit) actions.push("retry_job");
+  return actions;
 }
 
 export interface ProjectRelated {
@@ -198,6 +209,8 @@ export interface ProjectRelated {
   embedActiveJob?: boolean;
   /** The project's newest plan job (for `retry_job`). */
   latestPlanJob?: JobDocument | null;
+  /** The project's newest revise job (for `retry_job` on the storyboard, F18). */
+  latestReviseJob?: JobDocument | null;
 }
 
 /**
@@ -216,7 +229,7 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     currentStep: currentStepOf(state),
     thumbnailUrl: null,
     latestPost: null,
-    activeJobType: activeJob ? activeJob.type : doc.activeJobId ? "plan" : null,
+    activeJobType: activeJob ? activeJob.type : null,
     input: { type: doc.input.type, text: doc.input.text, brainstormChoice: doc.input.brainstormChoice },
     stateVersion: doc.stateVersion,
     currentPlanVersionId: hexOrNull(doc.currentPlanVersionId),
@@ -225,7 +238,7 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     activeJobId: hexOrNull(doc.activeJobId),
     activeJob: activeJob && related.embedActiveJob !== false ? toJobResource(activeJob) : null,
     lastError: doc.lastError ? { code: doc.lastError.code, message: doc.lastError.message, at: doc.lastError.at.toISOString() } : null,
-    allowedActions: allowedActionsFor(doc, related.latestPlanJob),
+    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob),
     archivedAt: doc.archivedAt ? doc.archivedAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

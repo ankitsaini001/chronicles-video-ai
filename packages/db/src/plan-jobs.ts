@@ -16,6 +16,7 @@ import {
 } from "./jobs";
 import { PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type PlanStatsDoc, type StoredPlan, type ValidationIssueDoc } from "./plan-versions";
 import { ProjectActionError, PROJECTS_COLLECTION, titleFromIdea, type ProjectDocument } from "./projects";
+import type { RevisionDocument } from "./revisions";
 import { USAGE_LIMITS } from "./usage";
 
 // The life of a `plan` job (F15; docs/DATABASE.md §4.9, §7.2 rows 8 and 18; API.md E2).
@@ -43,7 +44,11 @@ export const STUCK_JOB_RULES = {
   queuedGiveUpMs: 15 * 60_000,
 } as const;
 
-export type PlanJobContext = { job: JobDocument; project: ProjectDocument };
+/**
+ * What a job step reads. Revise jobs (F18, revisions.ts) also carry the base version and the
+ * revision the change is made on.
+ */
+export type PlanJobContext = { job: JobDocument; project: ProjectDocument; base?: PlanVersionDocument; revision?: RevisionDocument };
 
 /**
  * Step 1 of a run: the job becomes `running` for this attempt and gets its planner checkpoint.
@@ -388,39 +393,4 @@ export async function retryPlanJob(
     await session.endSession();
   }
   return result!;
-}
-
-export type StuckCheck = { job: JobDocument; resendEventId: string | null };
-
-/**
- * The stuck-job rule (ARCHITECTURE §20.3, DATABASE.md Q11), checked whenever the status of an
- * active job is read (C6, E1, the project page), so nothing waits forever and no cron is needed:
- * - running with no update for 10 min → failed (INTERNAL, retryable): the run died;
- * - queued for 15 min → failed (INTERNAL, retryable): Inngest never started it;
- * - queued and its start event not handed over (or sent but not started after 2 min) → the caller
- *   sends the event again; the same event id means Inngest drops it if the first one did arrive.
- * Only one reader claims a resend (conditional update on `event.lastTriedAt`).
- */
-export async function checkStuckPlanJob(db: Db, job: JobDocument, now: Date = new Date()): Promise<StuckCheck> {
-  if (job.type !== "plan") return { job, resendEventId: null };
-  const at = now.getTime();
-  const reload = async () => (await getJob(db, job._id)) ?? job;
-  if (job.state === "running" && at - job.updatedAt.getTime() >= STUCK_JOB_RULES.runningStaleMs) {
-    await failPlanJob(db, { jobId: job._id, attempt: job.attempt, code: "INTERNAL", stage: "plan", detail: "No progress for 10 minutes (stuck-job rule)", staleBefore: new Date(at - STUCK_JOB_RULES.runningStaleMs), now });
-    return { job: await reload(), resendEventId: null };
-  }
-  if (job.state !== "queued") return { job, resendEventId: null };
-  if (at - job.queuedAt.getTime() >= STUCK_JOB_RULES.queuedGiveUpMs) {
-    await failPlanJob(db, { jobId: job._id, attempt: job.attempt, code: "INTERNAL", stage: "plan", detail: "Never started (stuck-job rule)", queuedBefore: new Date(at - STUCK_JOB_RULES.queuedGiveUpMs), now });
-    return { job: await reload(), resendEventId: null };
-  }
-  const lastTried = job.event.lastTriedAt?.getTime() ?? null;
-  const due = job.event.sentAt
-    ? at - job.queuedAt.getTime() >= STUCK_JOB_RULES.sentResendMs && (lastTried === null || at - lastTried >= STUCK_JOB_RULES.sentResendMs)
-    : lastTried === null || at - lastTried >= STUCK_JOB_RULES.unsentResendMs;
-  if (!due) return { job, resendEventId: null };
-  const claimed = await db
-    .collection<JobDocument>(JOBS_COLLECTION)
-    .updateOne({ _id: job._id, state: "queued", attempt: job.attempt, "event.id": job.event.id, "event.lastTriedAt": job.event.lastTriedAt }, { $set: { "event.lastTriedAt": now } });
-  return { job, resendEventId: claimed.matchedCount === 1 ? job.event.id : null };
 }
