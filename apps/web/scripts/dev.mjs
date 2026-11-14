@@ -10,6 +10,11 @@ import path from "node:path";
 const rootEnvFile = path.resolve(import.meta.dirname, "../../../.env");
 if (existsSync(rootEnvFile)) process.loadEnvFile(rootEnvFile);
 
+// F15: background jobs run on the local Inngest Dev Server (`npm run inngest`) in dev mode. Dev mode
+// is never assumed by the app (apps/web/inngest/client.ts); `npm run dev` asks for it here, so no
+// .env line is needed. A value already set (e.g. another Dev Server address) is kept.
+process.env.INNGEST_DEV ||= "1";
+
 // Run Next's own command-line entry as if `next dev <args>` had been typed.
 const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
 process.argv = [process.argv[0], nextBin, "dev", ...process.argv.slice(2)];
