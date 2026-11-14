@@ -140,8 +140,8 @@ async function main(): Promise<void> {
   check("E1: job succeeded, stages succeeded, result.planVersionId, pollAfterMs null", r.status === 200 && r.json.state === "succeeded" && r.json.stages.every((s: Json) => s.status === "succeeded") && r.json.result?.planVersionId === version?._id.toHexString() && r.json.pollAfterMs === null);
   let rows = await usageRows(job.id);
   check("providerUsage: one Gemini 'plan' row, final ok, with project and job, no idea text", rows.length === 1 && rows[0]!.provider === "gemini" && rows[0]!.operation === "plan" && rows[0]!.status === "final" && rows[0]!.outcome === "ok" && String(rows[0]!.projectId) === project.id && !JSON.stringify(rows[0]).includes("lightning"));
-  const html = (await (await fetch(`${base}/projects/${project.id}`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
-  check("project page shows the saved storyboard (scene list with narration)", html.includes("Storyboard ready") && html.includes("Scene 1") && html.includes(String(version?.plan?.scenes?.[0]?.narration?.[0]?.text ?? "").slice(0, 30).replace(/'/g, "&#x27;")));
+  const html = (await (await fetch(`${base}/projects/${project.id}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
+  check("storyboard page shows the saved storyboard (scene cards with narration; F16)", html.includes("Scene 01") && html.includes(String(version?.plan?.scenes?.[0]?.narration?.[0]?.text ?? "").slice(0, 30).replace(/'/g, "&#x27;")));
 
   // --- 2. Owner only.
   for (const [label, res] of [
