@@ -16,7 +16,8 @@ import type { Language } from "@/lib/auth/session";
 // No Idempotency-Key: C7 saves nothing (API.md §6).
 
 export type BrainstormIdea = { id: string; title: string; hook: string; angle: string };
-export type PickedIdea = { subject: string; idea: BrainstormIdea };
+/** The picked idea, with the subject and the language it was written in. */
+export type PickedIdea = { subject: string; language: Language; idea: BrainstormIdea };
 
 type BrainstormPanelProps = {
   language: Language;
@@ -243,7 +244,7 @@ export function BrainstormPanel({ language, ideaText, picked, onPick, timezone, 
                 <li key={idea.id}>
                   <button
                     type="button"
-                    onClick={() => onPick({ subject: result.subject, idea })}
+                    onClick={() => onPick({ subject: result.subject, language: result.language, idea })}
                     disabled={disabled}
                     aria-pressed={chosen}
                     lang={language === "hi" ? "hi" : undefined}
