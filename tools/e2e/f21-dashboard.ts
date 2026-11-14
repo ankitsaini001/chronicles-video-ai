@@ -153,7 +153,7 @@ async function main(): Promise<void> {
   const planJobId = new ObjectId();
   const planning = await seed(a.id, "Writing this one", "planning", 1, { activeJobId: planJobId });
   // Just enough of a running plan job for the card to know a job runs (this page never runs it).
-  await db.collection("jobs").insertOne({ _id: planJobId, ownerId: a.id, projectId: oid(planning), schemaVersion: 1, type: "plan", state: "running", createdAt: new Date(T0), updatedAt: new Date() });
+  await db.collection("jobs").insertOne({ _id: planJobId, ownerId: a.id, projectId: oid(planning), schemaVersion: 1, type: "plan", state: "running", idempotencyKey: `e2e:${planJobId.toHexString()}`, createdAt: new Date(T0), updatedAt: new Date() });
   const failed = await seed(a.id, "Failed storyboard", "plan_failed", 30, { lastError: { code: "PROVIDER_BUSY", message: "Busy", at: new Date(T0) } });
   const ready = await seed(a.id, "Storyboard to review", "storyboard_ready", 10);
   await seedStoryboard(a.id, ready);
@@ -281,8 +281,8 @@ async function main(): Promise<void> {
   const failedPlanJob = new ObjectId();
   const failedReviseJob = new ObjectId();
   await db.collection("jobs").insertMany([
-    { _id: failedPlanJob, ownerId: a.id, projectId: oid(failed), schemaVersion: 1, type: "plan", state: "failed", attempt: 1, error: { code: "PROVIDER_BUSY", message: "Busy", retryable: true }, createdAt: new Date(T0), updatedAt: new Date(T0) },
-    { _id: failedReviseJob, ownerId: a.id, projectId: oid(approved), schemaVersion: 1, type: "revise", state: "failed", attempt: 1, inputRef: { planVersionId: approvedVersion }, error: { code: "PROVIDER_BUSY", message: "Busy", retryable: true }, createdAt: new Date(T0), updatedAt: new Date(T0) },
+    { _id: failedPlanJob, ownerId: a.id, projectId: oid(failed), schemaVersion: 1, type: "plan", state: "failed", idempotencyKey: `e2e:${failedPlanJob.toHexString()}`, attempt: 1, error: { code: "PROVIDER_BUSY", message: "Busy", retryable: true }, createdAt: new Date(T0), updatedAt: new Date(T0) },
+    { _id: failedReviseJob, ownerId: a.id, projectId: oid(approved), schemaVersion: 1, type: "revise", state: "failed", idempotencyKey: `e2e:${failedReviseJob.toHexString()}`, attempt: 1, inputRef: { planVersionId: approvedVersion }, error: { code: "PROVIDER_BUSY", message: "Busy", retryable: true }, createdAt: new Date(T0), updatedAt: new Date(T0) },
   ]);
   for (const [label, jobId] of [["storyboard", failedPlanJob], ["change", failedReviseJob]] as const) {
     r = await send(a.cookie, "POST", `/api/v1/jobs/${jobId.toHexString()}/retry`, {}, { "idempotency-key": randomBytes(16).toString("hex") });
