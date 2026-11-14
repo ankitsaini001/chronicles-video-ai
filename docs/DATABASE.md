@@ -430,7 +430,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `currentRenderId` | ObjectId? → `renders` | "The video" (latest successful render) | No |
 | `activeJobId` | ObjectId? → `jobs` | The one job running for this project, or null | No |
 | `stateVersion` | int ≥ 1 | +1 on every change. Stops two browser tabs from overwriting each other (`STALE_VERSION`, §7.3) | Auto |
-| `planRequestCount` | int 0–limit | How many of the **20 plan + revision requests** this project has used: 1 at creation (C2), +1 per accepted revision (D5) and per plan retry (E2, with or without an edited idea; F15). Increased in the same transaction, and only if still below the limit (Q7) | Auto |
+| `planRequestCount` | int 0–limit | How many of the **20 plan + revision requests** this project has used: +1 per plan job attempt that sends a Gemini request (C2's job, each E2 retry; F15) and per accepted revision (D5). Increased in the same transaction, and only if still below the limit (Q7) | Auto |
 | `lastError` | `{ code, message, at }`? | Plain-language error shown to the creator | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
 | `archivedAt` | date? | When it was archived (soft delete, §6.6) | No |
@@ -438,8 +438,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 
 **Rules**
 - Idea text length: topic 3–300, notes 20–5,000, brainstorm 3–300 characters (after trimming and NFC). `brainstormChoice` only when `type = brainstorm`.
-- **Since F15:** C2 saves a new project in state `planning` with `planRequestCount: 1` and its queued `plan` job (API.md C2). Projects saved by F12 before F15 stay in state `draft` with `planRequestCount: 0` and no job. Code: `packages/db/src/projects.ts`, `packages/db/src/plan-jobs.ts`.
-- **`planRequestCount` is enforced since F15:** every plan retry (E2) adds 1, only while below 20, inside E2's transaction; at 20 E2 answers `429` (API.md E2, §10.1).
+- **Since F15:** C2 saves a new project in state `planning` with `planRequestCount: 0` and its queued `plan` job (API.md C2). Projects saved by F12 before F15 stay in state `draft` with `planRequestCount: 0` and no job. Code: `packages/db/src/projects.ts`, `packages/db/src/plan-jobs.ts`.
+- **`planRequestCount` is enforced since F15:** a plan job attempt adds 1 when it sends its FIRST Gemini request (in the same transaction that counts the request on the job, only while below 20; `reservePlanRequest`). A job that never reached Gemini, or a Try again that reuses a saved answer, adds nothing. At 20, E2 answers `429` and a job that reaches Gemini fails with `QUOTA_EXCEEDED` (API.md E2, §10.1).
 - At most **one active job** per project: `activeJobId` is set with a conditional update ("only if it is currently null").
 - Every change needs the caller's `stateVersion`; a mismatch changes nothing.
 
@@ -1308,14 +1308,14 @@ The checks (is this still the current version? is the job slot free? quota left?
 
 | # | Action | Endpoint · feature | Changes together | What would go wrong without it |
 |---|---|---|---|---|
-| 1 | Create project | C2 · F12/F15 | `usageCounters` projects +1 (within 5) + insert `projects` (`planning`, `planRequestCount: 1`, `activeJobId`) + insert the queued `plan` job + the answer saved on the `idempotencyKeys` record (as built since F15; the Inngest event is sent after the commit) | A project stuck in "planning" with no job, or a used quota with no project |
+| 1 | Create project | C2 · F12/F15 | `usageCounters` projects +1 (within 5) + insert `projects` (`planning`, `planRequestCount: 0`, `activeJobId`) + insert the queued `plan` job + the answer saved on the `idempotencyKeys` record (as built since F15; the Inngest event is sent after the commit) | A project stuck in "planning" with no job, or a used quota with no project |
 | 2 | Edit idea after a failed storyboard | C4 · F15 | `projects` idea text, title, `stateVersion` (one document: atomic anyway) | — |
 | 3 | Edit narration / switch voice | D3, D4 · F17, F19 | insert `planVersions` + project pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, state, `stateVersion`) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | A new storyboard while an old publish approval stays live |
 | 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + `planRequestCount` +1 (only if below the limit) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | Same as 3; or a revision with no job, or a counted change with no revision |
 | 5 | Undo / restore a version | D7 · F17 | project pointers + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (ARCHITECTURE §17.5) | Same as 3 |
 | 6 | **Approve storyboard** (approval #1) | D8 · F20 | insert `storyboardApprovals` + insert `generate` job + project `generating`, `approvedPlanVersionId`, `activeJobId` + `usageCounters` videos +1. Re-approving a version that already has a video instead points the project back to that render (no job, no quota) | Approval with no job, or a counted video with no job |
 | 7 | Caption fix | F4 · F25 | insert `captionOverrides` + insert `caption` job + project `generating`, `activeJobId` + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (**no** quota counter) | A caption change while the old approval stays live |
-| 8 | Retry a job | E2 (and admin I9) · F15, F23 | job `queued`, `attempt` +1 + project back to `planning`/`generating`, `activeJobId`, `lastError` cleared + `planRequestCount` +1 for every plan retry (only below 20; F15) + the answer saved on the `idempotencyKeys` record | A queued job the project doesn't know about, or a counted retry that never runs |
+| 8 | Retry a job | E2 (and admin I9) · F15, F23 | job `queued`, `attempt` +1 + project back to `planning`/`generating`, `activeJobId`, `lastError` cleared (refused at 20 `planRequestCount`; the count itself is added by the job's first Gemini request, F15) + the answer saved on the `idempotencyKeys` record | A queued job the project doesn't know about, or a counted retry that never runs |
 | 9 | **Publish now / schedule** (approval #2) | H2 · F30, F31 | insert `posts` (approval snapshot with a new approval id, `publishKey`) + insert `publish` job + project `publishing`/`scheduled` + audit `post.approved` | A post without a job (never published), or a job without its approval record |
 | 10 | Cancel a scheduled post | H5 · F31 | post → `cancelled` + job cancelled + project → `video_ready` | A cancelled post whose job still wakes up, or a project stuck in "scheduled" |
 | 11 | Retry a failed publish | H6 (and admin I9) · F30 | post → `publishing`, `attempts` +1 + publish job re-queued (after the full re-check, §4.22) | A post marked "publishing" with no job behind it |

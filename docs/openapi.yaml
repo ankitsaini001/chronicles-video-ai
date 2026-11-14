@@ -569,7 +569,7 @@ paths:
       operationId: createProject
       summary: Create a project and start the storyboard
       description: |
-        C2. ① Create storyboard. Creates the project (state planning, planRequestCount 1) and its queued
+        C2. ① Create storyboard. Creates the project (state planning, planRequestCount 0) and its queued
         `plan` job in one transaction, then sends Inngest `plan.requested`; answers 202 (F15).
         **Idempotency-Key required.** Rate limit 10/hour; quota 5 projects/day (429 QUOTA_EXCEEDED);
         503 SPEND_CEILING / MAINTENANCE (from F27/F36). If the AI planner or Inngest isn't set up: 500,
@@ -1343,8 +1343,9 @@ paths:
         E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable,
         cancelled plan/caption jobs, and failed plan jobs whose idea was edited (PATCH project `text`) after the
         failure; plan retries use the current idea and never count toward projects/day, but every plan retry
-        counts 1 toward the 20 plan + revision requests per project (F15: each one is a new paid AI request;
-        429 QUOTA_EXCEEDED plan_requests_per_project at the limit). Not for publish jobs: use the post retry. **Idempotency-Key required.**
+        that makes a new AI request counts 1 toward the 20 plan + revision requests per project (counted when
+        the job sends its first Gemini request, F15); refused with 429 QUOTA_EXCEEDED plan_requests_per_project
+        when the project is already at 20. Not for publish jobs: use the post retry. **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
       tags: [Jobs]
       security:

@@ -143,6 +143,6 @@ Body text max width: ~65 characters.
   3. Meta app name and Instagram Login screens; Meta App Review if already submitted (F28/F38).
   4. AI prompt text in `packages/pipeline/src/planning/prompts.ts` (says "storyboard planner for ByteReel"; not shown to users).
   5. CLI banner text in `tools/cli/*.ts` (developer-only).
-  6. Inngest app id (`apps/web/inngest/client.ts`, derived from `SITE.name`): a rename makes Inngest Cloud see a new app. Re-sync the app in the Inngest dashboard and archive the old one; wait until no job is running before deploying the rename (F15).
+  6. **Do not change** the Inngest app id `reel-app` (`apps/web/inngest/client.ts`). It is brand-neutral on purpose: changing it makes Inngest Cloud see a new app and can strand running jobs (F15).
   7. Optional, internal only: npm package names `@bytereel/*`, temp-folder prefixes, repo name. Safe to leave.
   8. Docs (`PRD.md`, `docs/*.md`) and the Stitch designs: find-and-replace when convenient.

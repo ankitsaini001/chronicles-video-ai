@@ -45,7 +45,8 @@ npm run inngest
 ```
 
 `npm run inngest` downloads the pinned Inngest Dev Server (`inngest-cli@1.49.0`) the first time and
-connects it to http://localhost:3000/api/inngest. No Inngest account or keys are needed locally
+connects it to http://localhost:3000/api/inngest. `npm run dev` switches the website to the local
+Dev Server for you (it sets `INNGEST_DEV=1`), so no `.env` line, Inngest account or keys are needed locally
 (the keys are only for production, F38). If terminal 2 isn't running, "Create storyboard" still saves
 the project, but the storyboard waits; start `npm run inngest` and it begins within a few seconds
 (the project page sends the job again automatically).
