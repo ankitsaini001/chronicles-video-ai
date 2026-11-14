@@ -176,7 +176,7 @@ async function main(): Promise<void> {
   const invalidJob = r.json.job.id as string;
   done = await waitDone(a.cookie, invalidProject);
   check("invalid twice → plan_failed, lastError PLAN_INVALID with the plain message", done.status.state === "plan_failed" && done.status.lastError?.code === "PLAN_INVALID" && done.status.lastError?.message === "Couldn't build a good storyboard, try rephrasing.");
-  check("plan_failed: allowedActions edit_idea + retry_job, polling stops", done.status.allowedActions?.join() === "edit_idea,retry_job" && done.status.pollAfterMs === null);
+  check("plan_failed: allowedActions edit_idea + retry_job, polling stops", done.status.allowedActions?.join() === "rename,edit_idea,retry_job,archive" && done.status.pollAfterMs === null);
   r = await send(a.cookie, "GET", `/api/v1/jobs/${invalidJob}`);
   check("E1: failed, error PLAN_INVALID retryable, validate stage failed", r.json.state === "failed" && r.json.error?.code === "PLAN_INVALID" && r.json.error?.retryable === true && r.json.stages?.[1]?.status === "failed");
   check("invalid: two Gemini rows, both invalid_output", (await usageRows(invalidJob)).map((x) => x.outcome).join() === "invalid_output,invalid_output");
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
   // --- 7. Per-project limit: at 20 the Try again is refused, nothing changes.
   await db.collection("projects").updateOne({ _id: new ObjectId(busyProject) }, { $set: { planRequestCount: 20 } });
   const capped = await status(a.cookie, busyProject);
-  check("at 20 requests: retry_job no longer offered", capped.json.allowedActions?.join() === "edit_idea");
+  check("at 20 requests: retry_job no longer offered", capped.json.allowedActions?.join() === "rename,edit_idea,archive");
   r = await retry(a.cookie, busyJob);
   check("at 20 requests: E2 → 429 QUOTA_EXCEEDED plan_requests_per_project, resetsAt null", r.status === 429 && r.json.error?.details?.quota === "plan_requests_per_project" && r.json.error?.details?.limit === 20 && r.json.error?.details?.resetsAt === null);
   const after = await db.collection("projects").findOne({ _id: new ObjectId(busyProject) });
@@ -241,12 +241,12 @@ async function main(): Promise<void> {
   const unsafeProject = r.json.project.id as string;
   const unsafeJob = r.json.job.id as string;
   done = await waitDone(b.cookie, unsafeProject);
-  check("safety → plan_failed PROVIDER_REJECTED, only edit_idea allowed", done.status.lastError?.code === "PROVIDER_REJECTED" && done.status.allowedActions?.join() === "edit_idea");
+  check("safety → plan_failed PROVIDER_REJECTED, only edit_idea allowed", done.status.lastError?.code === "PROVIDER_REJECTED" && done.status.allowedActions?.join() === "rename,edit_idea,archive");
   check("safety: one Gemini row, rejected, no retries", (await usageRows(unsafeJob)).map((x) => x.outcome).join() === "rejected");
   r = await retry(b.cookie, unsafeJob);
   check("safety: E2 without editing → 409 INVALID_STATE", r.status === 409 && r.json.error?.code === "INVALID_STATE");
   r = await editIdea(b.cookie, unsafeProject, { text: "How do volcanoes erupt?", expectedStateVersion: done.status.stateVersion });
-  check("safety: after Edit idea, retry_job is offered", r.status === 200 && r.json.allowedActions?.join() === "edit_idea,retry_job");
+  check("safety: after Edit idea, retry_job is offered", r.status === 200 && r.json.allowedActions?.join() === "rename,edit_idea,retry_job,archive");
   r = await retry(b.cookie, unsafeJob);
   done = await waitDone(b.cookie, unsafeProject);
   check("safety: Edit idea + Try again → storyboard_ready", r.status === 202 && done.status.state === "storyboard_ready");

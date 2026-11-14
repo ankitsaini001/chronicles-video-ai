@@ -1,8 +1,45 @@
-import { API_RATE_LIMITS, CREATE_PROJECT_STATUS, createProject, CreateProjectBodySchema, IdempotencyLockLostError, ProjectQuotaExceededError } from "@bytereel/db";
+import {
+  API_RATE_LIMITS,
+  CREATE_PROJECT_STATUS,
+  createProject,
+  CreateProjectBodySchema,
+  IdempotencyLockLostError,
+  InvalidCursorError,
+  isLibraryTab,
+  LIBRARY_TAB_IDS,
+  listProjects,
+  ProjectQuotaExceededError,
+} from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
 import { assertPlanJobsReady } from "@/lib/plan/api";
 import { sendPlanEvent } from "@/lib/plan/jobs";
+import { pageQuery } from "@/lib/storyboard/api";
+
+// C1 GET /api/v1/projects (docs/API.md C1, F21): "My videos". Only the signed-in user's projects,
+// never archived ones, newest-updated first (`updatedAt` desc, `_id` desc). Query: `tab` optional
+// (drafts | ready | scheduled | published; omitted = all), `limit` 1–50 (20), `cursor` (from
+// `nextCursor`; made for one tab only). Answer: { items: ProjectSummary[], nextCursor }.
+// Rate: the shared 300 reads per minute. The My videos page calls the same function directly.
+
+export const GET = apiRoute({
+  rateLimit: API_RATE_LIMITS.readsPerUser,
+  handle: async ({ db, user, request }) => {
+    const url = new URL(request.url);
+    const page = pageQuery(url, ["tab"]);
+    const rawTab = url.searchParams.get("tab");
+    if (rawTab !== null && !isLibraryTab(rawTab)) {
+      throw new ApiProblem(400, "INVALID_INPUT", API_MESSAGES.INVALID_INPUT, { issues: [{ path: "tab", message: `must be one of ${LIBRARY_TAB_IDS.join(", ")}` }] });
+    }
+    const tab = rawTab !== null && isLibraryTab(rawTab) ? rawTab : null;
+    try {
+      return await listProjects(db, user.id, { tab, limit: page.limit, cursor: page.cursor });
+    } catch (error) {
+      if (error instanceof InvalidCursorError) throw new ApiProblem(400, "INVALID_INPUT", error.message, { issues: [{ path: "cursor", message: "invalid cursor" }] });
+      throw error;
+    }
+  },
+});
 
 // C2 POST /api/v1/projects (docs/API.md §14.3): ① "Create storyboard".
 // Pipeline (lib/api/v1.ts): Origin → session → 10 per hour per user → JSON body (64 KB, strict) →

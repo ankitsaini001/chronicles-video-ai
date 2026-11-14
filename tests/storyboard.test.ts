@@ -213,13 +213,13 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
   });
 
   it("allowedActions on a storyboard: edit, change (under 20), approve (until approved), retry a failed change", () => {
-    expect(allowedActionsFor(projectDoc(), null)).toEqual(["edit_storyboard", "request_revision", "approve_storyboard"]);
-    expect(allowedActionsFor(projectDoc({ planRequestCount: 20 }), null)).toEqual(["edit_storyboard", "approve_storyboard"]);
-    expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null)).toEqual(["edit_storyboard", "request_revision"]);
+    expect(allowedActionsFor(projectDoc(), null)).toEqual(["rename", "edit_storyboard", "request_revision", "approve_storyboard", "archive"]);
+    expect(allowedActionsFor(projectDoc({ planRequestCount: 20 }), null)).toEqual(["rename", "edit_storyboard", "approve_storyboard", "archive"]);
+    expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null)).toEqual(["rename", "edit_storyboard", "request_revision", "archive"]);
     expect(allowedActionsFor(projectDoc({ activeJobId: new ObjectId() }), null)).toEqual([]);
     // Until F30 (post invalidation), a scheduled or failed-publish project's storyboard can't change.
-    expect(allowedActionsFor(projectDoc({ state: "scheduled" }), null)).toEqual([]);
-    expect(allowedActionsFor(projectDoc({ state: "publish_failed" }), null)).toEqual([]);
+    expect(allowedActionsFor(projectDoc({ state: "scheduled" }), null)).toEqual(["rename", "archive"]);
+    expect(allowedActionsFor(projectDoc({ state: "publish_failed" }), null)).toEqual(["rename", "archive"]);
     const failed = { ...newPlanJob({ ownerId: OWNER, projectId: PROJECT, project: projectDoc(), now: NOW }), type: "revise" as const, state: "failed" as const, inputRef: { planVersionId: V1 }, error: { code: "PROVIDER_BUSY", message: "", retryable: true } };
     expect(allowedActionsFor(projectDoc(), null, failed)).toContain("retry_job");
     expect(allowedActionsFor(projectDoc({ currentPlanVersionId: new ObjectId() }), null, failed)).not.toContain("retry_job");

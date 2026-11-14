@@ -3,7 +3,7 @@ import {
   API_RATE_LIMITS,
   canRetryPlanJob,
   CREATE_PROJECT_STATUS,
-  EditIdeaBodySchema,
+  UpdateProjectBodySchema,
   indexesForFeatures,
   newPlanJob,
   planInputHash,
@@ -479,11 +479,11 @@ describe("jobs, projects and limits (pure parts)", () => {
 
   it("allowedActions: only after a failure; retry_job hidden at 20 requests or for a safety refusal", () => {
     const job: JobDocument = { ...newPlanJob({ ownerId: OWNER, projectId: PROJECT, project, now: NOW }), state: "failed", error: { code: "PLAN_INVALID", message: "", retryable: true } };
-    expect(allowedActionsFor(projectDoc({ state: "plan_failed" }), job)).toEqual(["edit_idea", "retry_job"]);
-    expect(allowedActionsFor(projectDoc({ state: "plan_failed", planRequestCount: 20 }), job)).toEqual(["edit_idea"]);
-    expect(allowedActionsFor(projectDoc({ state: "plan_failed" }), { ...job, error: { code: "PROVIDER_REJECTED", message: "", retryable: false } })).toEqual(["edit_idea"]);
+    expect(allowedActionsFor(projectDoc({ state: "plan_failed" }), job)).toEqual(["rename", "edit_idea", "retry_job", "archive"]);
+    expect(allowedActionsFor(projectDoc({ state: "plan_failed", planRequestCount: 20 }), job)).toEqual(["rename", "edit_idea", "archive"]);
+    expect(allowedActionsFor(projectDoc({ state: "plan_failed" }), { ...job, error: { code: "PROVIDER_REJECTED", message: "", retryable: false } })).toEqual(["rename", "edit_idea", "archive"]);
     expect(allowedActionsFor(projectDoc({ state: "planning", activeJobId: job._id }), job)).toEqual([]);
-    expect(allowedActionsFor(projectDoc({ state: "storyboard_ready" }), job)).toEqual([]);
+    expect(allowedActionsFor(projectDoc({ state: "storyboard_ready" }), job)).toEqual(["rename", "archive"]);
     expect(USAGE_LIMITS.planRequestsPerProject).toBe(20);
   });
 
@@ -501,14 +501,15 @@ describe("jobs, projects and limits (pure parts)", () => {
     expect(planning).toMatchObject({ state: "planning", currentStep: "idea", pollAfterMs: 2000, activeJob: { id: job._id.toHexString(), state: "queued" }, latestPost: null });
     const failedJob: JobDocument = { ...job, state: "failed", error: { code: "PROVIDER_BUSY", message: "", retryable: true } };
     const failed = toProjectStatus({ project: projectDoc({ state: "plan_failed", lastError: { code: "PROVIDER_BUSY", message: "Busy", at: NOW } }), activeJob: null, latestPlanJob: failedJob });
-    expect(failed).toMatchObject({ pollAfterMs: null, activeJob: null, allowedActions: ["edit_idea", "retry_job"], lastError: { code: "PROVIDER_BUSY" } });
+    expect(failed).toMatchObject({ pollAfterMs: null, activeJob: null, allowedActions: ["rename", "edit_idea", "retry_job", "archive"], lastError: { code: "PROVIDER_BUSY" } });
   });
 
-  it("C4 body: text required (rename alone is F21), strict, expectedStateVersion a whole number", () => {
-    expect(EditIdeaBodySchema.safeParse({ text: " Why is the sky blue? ", expectedStateVersion: 3 })).toMatchObject({ success: true, data: { text: "Why is the sky blue?" } });
-    expect(EditIdeaBodySchema.safeParse({ title: "New", expectedStateVersion: 3 }).success).toBe(false);
-    expect(EditIdeaBodySchema.safeParse({ text: "abc", expectedStateVersion: 1.5 }).success).toBe(false);
-    expect(EditIdeaBodySchema.safeParse({ text: "abc", expectedStateVersion: 1, inputType: "notes" }).success).toBe(false);
+  it("C4 body: text or title (rename, F21), strict, expectedStateVersion a whole number", () => {
+    expect(UpdateProjectBodySchema.safeParse({ text: " Why is the sky blue? ", expectedStateVersion: 3 })).toMatchObject({ success: true, data: { text: "Why is the sky blue?" } });
+    expect(UpdateProjectBodySchema.safeParse({ title: "New", expectedStateVersion: 3 })).toMatchObject({ success: true, data: { title: "New" } });
+    expect(UpdateProjectBodySchema.safeParse({ expectedStateVersion: 3 }).success).toBe(false);
+    expect(UpdateProjectBodySchema.safeParse({ text: "abc", expectedStateVersion: 1.5 }).success).toBe(false);
+    expect(UpdateProjectBodySchema.safeParse({ text: "abc", expectedStateVersion: 1, inputType: "notes" }).success).toBe(false);
   });
 
   it("limits and indexes from the docs", () => {

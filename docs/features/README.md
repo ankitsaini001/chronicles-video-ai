@@ -64,7 +64,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | ✅ Done |
 | F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | ✅ Done |
 | F20 | [Approve storyboard (approval #1)](F20-approve-storyboard.md) | F18 | ✅ Done |
-| F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | ⬜ Not started |
+| F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | 🔄 In progress |
 
 ### A4 · Generate and review video
 

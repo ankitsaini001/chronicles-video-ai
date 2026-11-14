@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20";
+  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20" | "F21";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -46,6 +46,9 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "planVersions", name: "ownerId_projectId", keys: { ownerId: 1, projectId: 1 }, options: {}, feature: "F15", why: "Owner-scoped lookups" },
   { collection: "revisions", name: "projectId_createdAt", keys: { projectId: 1, createdAt: -1 }, options: {}, feature: "F18", why: "Revision chat history, newest first" },
   { collection: "storyboardApprovals", name: "planVersionId_unique", keys: { planVersionId: 1 }, options: { unique: true }, feature: "F20", why: "A storyboard version is approved at most once" },
+  // C1 sorts by updatedAt AND _id (the tie-breaker, API.md §5): this index serves the whole sort, so
+  // a page never needs an in-memory sort. Tabs filter on state on the way (a user has few projects).
+  { collection: "projects", name: "ownerId_updatedAt_id", keys: { ownerId: 1, updatedAt: -1, _id: -1 }, options: {}, feature: "F21", why: "My videos pages, newest first (with the tie-breaker)" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */

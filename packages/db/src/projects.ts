@@ -173,11 +173,22 @@ export type ProjectResource = {
 
 const hexOrNull = (id: ObjectId | null) => (id ? id.toHexString() : null);
 
+/**
+ * The state the project's pages follow. An archived project keeps showing the step it was on
+ * (`stateBeforeArchive`, API.md C5), read-only, so a saved link still opens the same page (F21).
+ */
+export function displayStateOf(doc: Pick<ProjectDocument, "state" | "stateBeforeArchive">): ProjectState {
+  return doc.state === "archived" ? (doc.stateBeforeArchive ?? "draft") : doc.state;
+}
+
 /** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
-export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard";
+export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "archive";
 
 /**
- * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs.
+ * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs,
+ * nothing on an archived project.
+ * - F21: `rename` (C4 title) first and `archive` (C5) last, in every state (archive not while
+ *   `publishing`, ARCHITECTURE §7.2).
  * - F15, after a failed storyboard: `edit_idea` (C4), and `retry_job` (E2) while the last plan job
  *   may be retried and the project is under its 20 storyboard requests.
  * - F17, with a storyboard: `edit_storyboard` (D3 narration edit, D4 voice, D7 undo/restore).
@@ -185,10 +196,16 @@ export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard" | "req
  *   change request failed with a retryable error and the storyboard is still the one it was made on.
  * - F20: `approve_storyboard` (D8) in storyboard_ready / generate_failed while the current version
  *   isn't the approved one (whether it passes the checks is on the version: `valid`).
- * Rename and archive arrive with F21.
  */
 export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
-  if (doc.activeJobId) return [];
+  if (doc.activeJobId || doc.state === "archived") return [];
+  const actions: AllowedAction[] = ["rename", ...stepActionsFor(doc, latestPlanJob, latestReviseJob)];
+  if (doc.state !== "publishing") actions.push("archive");
+  return actions;
+}
+
+/** The actions of the step the project is on (F15–F20), without rename/archive. */
+function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
   const underLimit = doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject;
   if (doc.state === "plan_failed") {
     const actions: AllowedAction[] = ["edit_idea"];
@@ -225,7 +242,7 @@ export interface ProjectRelated {
  */
 export function toProjectResource(doc: ProjectDocument, related: ProjectRelated = {}): ProjectResource {
   const activeJob = related.activeJob && doc.activeJobId && related.activeJob._id.equals(doc.activeJobId) ? related.activeJob : null;
-  const state = doc.state === "archived" && doc.stateBeforeArchive ? doc.stateBeforeArchive : doc.state;
+  const state = displayStateOf(doc);
   return {
     id: doc._id.toHexString(),
     title: doc.title,
@@ -362,13 +379,25 @@ export class ProjectActionError extends Error {
   }
 }
 
-/** C4 body in F15: edit the idea after a failed storyboard (API.md C4). Rename alone arrives with F21. */
-export const EditIdeaBodySchema = z.strictObject({
-  text: cleanText,
-  title: textBetween(1, TITLE_MAX).optional(),
-  expectedStateVersion: z.number({ error: "must be a whole number" }).int({ error: "must be a whole number" }).min(1, { error: "must be at least 1" }),
-});
-export type EditIdeaBody = z.output<typeof EditIdeaBodySchema>;
+/**
+ * A project title sent by the creator (C4): cleaned like the idea (control and invisible format
+ * characters removed, NFC), spaces and line breaks collapsed to one space, trimmed, 1–120.
+ */
+const titleText = cleanText
+  .transform((s) => s.replace(/\s+/g, " ").trim())
+  .pipe(z.string().min(1, { error: "must not be empty" }).max(TITLE_MAX, { error: `must be at most ${TITLE_MAX} characters` }));
+
+const expectedStateVersion = z.number({ error: "must be a whole number" }).int({ error: "must be a whole number" }).min(1, { error: "must be at least 1" });
+
+/**
+ * C4 body (API.md C4), strict: `title` alone = rename (F21); `text` (optionally with `title`) =
+ * edit the idea after a failed storyboard (F15). `expectedStateVersion` is always required.
+ */
+export const UpdateProjectBodySchema = z
+  .strictObject({ title: titleText.optional(), text: cleanText.optional(), expectedStateVersion })
+  .refine((body) => body.title !== undefined || body.text !== undefined, { path: ["title"], error: "send a title, the idea text, or both" });
+export type UpdateProjectBody = z.output<typeof UpdateProjectBodySchema>;
+export type EditIdeaBody = { text: string; title?: string | undefined; expectedStateVersion: number };
 
 /**
  * C4 "Edit idea" (API.md C4, DATABASE.md §7.2 #2): only in `plan_failed` with no job running.

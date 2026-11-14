@@ -65,13 +65,15 @@ export {
   createProject,
   CreateProjectBodySchema,
   currentStepOf,
-  EditIdeaBodySchema,
+  displayStateOf,
   editProjectIdea,
   getOwnedProject,
   ProjectActionError,
   type AllowedAction,
   type EditIdeaBody,
   type ProjectRelated,
+  UpdateProjectBodySchema,
+  type UpdateProjectBody,
   IDEA_LIMITS,
   INPUT_TYPES,
   LANGUAGES,
@@ -216,6 +218,21 @@ export {
   type PlanJobContext,
   type ValidPlanToSave,
 } from "./plan-jobs";
+export {
+  archiveProject,
+  hasLibraryProjects,
+  isLibraryTab,
+  LIBRARY_TAB_IDS,
+  LIBRARY_TABS,
+  libraryTabOf,
+  listProjects,
+  parseIfMatch,
+  renameProject,
+  toProjectSummary,
+  type LibraryPage,
+  type LibraryTab,
+  type ProjectSummaryResource,
+} from "./project-library";
 export { checkStuckJob, checkStuckPlanJob, type StuckCheck } from "./stuck-jobs";
 export {
   canRetryReviseJob,

@@ -159,7 +159,7 @@ describe("Project resource (API.md §11.3)", () => {
       activeJobId: null,
       activeJob: null,
       lastError: null,
-      allowedActions: [],
+      allowedActions: ["rename", "archive"],
       archivedAt: null,
       createdAt: "2026-11-12T05:00:00.000Z",
       updatedAt: "2026-11-12T05:00:00.000Z",

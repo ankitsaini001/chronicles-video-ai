@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F15 |
 | **Design** | Stitch: ByteReel — My videos |
