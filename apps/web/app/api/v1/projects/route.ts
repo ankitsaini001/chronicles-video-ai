@@ -1,22 +1,29 @@
 import { API_RATE_LIMITS, CREATE_PROJECT_STATUS, createProject, CreateProjectBodySchema, IdempotencyLockLostError, ProjectQuotaExceededError } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
+import { assertPlanJobsReady } from "@/lib/plan/api";
+import { sendPlanEvent } from "@/lib/plan/jobs";
 
 // C2 POST /api/v1/projects (docs/API.md §14.3): ① "Create storyboard".
-// F12 (no AI yet): saves the project in state `draft` and answers 201 { project, job: null }.
-// F15 adds the queued `plan` job in the same transaction and the 202 answer (API.md C2 "Until F15").
 // Pipeline (lib/api/v1.ts): Origin → session → 10 per hour per user → JSON body (64 KB, strict) →
-// Idempotency-Key → here. The projects/day quota (5, user timezone) is checked inside the
-// transaction that saves the project, so two clicks at the same moment can't get past it.
+// Idempotency-Key → here. Then (F15, full spec):
+//   1. the AI planner and Inngest must be set up (else 500, nothing saved or counted);
+//   2. ONE transaction: the projects/day quota (5, user timezone), the project in state `planning`
+//      (planRequestCount 1), its queued `plan` job, and the saved answer for the Idempotency-Key;
+//   3. AFTER the commit, the `plan.requested` event goes to Inngest (never inside the transaction).
+//      If that send fails the answer is still 202: the job stays queued and is sent again by the
+//      stuck-job rule when the page polls (lib/plan/jobs.ts).
+// Answer: 202 { project, job }.
 
 export const POST = apiRoute({
   rateLimit: API_RATE_LIMITS.createProjectPerUser,
   body: CreateProjectBodySchema,
   idempotent: true,
   handle: async ({ db, user, body, idempotencyLock }) => {
+    assertPlanJobsReady();
+    let created: Awaited<ReturnType<typeof createProject>>;
     try {
-      const created = await createProject(db, { ownerId: user.id, timezone: user.timezone, body, idempotencyLock });
-      return new ApiResult(CREATE_PROJECT_STATUS, created);
+      created = await createProject(db, { ownerId: user.id, timezone: user.timezone, body, idempotencyLock });
     } catch (error) {
       if (error instanceof ProjectQuotaExceededError) {
         throw new ApiProblem(429, "QUOTA_EXCEEDED", `You've created ${error.limit} projects today. Try again tomorrow.`, {
@@ -33,5 +40,7 @@ export const POST = apiRoute({
       }
       throw error;
     }
+    await sendPlanEvent(db, created.job);
+    return new ApiResult(CREATE_PROJECT_STATUS, created.response);
   },
 });
