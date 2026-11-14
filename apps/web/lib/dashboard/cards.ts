@@ -79,10 +79,14 @@ export function updatedLabel(updatedAt: string, now: string, timeZone: string): 
   return `Updated ${new Intl.DateTimeFormat("en-IN", { timeZone, day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) }).format(then)}`;
 }
 
-/** The big letter on the placeholder thumbnail: the title's first character (a whole Devanagari syllable). */
+/**
+ * The big letter on the placeholder thumbnail: the title's first character with its marks (so a
+ * Devanagari letter keeps its vowel sign). A plain rule rather than Intl.Segmenter, whose answer
+ * for conjuncts differs between Node and browsers (the server and the browser must print the same).
+ */
 export function titleInitial(title: string): string {
-  const first = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(title.trim())[Symbol.iterator]().next();
-  return first.done ? "?" : first.value.segment.toLocaleUpperCase("en");
+  const first = /^\P{M}\p{M}*/u.exec(title.trim())?.[0];
+  return first ? first.toLocaleUpperCase("en") : "?";
 }
 
 /** Placeholder thumbnail background per language (warm Ember Gold tints), until real thumbnails exist (F23). */
