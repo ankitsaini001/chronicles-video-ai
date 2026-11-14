@@ -73,6 +73,7 @@ export {
   PROJECTS_COLLECTION,
   TITLE_MAX,
   titleFromIdea,
+  projectTitle,
   toProjectResource,
   VOICE_GENDERS,
   type CreateProjectBody,

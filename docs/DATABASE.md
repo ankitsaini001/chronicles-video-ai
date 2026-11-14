@@ -420,7 +420,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 |---|---|---|---|
 | `_id`, `ownerId` | ObjectId | Project id; owner (the user) | Auto |
 | `schemaVersion` | int | Document shape version (§1.7) | Auto |
-| `title` | string 1–120 | First 120 chars of the idea until the storyboard arrives, then the plan's topic; the creator can rename | Yes |
+| `title` | string 1–120 | Until the storyboard arrives: the picked brainstorm idea's title, otherwise the idea text (over 120 characters cut at a word break, ending with "…"); then the plan's topic; the creator can rename | Yes |
 | `language` | `en` \| `hi` \| `hinglish` | Chosen on the Idea step. **Can't be changed later** (PRD decision #25: make a new project) | Yes |
 | `voiceGender` | `female` \| `male` | Narrator voice; switchable on the storyboard | Yes |
 | `input` | object | The idea: `type` (`topic` \| `notes` \| `brainstorm`), `text`, `brainstormChoice` (`{ subject, title, hook }` or null) | Yes |

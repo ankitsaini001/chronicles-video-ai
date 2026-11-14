@@ -94,14 +94,25 @@ export const CreateProjectBodySchema = z
 
 export type CreateProjectBody = z.output<typeof CreateProjectBodySchema>;
 
-/** First 120 characters of the idea, spaces and line breaks collapsed, never cutting an emoji in half. */
+/**
+ * The idea as a title: spaces and line breaks collapsed. A longer idea is cut to at most 120
+ * characters at the last word break (never mid-word, never an emoji in half) and ends with "…".
+ */
 export function titleFromIdea(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= TITLE_MAX) return flat;
-  let end = TITLE_MAX;
+  let end = TITLE_MAX - 1; // room for "…"
   const last = flat.charCodeAt(end - 1);
   if (last >= 0xd800 && last <= 0xdbff) end--; // a high surrogate: keep the pair together
-  return flat.slice(0, end).trimEnd();
+  // Cut at the last space if that keeps at least half the room; one very long word is cut as is.
+  const space = flat.lastIndexOf(" ", end);
+  if (space >= TITLE_MAX / 2) end = space;
+  return `${flat.slice(0, end).replace(/[\s,;:–—-]+$/u, "")}…`;
+}
+
+/** The project title: the picked brainstorm idea's own title, otherwise taken from the idea text. */
+export function projectTitle(body: { text: string; brainstormChoice?: { title: string } | null | undefined }): string {
+  return body.brainstormChoice?.title ?? titleFromIdea(body.text);
 }
 
 /** API.md §11.3 `currentStep` rules. */
@@ -215,7 +226,7 @@ export async function createProject(
     _id: new ObjectId(),
     ownerId: new ObjectId(input.ownerId),
     schemaVersion: PROJECT_SCHEMA_VERSION,
-    title: titleFromIdea(input.body.text),
+    title: projectTitle(input.body),
     language: input.body.language,
     voiceGender: input.body.voiceGender,
     input: { type: input.body.inputType, text: input.body.text, brainstormChoice: input.body.brainstormChoice ?? null },

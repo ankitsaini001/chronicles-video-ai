@@ -5,6 +5,7 @@ import {
   CreateProjectBodySchema,
   currentStepOf,
   IDEA_LIMITS,
+  projectTitle,
   titleFromIdea,
   toProjectResource,
   usageCounterPeriod,
@@ -81,14 +82,34 @@ describe("titleFromIdea", () => {
     expect(titleFromIdea("How UPI\n\n  payments   work")).toBe("How UPI payments work");
   });
 
-  it("keeps the first 120 characters", () => {
-    expect(titleFromIdea("a".repeat(500))).toBe("a".repeat(120));
+  it("cuts one very long word to 119 characters plus …", () => {
+    expect(titleFromIdea("a".repeat(500))).toBe(`${"a".repeat(119)}…`);
   });
 
   it("never cuts an emoji (surrogate pair) in half", () => {
-    const title = titleFromIdea(`${"a".repeat(119)}😀 and more`);
-    expect(title).toBe("a".repeat(119));
+    const title = titleFromIdea(`${"a".repeat(118)}😀 and more`);
+    expect(title).toBe(`${"a".repeat(118)}…`);
     expect(title.length).toBeLessThanOrEqual(120);
+  });
+
+  it("cuts a long idea at a word break, never mid-word, and ends with …", () => {
+    const idea =
+      "Why does the Monsoon arrive in Kerala first? Have you ever wondered why the monsoon rains hit Kerala way before they reach the rest of India?";
+    const title = titleFromIdea(idea);
+    expect(title).toBe("Why does the Monsoon arrive in Kerala first? Have you ever wondered why the monsoon rains hit Kerala way before they…");
+    expect(title.length).toBeLessThanOrEqual(120);
+  });
+});
+
+describe("projectTitle", () => {
+  it("uses the picked brainstorm idea's own title", () => {
+    expect(projectTitle({ text: "Why the monsoon reaches Kerala first. Every June…", brainstormChoice: { title: "Why the monsoon reaches Kerala first" } })).toBe(
+      "Why the monsoon reaches Kerala first",
+    );
+  });
+
+  it("falls back to the idea text without a brainstorm choice", () => {
+    expect(projectTitle({ text: "How UPI payments work", brainstormChoice: null })).toBe("How UPI payments work");
   });
 
   it("keeps Hindi text as is", () => {
