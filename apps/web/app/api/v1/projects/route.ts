@@ -9,7 +9,8 @@ import { sendPlanEvent } from "@/lib/plan/jobs";
 // Idempotency-Key → here. Then (F15, full spec):
 //   1. the AI planner and Inngest must be set up (else 500, nothing saved or counted);
 //   2. ONE transaction: the projects/day quota (5, user timezone), the project in state `planning`
-//      (planRequestCount 1), its queued `plan` job, and the saved answer for the Idempotency-Key;
+//      (planRequestCount 0: counted when the job really asks Gemini), its queued `plan` job, and the
+//      saved answer for the Idempotency-Key;
 //   3. AFTER the commit, the `plan.requested` event goes to Inngest (never inside the transaction).
 //      If that send fails the answer is still 202: the job stays queued and is sent again by the
 //      stuck-job rule when the page polls (lib/plan/jobs.ts).

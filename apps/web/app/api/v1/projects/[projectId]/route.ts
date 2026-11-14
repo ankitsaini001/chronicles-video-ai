@@ -6,7 +6,7 @@ import { toApiProblem } from "@/lib/plan/api";
 // storyboard. Body (strict): `text` (same length rules as C2 for the project's input type), optional
 // `title`, `expectedStateVersion`. Only in `plan_failed` with no job running; one conditional
 // update (packages/db/src/projects.ts editProjectIdea). Doesn't count toward 5 projects/day; the Try
-// again that follows (E2) counts 1 toward the project's 20 storyboard requests.
+// again that follows (E2) counts 1 toward the project's 20 storyboard requests when it asks Gemini.
 // Rename alone (`title` without `text`) arrives with F21; until then `text` is required.
 // Owner only: someone else's project, a missing one and a malformed id all get 404.
 

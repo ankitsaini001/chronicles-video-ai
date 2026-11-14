@@ -19,7 +19,7 @@ export type JobType = "plan" | "revise" | "generate" | "caption" | "publish";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "needs_input" | "cancelled";
 export type StageStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 /** Error codes a plan job can end with (API.md §4.2). */
-export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "INTERNAL";
+export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "QUOTA_EXCEEDED" | "INTERNAL";
 
 export const TERMINAL_JOB_STATES: readonly JobState[] = ["succeeded", "failed", "needs_input", "cancelled"];
 /** API.md §8.1: the UI polls every 2 s while a job is active. */
@@ -39,6 +39,7 @@ export const JOB_MESSAGES = {
   PROVIDER_BUSY: "Our AI is very busy right now. Your idea is saved; please try again in a few minutes.",
   PROVIDER_REJECTED: "We can't make a video about this topic.",
   PLAN_INVALID: "Couldn't build a good storyboard, try rephrasing.",
+  QUOTA_EXCEEDED: "This project has reached 20 storyboard requests. Start a new project to keep going.",
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
 
@@ -47,6 +48,7 @@ export const PLAN_ERROR_RETRYABLE: Record<PlanJobErrorCode, boolean> = {
   PROVIDER_BUSY: true,
   PROVIDER_REJECTED: false,
   PLAN_INVALID: true,
+  QUOTA_EXCEEDED: false,
   INTERNAL: true,
 };
 

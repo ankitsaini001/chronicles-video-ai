@@ -8,7 +8,8 @@ import { USAGE_LIMITS } from "./usage";
 
 // Video projects (docs/DATABASE.md §4.8 `projects`, docs/API.md C2, C4 and §11.3 `Project`).
 // C2 "Create storyboard" (F12, full spec since F15): ONE transaction counts the project for the day,
-// saves it in state `planning` with planRequestCount 1, and inserts its queued `plan` job; the
+// saves it in state `planning` (planRequestCount 0: the storyboard request is counted when the job
+// really sends it to Gemini), and inserts its queued `plan` job; the
 // route then hands the job to Inngest (`plan.requested`). Projects saved by F12 before F15 stay in
 // state `draft` with no job.
 
@@ -237,7 +238,7 @@ export class ProjectQuotaExceededError extends Error {
 
 /**
  * C2 (DATABASE.md §7.2 #1). In ONE transaction: +1 on today's projects counter (only while within
- * 5), insert the project (`planning`, planRequestCount 1, activeJobId = the job), insert its queued
+ * 5), insert the project (`planning`, planRequestCount 0, activeJobId = the job), insert its queued
  * `plan` job, and, when the request carried an Idempotency-Key, save the answer on its record. So a
  * crash can never leave a counted project that doesn't exist, a project without its job, or a
  * saved project whose click would run again on retry. The Inngest event is sent by the caller
@@ -273,7 +274,8 @@ export async function createProject(
     currentRenderId: null,
     activeJobId: job._id,
     stateVersion: 1,
-    planRequestCount: 1,
+    // Counted when the job sends its first Gemini request (plan-jobs.ts reservePlanRequest).
+    planRequestCount: 0,
     lastError: null,
     createdAt: now,
     updatedAt: now,

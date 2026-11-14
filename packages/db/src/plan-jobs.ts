@@ -103,20 +103,54 @@ export async function loadPlanAttempt(db: Db, input: { jobId: string; attempt: n
 
 /**
  * Count one Gemini request BEFORE it is sent. "ok": go ahead. "limit": this attempt already made
- * `maxRequests` requests (no more AI calls). "stale": the job is no longer running this attempt.
+ * `maxRequests` requests (no more AI calls). "quota": this is the attempt's FIRST request and the
+ * project already used its 20 storyboard requests. "stale": the job is no longer running this attempt.
+ * The attempt's first request also adds 1 to `projects.planRequestCount` (only below 20), in the same
+ * transaction: only an attempt that really asks Gemini counts toward the 20 (a job that never got to
+ * Gemini, or a Try again that reuses a saved answer, costs nothing). F15, after code review.
  */
 export async function reservePlanRequest(
   db: Db,
   input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number; now?: Date },
-): Promise<"ok" | "limit" | "stale"> {
+): Promise<"ok" | "limit" | "quota" | "stale"> {
   const now = input.now ?? new Date();
-  const result = await db.collection<JobDocument>(JOBS_COLLECTION).updateOne(
-    { _id: input.jobId, attempt: input.attempt, state: "running", "planner.attempt": input.attempt, "planner.requests": { $lt: input.maxRequests } },
-    { $inc: { "planner.requests": 1, "stages.0.attempts": 1 }, $set: { progress: { stage: "plan", percent: input.percent, message: input.message }, updatedAt: now } },
-  );
-  if (result.matchedCount === 1) return "ok";
-  const job = await getJob(db, input.jobId);
-  return job && job.state === "running" && job.attempt === input.attempt && job.planner?.attempt === input.attempt ? "limit" : "stale";
+  const limit = USAGE_LIMITS.planRequestsPerProject;
+  const session = db.client.startSession();
+  let result: "ok" | "limit" | "quota" | "stale" = "stale";
+  try {
+    await session.withTransaction(async () => {
+      const jobs = db.collection<JobDocument>(JOBS_COLLECTION);
+      const job = await jobs.findOne({ _id: input.jobId, attempt: input.attempt, state: "running", "planner.attempt": input.attempt }, { session });
+      if (!job?.planner) {
+        result = "stale";
+        return;
+      }
+      if (job.planner.requests >= input.maxRequests) {
+        result = "limit";
+        return;
+      }
+      if (job.planner.requests === 0) {
+        const counted = await db
+          .collection<ProjectDocument>(PROJECTS_COLLECTION)
+          .updateOne({ _id: job.projectId, activeJobId: job._id, planRequestCount: { $lt: limit } }, { $inc: { planRequestCount: 1 }, $set: { updatedAt: now } }, { session });
+        if (counted.matchedCount !== 1) {
+          result = "quota";
+          return;
+        }
+      }
+      const updated = await jobs.updateOne(
+        { _id: job._id, attempt: input.attempt, state: "running", "planner.requests": job.planner.requests },
+        { $inc: { "planner.requests": 1, "stages.0.attempts": 1 }, $set: { progress: { stage: "plan", percent: input.percent, message: input.message }, updatedAt: now } },
+        { session },
+      );
+      // Someone else counted a request at the same moment: refuse this one (the transaction rolls back).
+      if (updated.matchedCount !== 1) throw new Error("Concurrent request reservation; try again.");
+      result = "ok";
+    });
+  } finally {
+    await session.endSession();
+  }
+  return result;
 }
 
 /** Save one planner answer on the job (once per answer number and attempt). */
@@ -279,9 +313,10 @@ export async function failPlanJob(
  * E2 "Try again" on a failed plan job (API.md E2, DATABASE.md §7.2 #8), ONE transaction: the same
  * job back to `queued` with attempt + 1, planning from the project's CURRENT idea (new inputHash and
  * key when the idea was edited), project → `planning` with `activeJobId`, `lastError` cleared,
- * +1 stateVersion, and +1 `planRequestCount` only while below 20 (every Try again is a new paid AI
- * request; F15 decision). The answer is saved on the Idempotency-Key record in the same
- * transaction. Throws ProjectActionError (nothing changed) when it isn't allowed.
+ * +1 stateVersion. Refused (429) when the project already used its 20 storyboard requests; the new
+ * attempt is counted only when it really sends a request to Gemini (reservePlanRequest). The answer
+ * is saved on the Idempotency-Key record in the same transaction. Throws ProjectActionError (nothing
+ * changed) when it isn't allowed.
  * The caller sends the Inngest event (id `{jobId}:retry:{attempt}`) after this returns.
  */
 export async function retryPlanJob(
@@ -319,12 +354,12 @@ export async function retryPlanJob(
       }
       const attempt = job.attempt + 1;
       const key = planJobKey(job.projectId, inputHash);
-      const counted = await projects.updateOne(
+      const moved = await projects.updateOne(
         { _id: project._id, state: "plan_failed", activeJobId: null, stateVersion: project.stateVersion, planRequestCount: { $lt: limit } },
-        { $set: { state: "planning", activeJobId: job._id, lastError: null, updatedAt: now }, $inc: { stateVersion: 1, planRequestCount: 1 } },
+        { $set: { state: "planning", activeJobId: job._id, lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
         { session },
       );
-      if (counted.matchedCount !== 1) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.");
+      if (moved.matchedCount !== 1) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.");
       const next: Partial<JobDocument> = {
         state: "queued",
         attempt,
