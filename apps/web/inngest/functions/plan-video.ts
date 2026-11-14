@@ -16,11 +16,12 @@ import type { ObjectId } from "mongodb";
 import { z } from "zod";
 import { plannerProviderFromEnv } from "@/lib/plan/provider";
 import { runPlanJob, type PlanJobStore } from "@/lib/plan/run-plan-job";
-import { PLAN_REQUESTED } from "../client";
+import { PLAN_REQUESTED, PLANNER_CONCURRENCY } from "../client";
 
 // `plan-video` (ARCHITECTURE §13.1): plan.requested → the AI writes the storyboard → plan version 1.
 // The work itself is lib/plan/run-plan-job.ts; this file connects it to Inngest and MongoDB.
-// - Concurrency: at most 2 storyboards per creator and 5 in total at the same time.
+// - Concurrency: at most 2 per creator and 5 in total at the same time, shared with revise-plan
+//   (PLANNER_CONCURRENCY in ../client.ts).
 // - Retries: 2 per step (Inngest). A busy Gemini answer is retried by the step itself through
 //   RetryAfterError (Retry-After honoured); answers already saved are never asked for again.
 // - Timeouts: a run waiting more than 15 min to start, or running more than 20 min, is cancelled
@@ -61,10 +62,7 @@ export function createPlanVideoFunction(inngest: Inngest) {
       id: "plan-video",
       name: "Write the storyboard",
       triggers: [{ event: PLAN_REQUESTED }],
-      concurrency: [
-        { key: "event.data.ownerId", limit: 2 },
-        { limit: 5 },
-      ],
+      concurrency: PLANNER_CONCURRENCY,
       retries: 2,
       timeouts: { start: "15m", finish: "20m" },
     },

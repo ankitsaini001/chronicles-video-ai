@@ -23,8 +23,10 @@ import {
   type StoredPlan,
   type ValidPlanToSave,
 } from "@bytereel/db";
+import { readFileSync } from "node:fs";
 import { ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
+import { PLANNER_CONCURRENCY } from "../apps/web/inngest/client";
 import { fakeGeminiFetch } from "../apps/web/lib/brainstorm/fake-gemini";
 import { runPlanJob, type PlanJobStore } from "../apps/web/lib/plan/run-plan-job";
 import { buildPlanVersion, narrationChange, voiceChange } from "../apps/web/lib/storyboard/edit-plan";
@@ -310,6 +312,16 @@ describe("F18 revision chat", () => {
     expect((await ask("make it simpler", "scene-takeaway")).scenes[5]!.narration[0]!.text).toMatch(/Simple as that\.$/);
     const same = await ask("e2e nochange", null);
     expect(same.scenes.map((s) => s.narration.map((n) => n.text))).toEqual(plan.scenes.map((s) => s.narration.map((n) => n.text)));
+  });
+});
+
+describe("Inngest limits (F18 review)", () => {
+  it("plan-video and revise-plan share one limit: 2 per creator, 5 in total, across both functions", () => {
+    expect(PLANNER_CONCURRENCY).toEqual([
+      { scope: "env", key: '"planner-owner-" + event.data.ownerId', limit: 2 },
+      { scope: "env", key: '"planner-all"', limit: 5 },
+    ]);
+    for (const file of ["plan-video", "revise-plan"]) expect(readFileSync(`apps/web/inngest/functions/${file}.ts`, "utf8")).toContain("concurrency: PLANNER_CONCURRENCY");
   });
 });
 

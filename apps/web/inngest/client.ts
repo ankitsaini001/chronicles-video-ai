@@ -25,6 +25,17 @@ export const PLAN_REQUESTED = "plan.requested";
 /** Event that starts a storyboard change (API.md D5, E2; F18). Carries ids only. */
 export const REVISION_REQUESTED = "revision.requested";
 
+/**
+ * Storyboard AI work shares ONE limit across `plan-video` and `revise-plan` (F16–F20 review): at most
+ * 2 runs per creator and 5 in total at the same time, whichever function they are in. `scope: "env"`
+ * makes a keyed limit count across functions of this environment; the keys are fixed strings, never
+ * the product name.
+ */
+export const PLANNER_CONCURRENCY: [{ scope: "env"; key: string; limit: number }, { scope: "env"; key: string; limit: number }] = [
+  { scope: "env", key: '"planner-owner-" + event.data.ownerId', limit: 2 },
+  { scope: "env", key: '"planner-all"', limit: 5 },
+];
+
 export type InngestSetup = { ok: true; dev: boolean; client: Inngest } | { ok: false; problem: string };
 
 const LOCAL_DEV_SERVER = /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}\/?$/;

@@ -17,15 +17,15 @@ import { z } from "zod";
 import { plannerProviderFromEnv } from "@/lib/plan/provider";
 import { runPlanJob, type PlanJobStore } from "@/lib/plan/run-plan-job";
 import { prepareRevisionRequest } from "@/lib/storyboard/revise-job";
-import { REVISION_REQUESTED } from "../client";
+import { PLANNER_CONCURRENCY, REVISION_REQUESTED } from "../client";
 
 // `revise-plan` (ARCHITECTURE §13.1, F18): revision.requested → Gemini writes the storyboard with
 // the creator's change → a new `ai_revision` version (packages/db/src/revisions.ts).
 // The steps are the storyboard job's own (lib/plan/run-plan-job.ts): each Gemini request counted
 // on the job before it is sent (the attempt's first one also counts 1 of the project's 20), each
 // answer saved at once, ONE repair, 2 retries per step; only the prompt differs.
-// Concurrency: like plan-video, at most 2 per creator and 5 in total (cost safety); one per project
-// anyway (a project has one active job). Every Gemini request is logged in providerUsage
+// Concurrency: ONE shared limit with plan-video (PLANNER_CONCURRENCY): at most 2 per creator and 5
+// in total across both functions (cost safety); one per project anyway (one active job). Every Gemini request is logged in providerUsage
 // (operation "revise"). Events carry ids only.
 
 const EventData = z.object({
@@ -62,10 +62,7 @@ export function createRevisePlanFunction(inngest: Inngest) {
       id: "revise-plan",
       name: "Change the storyboard",
       triggers: [{ event: REVISION_REQUESTED }],
-      concurrency: [
-        { key: "event.data.ownerId", limit: 2 },
-        { limit: 5 },
-      ],
+      concurrency: PLANNER_CONCURRENCY,
       retries: 2,
       timeouts: { start: "15m", finish: "20m" },
     },
