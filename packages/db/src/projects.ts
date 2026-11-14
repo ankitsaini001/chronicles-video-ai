@@ -2,6 +2,7 @@ import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS } from "./idea-text";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
+import { isLanguageEnabled, LANGUAGES, languageUnavailableMessage, type Language } from "./languages";
 import { canRetryPlanJob, JOBS_COLLECTION, newPlanJob, planInputHash, toJobResource, type JobDocument, type JobResource, type JobType } from "./jobs";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
@@ -16,10 +17,9 @@ import { USAGE_LIMITS } from "./usage";
 export const PROJECTS_COLLECTION = "projects";
 export const PROJECT_SCHEMA_VERSION = 1;
 
-export const LANGUAGES = ["en", "hi", "hinglish"] as const;
+export { LANGUAGES, type Language };
 export const VOICE_GENDERS = ["female", "male"] as const;
 export const INPUT_TYPES = ["topic", "notes", "brainstorm"] as const;
-export type Language = (typeof LANGUAGES)[number];
 export type VoiceGender = (typeof VOICE_GENDERS)[number];
 export type InputType = (typeof INPUT_TYPES)[number];
 
@@ -210,12 +210,28 @@ export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storybo
  *   change request failed with a retryable error and the storyboard is still the one it was made on.
  * - F20: `approve_storyboard` (D8) in storyboard_ready / generate_failed while the current version
  *   isn't the approved one (whether it passes the checks is on the version: `valid`).
+ * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
+ *   loses every action that costs AI or voice: `retry_job`, `request_revision`, and `edit_idea`
+ *   (only useful for its Try again). It stays viewable; the free actions stay.
  */
 export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
   if (doc.activeJobId || doc.state === "archived") return [];
-  const actions: AllowedAction[] = ["rename", ...stepActionsFor(doc, latestPlanJob, latestReviseJob)];
+  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob);
+  const actions: AllowedAction[] = ["rename", ...(isLanguageEnabled(doc.language) ? stepActions : stepActions.filter((a) => !AI_ACTIONS.includes(a)))];
   if (doc.state !== "publishing") actions.push("archive");
   return actions;
+}
+
+/** Actions that start an AI job (or lead only to one): refused for a switched-off language. */
+const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea"];
+
+/**
+ * Throws 422 LANGUAGE_UNAVAILABLE when the language is switched off (languages.ts). Every action
+ * that costs AI or voice calls this BEFORE counting anything or starting a job: C2, D5, E2 (and
+ * the F23 video job).
+ */
+export function assertLanguageEnabled(language: string): void {
+  if (!isLanguageEnabled(language)) throw new ProjectActionError("LANGUAGE_UNAVAILABLE", languageUnavailableMessage(), { language });
 }
 
 /** The actions of the step the project is on (F15–F20), without rename/archive. */
@@ -306,13 +322,15 @@ export class ProjectQuotaExceededError extends Error {
  * saved project whose click would run again on retry. The Inngest event is sent by the caller
  * AFTER this returns (never inside a transaction); if that send fails, the job stays `queued` and
  * the stuck-job rule sends it again (plan-jobs.ts).
- * Throws ProjectQuotaExceededError (nothing saved) when the limit is reached, and
+ * Throws ProjectActionError LANGUAGE_UNAVAILABLE first (nothing read, counted or saved) for a
+ * switched-off language, ProjectQuotaExceededError (nothing saved) when the limit is reached, and
  * IdempotencyLockLostError (nothing saved) when a repeat of the same click took the record over.
  */
 export async function createProject(
   db: Db,
   input: { ownerId: string; timezone: string; body: CreateProjectBody; idempotencyLock?: IdempotencyLock | null; now?: Date },
 ): Promise<{ response: CreateProjectResponse; job: JobDocument }> {
+  assertLanguageEnabled(input.body.language);
   const now = input.now ?? new Date();
   const projectId = new ObjectId();
   const ownerId = new ObjectId(input.ownerId);
@@ -384,7 +402,16 @@ export async function getOwnedProject(db: Db, ownerId: string, projectId: string
  */
 export class ProjectActionError extends Error {
   constructor(
-    readonly code: "NOT_FOUND" | "INVALID_STATE" | "STALE_VERSION" | "JOB_ALREADY_RUNNING" | "QUOTA_EXCEEDED" | "INVALID_INPUT" | "APPROVAL_STALE" | "PLAN_INVALID",
+    readonly code:
+      | "NOT_FOUND"
+      | "INVALID_STATE"
+      | "STALE_VERSION"
+      | "JOB_ALREADY_RUNNING"
+      | "QUOTA_EXCEEDED"
+      | "INVALID_INPUT"
+      | "APPROVAL_STALE"
+      | "PLAN_INVALID"
+      | "LANGUAGE_UNAVAILABLE",
     message: string,
     readonly details?: Record<string, unknown>,
   ) {

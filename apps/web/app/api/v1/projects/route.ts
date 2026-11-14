@@ -1,5 +1,6 @@
 import {
   API_RATE_LIMITS,
+  assertLanguageEnabled,
   CREATE_PROJECT_STATUS,
   createProject,
   CreateProjectBodySchema,
@@ -8,11 +9,12 @@ import {
   isLibraryTab,
   LIBRARY_TAB_IDS,
   listProjects,
+  ProjectActionError,
   ProjectQuotaExceededError,
 } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
-import { assertPlanJobsReady } from "@/lib/plan/api";
+import { assertPlanJobsReady, toApiProblem } from "@/lib/plan/api";
 import { refreshJob, sendPlanEvent } from "@/lib/plan/jobs";
 import { pageQuery } from "@/lib/storyboard/api";
 
@@ -45,6 +47,8 @@ export const GET = apiRoute({
 // C2 POST /api/v1/projects (docs/API.md §14.3): ① "Create storyboard".
 // Pipeline (lib/api/v1.ts): Origin → session → 10 per hour per user → JSON body (64 KB, strict) →
 // Idempotency-Key → here. Then (F15, full spec):
+//   0. the language must be switched on (packages/db/src/languages.ts), else 422
+//      LANGUAGE_UNAVAILABLE: nothing saved or counted, no AI job;
 //   1. the AI planner and Inngest must be set up (else 500, nothing saved or counted);
 //   2. ONE transaction: the projects/day quota (5, user timezone), the project in state `planning`
 //      (planRequestCount 0: counted when the job really asks Gemini), its queued `plan` job, and the
@@ -59,6 +63,12 @@ export const POST = apiRoute({
   body: CreateProjectBodySchema,
   idempotent: true,
   handle: async ({ db, user, body, idempotencyLock }) => {
+    // Before the set-up check, so a switched-off language gets its clear 422 (createProject checks too).
+    try {
+      assertLanguageEnabled(body.language);
+    } catch (error) {
+      toApiProblem(error);
+    }
     assertPlanJobsReady();
     let created: Awaited<ReturnType<typeof createProject>>;
     try {
@@ -72,6 +82,7 @@ export const POST = apiRoute({
           resetsAt: error.resetsAt.toISOString(),
         });
       }
+      if (error instanceof ProjectActionError) toApiProblem(error);
       if (error instanceof IdempotencyLockLostError) {
         // This request was so slow that a repeat of the same click took over; nothing was saved
         // here. The repeat's answer is what counts: the client tries again and gets it replayed.

@@ -6,7 +6,7 @@ import { cleanIdeaText } from "./idea-text";
 import { getJob, JOB_SCHEMA_VERSION, JOBS_COLLECTION, PLAN_ERROR_RETRYABLE, PLAN_STAGES, retryEventId, type JobDocument, type PlanCheckpoint, type PlanJobErrorCode } from "./jobs";
 import type { PlanJobContext, ValidPlanToSave } from "./plan-jobs";
 import { decodeCursor, diffScenes, encodeCursor, InvalidCursorError, PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type SceneDiff } from "./plan-versions";
-import { ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument } from "./projects";
+import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument } from "./projects";
 import { assertStoryboardEditable, ObjectIdString } from "./storyboard-edits";
 import { USAGE_LIMITS } from "./usage";
 
@@ -181,6 +181,8 @@ export async function requestRevision(
           ? await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: new ObjectId(input.projectId), ownerId: new ObjectId(input.ownerId) }, { session })
           : null;
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this project.");
+      // Language switch: nothing is saved or counted and no AI job starts (422 LANGUAGE_UNAVAILABLE).
+      assertLanguageEnabled(project.language);
       assertStoryboardEditable(project, body.expectedStateVersion);
       if (!project.currentPlanVersionId!.equals(new ObjectId(body.basePlanVersionId))) {
         throw new ProjectActionError("STALE_VERSION", "This storyboard changed in another tab, refresh.", { expectedStateVersion: body.expectedStateVersion, currentStateVersion: project.stateVersion });
@@ -521,6 +523,8 @@ export async function retryReviseJob(
       if (!job) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
       const project = await projects.findOne({ _id: job.projectId, ownerId }, { session });
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
+      // Language switch: no retry, nothing counted (422 LANGUAGE_UNAVAILABLE).
+      assertLanguageEnabled(project.language);
       // Archived first (F21 review), like assertStoryboardEditable: an archived project is read-only.
       if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
       if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");

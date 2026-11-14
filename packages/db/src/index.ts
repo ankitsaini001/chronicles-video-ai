@@ -59,8 +59,10 @@ export {
   type UsageCounterDocument,
   type UsageKind,
 } from "./usage-counters";
+export { ENABLED_LANGUAGES, enabledLanguageOr, isLanguageEnabled, LANGUAGE_NAMES, languageUnavailableMessage } from "./languages";
 export {
   allowedActionsFor,
+  assertLanguageEnabled,
   CREATE_PROJECT_STATUS,
   createProject,
   CreateProjectBodySchema,

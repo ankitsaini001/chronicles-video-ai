@@ -15,7 +15,7 @@ import {
   type PlannerAnswer,
 } from "./jobs";
 import { PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type PlanStatsDoc, type StoredPlan, type ValidationIssueDoc } from "./plan-versions";
-import { ProjectActionError, PROJECTS_COLLECTION, titleAfterPlan, type ProjectDocument } from "./projects";
+import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, titleAfterPlan, type ProjectDocument } from "./projects";
 import type { RevisionDocument } from "./revisions";
 import { USAGE_LIMITS } from "./usage";
 
@@ -346,6 +346,8 @@ export async function retryPlanJob(
       if (!job) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
       const project = await projects.findOne({ _id: job.projectId, ownerId }, { session });
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
+      // Language switch: no retry, nothing counted (422 LANGUAGE_UNAVAILABLE).
+      assertLanguageEnabled(project.language);
       // Archived first (F21 review), like assertStoryboardEditable: an archived project is read-only.
       if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
       if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");

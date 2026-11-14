@@ -16,6 +16,7 @@ const STATUS: Record<ProjectActionError["code"], number> = {
   INVALID_INPUT: 400,
   APPROVAL_STALE: 409,
   PLAN_INVALID: 422,
+  LANGUAGE_UNAVAILABLE: 422,
 };
 
 /** A refused project/job action → its documented API error (API.md §4.2). Anything else is rethrown. */
