@@ -331,3 +331,21 @@ describe("R2ArtifactStore (mocked S3 client)", () => {
     }
   });
 });
+
+describe("npm run storage -- check (offline parts)", () => {
+  it("shows usage for anything but check, and names missing variables without contacting R2", async () => {
+    const { runStorageCommand } = await import("../tools/cli/storage");
+    const lines: string[] = [];
+    expect(await runStorageCommand([], (l) => lines.push(l), {})).toBe(2);
+    expect(await runStorageCommand(["check", "--force"], (l) => lines.push(l), {})).toBe(2);
+    lines.length = 0;
+    expect(await runStorageCommand(["check"], (l) => lines.push(l), { R2_ACCOUNT_ID: FAKE.R2_ACCOUNT_ID, R2_SECRET_ACCESS_KEY: "bad value with spaces" })).toBe(1);
+    const text = lines.join("\n");
+    expect(text).toContain("FAIL  config");
+    expect(text).toContain("R2_ACCESS_KEY_ID is missing");
+    expect(text).toContain("R2_BUCKET is missing");
+    expect(text).toContain("R2_SECRET_ACCESS_KEY doesn't look right");
+    expect(text).not.toContain(FAKE.R2_ACCOUNT_ID);
+    expect(text).not.toContain("bad value");
+  });
+});
