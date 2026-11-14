@@ -70,7 +70,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | 🧪 Testing |
+| F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | ✅ Done |
 | F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ⬜ Not started |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ⬜ Not started |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ⬜ Not started |
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** phase A4 (F22 Cloudflare R2 storage setup, together). Phases A1, A2 and A3 done (F01–F21); A3 merged to main 2026-11-14.
+**Next up:** F23 (generate the video) — plan being discussed with the founder; voices stay on the ElevenLabs free plan for now (paid plan decided after all features). Phases A1–A3 done; F22 done.
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.

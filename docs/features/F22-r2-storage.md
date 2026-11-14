@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done (code review fixed; live check 8/8 PASS on reel-app-dev; founder tested 2026-11-14) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F20 |
 | **Design** | — |
