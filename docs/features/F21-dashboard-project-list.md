@@ -41,7 +41,8 @@ The 'ByteReel — My videos' screen.
 - [x] 4. Archived projects open by direct link, read-only
 - [x] 5. Unit tests and e2e check on `bytereel_test` (no AI)
 - [x] 6. Docs: API.md, openapi.yaml, DATABASE.md
-- [ ] 7. Founder: create the index on the real database: `npm run db -- indexes --feature F21 --apply`
+- [x] 8. Code review fixes: a chosen title survives a later storyboard job (`titleSetByUser`); Try again refused on archived projects; stuck-job rule on the list; focus and Load more fixes; ⋯ spacing on phones; F12's `ownerId_updatedAt` removed from the index list
+- [ ] 7. Founder: create the index on the real database: `npm run db -- indexes --feature F21 --apply`. Then (optional) drop the old one by hand: Atlas → Data Explorer → `bytereel` → `projects` → Indexes → `ownerId_updatedAt` → Drop
 
 ## How we test it (done when all are ticked)
 - [x] Projects show with the right status (unit tests + e2e)
@@ -54,3 +55,4 @@ The 'ByteReel — My videos' screen.
 | Date | What happened |
 |---|---|
 | 2026-11-14 | Built steps 1–6. 674 unit tests pass, typecheck and `next build` pass, F21 e2e check: all checks pass on `bytereel_test` (dropped afterwards). Checked in the browser: phone width 375 px has no sideways scroll; rename, archive (keyboard too) work. Status 🧪 Testing: waiting for code review and the founder's test | |
+| 2026-11-14 | Code review fixes (HIGH: a title chosen by the creator is no longer replaced when a storyboard job finishes; MEDIUM: Try again refused on archived projects; LOW: index cleanup, stuck jobs on the list, focus, Load more, ⋯ spacing). All tests and the F15, F16–F20 and F21 e2e checks re-run |

@@ -1003,8 +1003,8 @@ Errors: `400 INVALID_INPUT`.
 **As built (F21).**
 - Only the signed-in user's projects (`ownerId` from the session, never from the request); `state = archived` is never listed. The cursor is base64url JSON `{ u: updatedAt, i: _id, t: tab | "all" }`: a cursor used with another tab, or tampered, → `400 INVALID_INPUT` (`cursor`). An unknown or repeated `tab`, a bad `limit` → `400`. Rate: the shared 300 reads/min.
 - Tab mapping as above (this table is the one source; code: `LIBRARY_TABS` in `packages/db/src/project-library.ts`). There is no Archived tab.
-- Each item is `ProjectSummary` plus two **additive** fields: `stateVersion` (sent back by the card's Rename, C4, and Archive, C5) and `storyboardApproved` (the storyboard on screen is the approved one, so the card says "Approved"). `thumbnailUrl` and `latestPost` stay `null` until F23 / F30. `activeJobType` is the type of the project's running job (one extra query for the page).
-- Index: `projects { ownerId: 1, updatedAt: -1, _id: -1 }` (F21; serves the sort including the tie-breaker).
+- Each item is `ProjectSummary` plus two **additive** fields: `stateVersion` (sent back by the card's Rename, C4, and Archive, C5) and `storyboardApproved` (the storyboard on screen is the approved one, so the card says "Approved"). `thumbnailUrl` and `latestPost` stay `null` until F23 / F30. `activeJobType` is the type of the project's running job (one extra query for the page). The stuck-job rule (§8.5) is applied to each card's active job, as in C3 (F21 review): a dead job becomes failed and the page is read once more, so a card never says "Writing storyboard…" forever. No extra query unless a job is stuck.
+- Index: `projects { ownerId: 1, updatedAt: -1, _id: -1 }` (F21; serves the sort including the tie-breaker). It replaces F12's `{ ownerId: 1, updatedAt: -1 }`, which was removed from the index list (DATABASE.md §8).
 - The My videos page reads the first page with the same function (`listProjects`) on the server; "Load more" calls C1.
 ```http
 GET /api/v1/projects?tab=ready&limit=20
@@ -1123,7 +1123,8 @@ Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `te
 Success `200` → `Project`. Errors: `400 INVALID_INPUT` (no field, text length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived; `text` sent outside `plan_failed`) · `409 JOB_ALREADY_RUNNING`.
 
 **As built (F15 edit idea, F21 rename).** A body with `title` only renames; with `text` it edits the idea (and `title` if sent); neither → `400`. `expectedStateVersion` goes in the body (the `If-Match` header isn't read on C4).
-- **Rename (F21):** the title is cleaned like the idea (control and invisible format characters removed, NFC), spaces and line breaks collapsed to one space, trimmed, then 1–120 characters. One conditional update (owner, `stateVersion`, no active job): `title`, `updatedAt` (the card moves to the top of My videos), `stateVersion + 1`. Plans, approvals and the idea are untouched; no limit is counted. **Also refused while a job runs** (`409 JOB_ALREADY_RUNNING`): a storyboard job sets the title to the plan's topic when it finishes and would overwrite the new name. Archived → `409 INVALID_STATE`. One conditional update (single document). The text is cleaned like C2 (control and invisible format characters removed, NFC, trimmed) and checked against the project's own `inputType` limits. `allowedActions` after a failure: `edit_idea`, plus `retry_job` while E2 would accept the job (retryable error, or the idea was edited since) and the project is under its 20 storyboard requests.
+- **Rename (F21):** the title is cleaned like the idea (control and invisible format characters removed, NFC), spaces and line breaks collapsed to one space, trimmed, then 1–120 characters. One conditional update (owner, `stateVersion`, no active job): `title`, `updatedAt` (the card moves to the top of My videos), `stateVersion + 1`. Plans, approvals and the idea are untouched; no limit is counted. **Also refused while a job runs** (`409 JOB_ALREADY_RUNNING`): a storyboard job sets the title to the plan's topic when it finishes and would overwrite the new name. Archived → `409 INVALID_STATE`.
+- **A chosen title is kept (F21 review):** rename, and Edit idea **with** a `title`, set `titleSetByUser` on the project; a storyboard job that succeeds later (e.g. Try again after a failure) then keeps that title instead of the plan's topic. Edit idea **without** a title sets the title from the text and clears the flag. Revise jobs never change the title. One conditional update (single document). The text is cleaned like C2 (control and invisible format characters removed, NFC, trimmed) and checked against the project's own `inputType` limits. `allowedActions` after a failure: `edit_idea`, plus `retry_job` while E2 would accept the job (retryable error, or the idea was edited since) and the project is under its 20 storyboard requests.
 ```json
 { "title": "UPI in 2 seconds", "expectedStateVersion": 4 }
 ```
@@ -1513,6 +1514,7 @@ Success `202` → `Job`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`)
 ```json
 {}
 ```
+**F21 review:** a job of an **archived** project is refused first with `409 INVALID_STATE` "This project is archived." (plan and revise jobs), like the storyboard edits.
 Response `202`: the job with `"state": "queued"`, `"attempt": 2`, `"error": null`, `"pollAfterMs": 2000`.
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This step can't be retried. Please edit your idea or storyboard instead.", "details": { "jobState": "failed", "retryable": false }, "requestId": "req_01JCXM3G1H2J" } }
