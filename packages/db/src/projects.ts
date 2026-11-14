@@ -65,6 +65,11 @@ export interface ProjectDocument {
   ownerId: ObjectId;
   schemaVersion: number;
   title: string;
+  /**
+   * True once the creator chose the title (C4 rename, or Edit idea with a title; F21 review). A
+   * finishing storyboard job then keeps it instead of using the plan's topic. Missing = false.
+   */
+  titleSetByUser?: boolean;
   language: Language;
   voiceGender: VoiceGender;
   input: { type: InputType; text: string; brainstormChoice: BrainstormChoice | null };
@@ -120,6 +125,15 @@ export function titleFromIdea(text: string): string {
   const space = flat.lastIndexOf(" ", end);
   if (space >= TITLE_MAX / 2) end = space;
   return `${flat.slice(0, end).replace(/[\s,;:–—-]+$/u, "")}…`;
+}
+
+/**
+ * The title after a storyboard job succeeds: the plan's topic (same 120-character rule), unless the
+ * creator chose the title themselves (rename, or Edit idea with a title), or the topic is empty.
+ */
+export function titleAfterPlan(project: Pick<ProjectDocument, "title" | "titleSetByUser">, planTopic: unknown): string {
+  if (project.titleSetByUser) return project.title;
+  return typeof planTopic === "string" && planTopic.trim() ? titleFromIdea(planTopic) : project.title;
 }
 
 /** The project title: the picked brainstorm idea's own title, otherwise taken from the idea text. */
@@ -435,7 +449,7 @@ export async function editProjectIdea(
   }
   const updated = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOneAndUpdate(
     { _id: project._id, ownerId: project.ownerId, state: "plan_failed", activeJobId: null, stateVersion: input.body.expectedStateVersion },
-    { $set: { "input.text": text, title: input.body.title ?? titleFromIdea(text), updatedAt: now }, $inc: { stateVersion: 1 } },
+    { $set: { "input.text": text, title: input.body.title ?? titleFromIdea(text), titleSetByUser: input.body.title !== undefined, updatedAt: now }, $inc: { stateVersion: 1 } },
     { returnDocument: "after" },
   );
   if (updated) return updated;

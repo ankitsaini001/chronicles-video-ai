@@ -10,6 +10,7 @@ import {
   libraryTabOf,
   listProjects,
   parseIfMatch,
+  titleAfterPlan,
   toProjectSummary,
   UpdateProjectBodySchema,
   type ProjectDocument,
@@ -121,6 +122,19 @@ describe("rename and archive (API.md C4, C5)", () => {
     expect(parse({ title: "New", expectedStateVersion: 4, language: "hi" }).success).toBe(false);
     expect(parse({ title: "New" }).success).toBe(false);
     expect(parse({ title: 42, expectedStateVersion: 4 }).success).toBe(false);
+  });
+
+  it("a storyboard job keeps a title the creator chose (fail → rename → Try again → success)", () => {
+    // After a failed storyboard the creator renames it: renameProject saves titleSetByUser: true.
+    const renamed = projectDoc({ state: "plan_failed", title: "My rain video", titleSetByUser: true });
+    expect(titleAfterPlan(renamed, "How the water cycle works")).toBe("My rain video");
+    // Edit idea WITH a title sets the flag too; Edit idea without one clears it: the topic is used.
+    expect(titleAfterPlan(projectDoc({ title: "Picked title", titleSetByUser: true }), "Topic")).toBe("Picked title");
+    expect(titleAfterPlan(projectDoc({ title: "the idea text", titleSetByUser: false }), "How the water cycle works")).toBe("How the water cycle works");
+    // Older projects have no flag: the topic is used (the F15 behaviour); an empty topic keeps the title.
+    expect(titleAfterPlan(projectDoc({ title: "the idea text" }), "Topic")).toBe("Topic");
+    expect(titleAfterPlan(projectDoc({ title: "the idea text" }), "  ")).toBe("the idea text");
+    expect(titleAfterPlan(projectDoc({ title: "x" }), `${"word ".repeat(40)}`).length).toBeLessThanOrEqual(120);
   });
 
   it("C5 If-Match: a quoted whole number only", () => {

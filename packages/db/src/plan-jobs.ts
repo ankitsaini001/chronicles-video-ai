@@ -15,7 +15,7 @@ import {
   type PlannerAnswer,
 } from "./jobs";
 import { PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type PlanStatsDoc, type StoredPlan, type ValidationIssueDoc } from "./plan-versions";
-import { ProjectActionError, PROJECTS_COLLECTION, titleFromIdea, type ProjectDocument } from "./projects";
+import { ProjectActionError, PROJECTS_COLLECTION, titleAfterPlan, type ProjectDocument } from "./projects";
 import type { RevisionDocument } from "./revisions";
 import { USAGE_LIMITS } from "./usage";
 
@@ -188,7 +188,8 @@ export interface ValidPlanToSave {
 /**
  * The job succeeded (DATABASE.md §7.2 #18), ONE transaction: insert the plan version (the next
  * version number, id = the checkpoint's planVersionId), project → `storyboard_ready` with the plan's
- * topic as title, `currentPlanVersionId`, `activeJobId` cleared, +1 stateVersion; job → `succeeded`.
+ * topic as title (unless the creator chose the title: `titleSetByUser`, F21 review), `currentPlanVersionId`,
+ * `activeJobId` cleared, +1 stateVersion; job → `succeeded`.
  * Returns false (nothing written) when the job is no longer running this attempt.
  */
 export async function completePlanJob(db: Db, input: { jobId: ObjectId; attempt: number; result: ValidPlanToSave; now?: Date }): Promise<boolean> {
@@ -224,7 +225,8 @@ export async function completePlanJob(db: Db, input: { jobId: ObjectId; attempt:
         },
         { session },
       );
-      const topic = typeof input.result.plan.topic === "string" && input.result.plan.topic.trim() ? titleFromIdea(input.result.plan.topic) : project.title;
+      // The plan's topic becomes the title, unless the creator chose one (rename / Edit idea title).
+      const topic = titleAfterPlan(project, input.result.plan.topic);
       await projects.updateOne(
         { _id: project._id, activeJobId: job._id },
         { $set: { state: "storyboard_ready", title: topic, currentPlanVersionId: versionId, activeJobId: null, lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },

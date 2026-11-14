@@ -247,9 +247,13 @@ async function main(): Promise<void> {
   check("safety: E2 without editing → 409 INVALID_STATE", r.status === 409 && r.json.error?.code === "INVALID_STATE");
   r = await editIdea(b.cookie, unsafeProject, { text: "How do volcanoes erupt?", expectedStateVersion: done.status.stateVersion });
   check("safety: after Edit idea, retry_job is offered", r.status === 200 && r.json.allowedActions?.join() === "rename,edit_idea,retry_job,archive");
+  // F21 review: a title the creator chose after the failure survives the successful Try again.
+  r = await editIdea(b.cookie, unsafeProject, { title: "My volcano video", expectedStateVersion: r.json.stateVersion });
+  check("F21: rename the failed storyboard → 200", r.status === 200 && r.json.title === "My volcano video");
   r = await retry(b.cookie, unsafeJob);
   done = await waitDone(b.cookie, unsafeProject);
   check("safety: Edit idea + Try again → storyboard_ready", r.status === 202 && done.status.state === "storyboard_ready");
+  check("F21: …and the creator's title is kept (not replaced by the plan's topic)", (await db.collection("projects").findOne({ _id: new ObjectId(unsafeProject) }))?.title === "My volcano video");
 
   // --- 10. Stuck-job rule.
   const stuckId = new ObjectId();

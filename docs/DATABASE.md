@@ -421,6 +421,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `_id`, `ownerId` | ObjectId | Project id; owner (the user) | Auto |
 | `schemaVersion` | int | Document shape version (§1.7) | Auto |
 | `title` | string 1–120 | Until the storyboard arrives: the picked brainstorm idea's title, otherwise the idea text (over 120 characters cut at a word break, ending with "…"); then the plan's topic; the creator can rename | Yes |
+| `titleSetByUser` | bool? | **F21 review:** `true` once the creator chose the title (C4 rename, or Edit idea with a `title`); Edit idea without a title sets it back to `false`. A finishing storyboard job keeps such a title instead of using the plan's topic. Missing (older projects) = `false` | No |
 | `language` | `en` \| `hi` \| `hinglish` | Chosen on the Idea step. **Can't be changed later** (PRD decision #25: make a new project) | Yes |
 | `voiceGender` | `female` \| `male` | Narrator voice; switchable on the storyboard | Yes |
 | `input` | object | The idea: `type` (`topic` \| `notes` \| `brainstorm`), `text`, `brainstormChoice` (`{ subject, title, hook }` or null) | Yes |

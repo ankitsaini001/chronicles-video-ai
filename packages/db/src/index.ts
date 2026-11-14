@@ -83,6 +83,7 @@ export {
   STORYBOARD_EDIT_STATES,
   TITLE_MAX,
   titleFromIdea,
+  titleAfterPlan,
   projectTitle,
   toProjectResource,
   VOICE_GENDERS,

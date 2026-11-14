@@ -178,7 +178,7 @@ async function guardedUpdate(
  */
 export function renameProject(db: Db, input: { ownerId: string; projectId: string; title: string; expectedStateVersion: number; now?: Date }): Promise<ProjectDocument> {
   const now = input.now ?? new Date();
-  return guardedUpdate(db, input, () => undefined, () => ({ $set: { title: input.title, updatedAt: now }, $inc: { stateVersion: 1 } }));
+  return guardedUpdate(db, input, () => undefined, () => ({ $set: { title: input.title, titleSetByUser: true, updatedAt: now }, $inc: { stateVersion: 1 } }));
 }
 
 /**
