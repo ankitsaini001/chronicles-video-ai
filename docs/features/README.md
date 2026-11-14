@@ -28,7 +28,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F00 | [Prototype: first voiced test video](F00-prototype-first-voiced-video.md) | — | ⏸ Parked (founder will do it later; must be done before F23) |
+| F00 | [Prototype: first voiced test video](F00-prototype-first-voiced-video.md) | — | ✅ Done |
 
 ### A1 · Foundation (project setup)
 

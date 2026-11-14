@@ -1,8 +1,8 @@
 # F00 — Prototype: first voiced test video
 
-| | |
+| 2026-11-14 | First voiced video rendered locally: water cycle, Matilda (US female, free plan), 898 ElevenLabs characters (1,173/10,000 this month), 68 s 1080×1920, all 10 checks passed; render 78 s (bundle 28 s), 2 min 10 s end to end. Founder: quality and narration good; animation too plain, wants a more attractive, illustrated, moving style (homepage poster as direction). Next: style sample (free, reuses this narration). |
 |---|---|
-| **Status** | ⏸ Parked (founder will do it later; must be done before F23) |
+| **Status** | ✅ Done (2026-11-14: founder watched the MP4; voice and video quality good; feedback: animations need to be more attractive → video style upgrade before F23) |
 | **Phase** | A0 · Prototype gate (finish the pipeline test) |
 | **Depends on** | — |
 | **Design** | — |
@@ -37,4 +37,4 @@ _We break this into small steps together when we start this feature._
 ## Progress log
 | Date | What happened |
 |---|---|
-| | |
+| 2026-11-14 | First voiced video rendered locally: water cycle, Matilda (US female, free plan), 898 ElevenLabs characters (1,173/10,000 this month), 68 s 1080×1920, all 10 checks passed; render 78 s (bundle 28 s), 2 min 10 s end to end. Founder: quality and narration good; animation too plain, wants a more attractive, illustrated, moving style (homepage poster as direction). Next: style sample (free, reuses this narration). |
