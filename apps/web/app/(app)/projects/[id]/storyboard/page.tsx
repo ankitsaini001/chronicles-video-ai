@@ -7,6 +7,7 @@ import { StoryboardScreen } from "@/components/storyboard/StoryboardScreen";
 import { requireUser } from "@/lib/auth/session";
 import { toProjectResourceOf } from "@/lib/plan/api";
 import { loadProjectWithJobs } from "@/lib/plan/jobs";
+import { availableSamples } from "@/lib/voices";
 
 // ② Review storyboard (F16; ARCHITECTURE §11, PRD §6.2, Stitch "Step 2 Storyboard").
 // Reads the same data as C3 (project) and D2 `current` (the full storyboard), straight from the
@@ -48,6 +49,7 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
         revisions={history.items.reverse()}
         failedChange={failedChange}
         requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
+        samplePresets={[...availableSamples()]}
       />
     </div>
   );

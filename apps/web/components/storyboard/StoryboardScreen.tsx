@@ -1,6 +1,6 @@
 "use client";
 
-import { VOICE_TEXT_LANG, voicePresetFor, type VoiceLanguage } from "@bytereel/db/voices";
+import { VOICE_TEXT_LANG, type VoiceLanguage, type VoicePresetId } from "@bytereel/db/voices";
 import type { PlanVersionResource, ProjectResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -11,6 +11,7 @@ import { NarrationEditor } from "./NarrationEditor";
 import { Note } from "./Note";
 import { SceneCard } from "./SceneCard";
 import { VersionMenu } from "./VersionMenu";
+import { VoiceMenu } from "./VoiceMenu";
 
 // ② Review storyboard (F16–F20; Stitch "Step 2 Storyboard"): the title strip (title, language,
 // voice, about N seconds, scene count), "Version N ▾" and Undo (F17), the scene cards with inline
@@ -30,6 +31,8 @@ export type StoryboardScreenProps = {
   failedChange: { id: string; message: string } | null;
   /** The project used all its 20 AI requests. */
   requestsUsedUp: boolean;
+  /** Voices with a recorded ▶ sample (F13). */
+  samplePresets: VoicePresetId[];
 };
 
 const LANGUAGE_NAMES: Record<VoiceLanguage, { text: string; lang?: string; english?: string }> = {
@@ -54,7 +57,7 @@ export function StoryboardScreen(props: StoryboardScreenProps) {
 
 type Problem = { message: string; stale: boolean };
 
-function Body({ project, version, revisions, failedChange, requestsUsedUp, announce }: StoryboardScreenProps & { announce: (text: string) => void }) {
+function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, announce }: StoryboardScreenProps & { announce: (text: string) => void }) {
   const router = useRouter();
   const language = project.language as VoiceLanguage;
   const lang = VOICE_TEXT_LANG[language];
@@ -63,7 +66,6 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, annou
   const notes = sceneNotes(plan, version.validation);
   const seconds = Math.round(version.stats.estimatedSeconds);
   const languageName = LANGUAGE_NAMES[language];
-  const voice = voicePresetFor(language, project.voiceGender);
   const changed = new Set(version.changedSceneIds);
   const canEdit = project.allowedActions.includes("edit_storyboard");
 
@@ -117,6 +119,20 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, annou
     router.refresh();
   }
 
+  /** D4: switch the voice (a new version). */
+  async function switchVoice(gender: "female" | "male") {
+    setBusy(true);
+    setProblem(null);
+    const answer = await apiSend<{ versionNumber: number }>("POST", `/api/v1/projects/${project.id}/voice`, {
+      basePlanVersionId: version.id,
+      voiceGender: gender,
+      expectedStateVersion: project.stateVersion,
+    });
+    if (!answer.ok) return fail(answer);
+    announce(`Voice changed. Saved as version ${answer.json.versionNumber}.`);
+    router.refresh();
+  }
+
   const locked = busy || !canEdit;
 
   return (
@@ -131,8 +147,8 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, annou
               <span lang={languageName.lang}>{languageName.text}</span>
               {languageName.english && <span className="text-muted">{languageName.english}</span>}
             </li>
-            <li className={chip}>
-              <span lang={language === "hi" ? "hi" : undefined}>{voice.label}</span>
+            <li>
+              <VoiceMenu language={language} current={project.voiceGender} samplePresets={samplePresets} disabled={locked || editing !== null} onChoose={(g) => void switchVoice(g)} />
             </li>
             <li className={`${chip} font-mono`}>
               <span aria-hidden="true">≈ {seconds}s</span>
