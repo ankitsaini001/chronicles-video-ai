@@ -51,7 +51,7 @@ export function visualParts(scene: SceneLike): { pattern: string; detail: string
   let parts = "";
   switch (scene.type) {
     case "title-hook":
-      parts = labelsOf(scene, "headline", "subtitle").join(" · ");
+      parts = [...labelsOf(scene, "headline"), ...labelsOf(scene, "subtitle")].join(" · ");
       break;
     case "labeled-diagram": {
       const whole = labelsOf(scene, "diagram")[0];
@@ -78,7 +78,7 @@ export function visualParts(scene: SceneLike): { pattern: string; detail: string
       parts = labelsOf(scene, "step").join(" → ");
       break;
     case "takeaway":
-      parts = labelsOf(scene, "headline", "bullet").join(" · ");
+      parts = [...labelsOf(scene, "headline"), ...labelsOf(scene, "bullet")].join(" · ");
       break;
   }
   if (!parts) parts = scene.objects.filter((o) => o.kind !== "arrow" && o.kind !== "particles").map((o) => o.label.trim()).filter(Boolean).join(", ");
