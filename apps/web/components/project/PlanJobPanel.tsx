@@ -234,10 +234,10 @@ function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, req
   return (
     <div className="flex flex-col gap-5">
       <p role="alert" className="rounded-2xl border border-danger/40 bg-danger-bg px-4 py-3 text-base text-text">
-        {failureText(lastError?.code, lastError?.message)}
+        {/* Language switched off: only the note (the old "busy / edit your idea" text would mislead). */}
+        {unavailableNote ?? failureText(lastError?.code, lastError?.message)}
       </p>
-      {requestsUsedUp && <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>}
-      {unavailableNote && <p className="text-sm text-muted">{unavailableNote}</p>}
+      {requestsUsedUp && !unavailableNote && <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>}
 
       {editing ? (
         <div className="flex flex-col gap-3">
