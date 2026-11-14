@@ -277,6 +277,18 @@ async function main(): Promise<void> {
   check("…and another user still gets 404", (await html(b.cookie, `/projects/${approved}/storyboard`)).status === 404);
   const failedSv = (await projects().findOne({ _id: oid(failed) }))!.stateVersion as number;
   check("archive a failed storyboard → 200", (await send(a.cookie, "DELETE", `/api/v1/projects/${failed}`, undefined, { "if-match": `"${failedSv}"` })).status === 200);
+  // F21 review: Try again (E2) is refused on an archived project, for a failed storyboard and a failed change.
+  const failedPlanJob = new ObjectId();
+  const failedReviseJob = new ObjectId();
+  await db.collection("jobs").insertMany([
+    { _id: failedPlanJob, ownerId: a.id, projectId: oid(failed), schemaVersion: 1, type: "plan", state: "failed", attempt: 1, error: { code: "PROVIDER_BUSY", message: "Busy", retryable: true }, createdAt: new Date(T0), updatedAt: new Date(T0) },
+    { _id: failedReviseJob, ownerId: a.id, projectId: oid(approved), schemaVersion: 1, type: "revise", state: "failed", attempt: 1, inputRef: { planVersionId: approvedVersion }, error: { code: "PROVIDER_BUSY", message: "Busy", retryable: true }, createdAt: new Date(T0), updatedAt: new Date(T0) },
+  ]);
+  for (const [label, jobId] of [["storyboard", failedPlanJob], ["change", failedReviseJob]] as const) {
+    r = await send(a.cookie, "POST", `/api/v1/jobs/${jobId.toHexString()}/retry`, {}, { "idempotency-key": randomBytes(16).toString("hex") });
+    check(`E2 Try again on an archived project's failed ${label} → 409 INVALID_STATE "archived"`, r.status === 409 && r.json.error?.code === "INVALID_STATE" && r.json.error?.message === "This project is archived.", `${r.status} ${r.json.error?.message ?? ""}`);
+  }
+  check("…and nothing changed (still archived, no job running)", (await projects().countDocuments({ _id: { $in: [oid(failed), oid(approved)] }, state: "archived", activeJobId: null })) === 2);
   page = await html(a.cookie, `/projects/${failed}`);
   check("archived failed project page: Archived note, no Try again / Edit idea", page.status === 200 && page.text.includes("This video is archived.") && !page.text.includes("Try again") && !page.text.includes("Edit idea"));
   page = await html(a.cookie, "/dashboard");

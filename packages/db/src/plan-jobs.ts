@@ -346,6 +346,8 @@ export async function retryPlanJob(
       if (!job) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
       const project = await projects.findOne({ _id: job.projectId, ownerId }, { session });
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
+      // Archived first (F21 review), like assertStoryboardEditable: an archived project is read-only.
+      if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
       if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");
       const inputHash = planInputHash(project);
       if (project.state !== "plan_failed" || !canRetryPlanJob(job, inputHash)) {
