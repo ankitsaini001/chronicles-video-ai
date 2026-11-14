@@ -1,19 +1,18 @@
-import { allowedActionsFor, currentStepOf, getCurrentPlanVersion, getDb, IDEA_LIMITS, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
+import { allowedActionsFor, currentStepOf, getDb, IDEA_LIMITS, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ProjectStepper } from "@/components/app/ProjectStepper";
 import { PlanJobPanel } from "@/components/project/PlanJobPanel";
-import { StoryboardPreview } from "@/components/project/StoryboardPreview";
 import { Button } from "@/components/ui";
 import { requireUser } from "@/lib/auth/session";
 import { loadProjectWithJobs } from "@/lib/plan/jobs";
 
-// TEMPORARY project page (F12, F15): where "Create storyboard" lands.
+// The project page (F12, F15, F16): where "Create storyboard" lands, and the project's address.
 // - `planning`: "Writing storyboard…" with the job's progress (polled every 2 s, PlanJobPanel).
 // - `plan_failed`: the plain error, Try again and Edit idea.
-// - `storyboard_ready`: the saved storyboard as a simple read-only list (the real storyboard
-//   screen, /projects/[id]/storyboard, is F16; this address then sends you to the current step).
+// - a storyboard exists (`currentStep` storyboard): sends you to /projects/[id]/storyboard (F16).
+//   The later steps (video, publish) get their own pages in F23–F30.
 // Leaving and coming back keeps the progress: the job runs on the server (Inngest) and this page
 // reads it again. Only the owner sees it: another user's project, a missing one and a malformed id
 // all get the same 404 page, so nobody can tell whether a project exists (ARCHITECTURE §10.3).
@@ -41,11 +40,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const loaded = await loadProjectWithJobs(db, user.id, id);
   if (!loaded) notFound();
   const { project, activeJob, latestPlanJob } = loaded;
-  const version = project.state === "storyboard_ready" ? await getCurrentPlanVersion(db, project) : null;
+  if (currentStepOf(project.state) === "storyboard") redirect(`/projects/${project._id.toHexString()}/storyboard`);
   const jobState = project.state === "planning" || project.state === "plan_failed" ? project.state : null;
 
   const eyebrow =
-    project.state === "planning" ? "Writing storyboard" : project.state === "plan_failed" ? "Storyboard not ready" : version ? "Storyboard ready" : "Idea saved";
+    project.state === "planning" ? "Writing storyboard" : project.state === "plan_failed" ? "Storyboard not ready" : "Idea saved";
 
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-col">
@@ -81,37 +80,30 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        {version ? (
-          <div className="mb-8">
-            <StoryboardPreview version={version} language={project.language} />
+        <dl className="mb-8 flex flex-col gap-5">
+          <div>
+            <dt className="mb-1.5 font-mono text-xs uppercase tracking-wider text-muted">Your idea</dt>
+            <dd className="max-h-80 overflow-y-auto rounded-2xl border border-line bg-surface-2 p-4 text-base leading-relaxed break-words whitespace-pre-wrap text-text">
+              {project.input.text}
+            </dd>
           </div>
-        ) : (
-          <dl className="mb-8 flex flex-col gap-5">
+          <div className="flex flex-wrap gap-x-10 gap-y-5">
             <div>
-              <dt className="mb-1.5 font-mono text-xs uppercase tracking-wider text-muted">Your idea</dt>
-              <dd className="max-h-80 overflow-y-auto rounded-2xl border border-line bg-surface-2 p-4 text-base leading-relaxed break-words whitespace-pre-wrap text-text">
-                {project.input.text}
-              </dd>
+              <dt className="mb-1.5 font-mono text-xs uppercase tracking-wider text-muted">Language</dt>
+              <dd className="text-text">{LANGUAGE_LABELS[project.language]}</dd>
             </div>
-            <div className="flex flex-wrap gap-x-10 gap-y-5">
-              <div>
-                <dt className="mb-1.5 font-mono text-xs uppercase tracking-wider text-muted">Language</dt>
-                <dd className="text-text">{LANGUAGE_LABELS[project.language]}</dd>
-              </div>
-              <div>
-                <dt className="mb-1.5 font-mono text-xs uppercase tracking-wider text-muted">Voice</dt>
-                <dd className="text-text">{VOICE_LABELS[project.voiceGender]}</dd>
-              </div>
+            <div>
+              <dt className="mb-1.5 font-mono text-xs uppercase tracking-wider text-muted">Voice</dt>
+              <dd className="text-text">{VOICE_LABELS[project.voiceGender]}</dd>
             </div>
-          </dl>
-        )}
+          </div>
+        </dl>
 
         {project.state === "draft" && (
           <p className="mb-8 rounded-2xl border border-line bg-progress-bg px-4 py-3 text-sm text-text">
             This idea was saved before storyboards could be made. To get a storyboard, create a new project with it.
           </p>
         )}
-        {version && <p className="mb-8 text-sm text-muted">Editing and approving the storyboard come next.</p>}
         {!jobState && (
           <Button href={project.state === "draft" ? "/projects/new" : "/dashboard"} variant="secondary">
             {project.state === "draft" ? "Start a new project" : "Back to My videos"}

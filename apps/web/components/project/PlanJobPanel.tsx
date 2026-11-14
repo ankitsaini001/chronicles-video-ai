@@ -101,7 +101,9 @@ function Progress({ projectId, progress, queuedAt }: PlanJobPanelProps) {
       const status = (await response.json().catch(() => ({}))) as Status;
       if (status.state !== "planning" || status.pollAfterMs == null) {
         stopped = true;
-        return router.refresh(); // done or failed: the server page shows the result
+        // Ready: straight to the storyboard screen (F16). Failed: the server page shows the error.
+        if (status.state === "storyboard_ready") return router.replace(`/projects/${projectId}/storyboard`);
+        return router.refresh();
       }
       const p = status.activeJob?.progress;
       if (p?.message) setCurrent({ percent: typeof p.percent === "number" ? p.percent : 0, message: p.message });
