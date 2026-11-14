@@ -1,4 +1,4 @@
-import { currentStepOf, getCurrentPlanVersion, getDb, loadPlanVersionResource, readDbConfig } from "@bytereel/db";
+import { currentStepOf, getCurrentPlanVersion, getDb, listRevisions, loadPlanVersionResource, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -30,7 +30,9 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
   if (currentStepOf(project.state) !== "storyboard") redirect(`/projects/${projectId}`);
   const current = await getCurrentPlanVersion(db, project);
   if (!current) redirect(`/projects/${projectId}`);
-  const version = await loadPlanVersionResource(db, project, current);
+  const [version, history] = await Promise.all([loadPlanVersionResource(db, project, current), listRevisions(db, project, { limit: 20, cursor: null, stage: "storyboard" })]);
+  const latestChange = loaded.latestReviseJob;
+  const failedChange = latestChange?.state === "failed" && latestChange.error ? { id: latestChange._id.toHexString(), message: latestChange.error.message } : null;
 
   return (
     <div className="mx-auto flex w-full flex-col pb-28">
@@ -40,7 +42,13 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
         </Link>
         <ProjectStepper current="storyboard" hrefs={{ storyboard: `/projects/${projectId}/storyboard` }} />
       </div>
-      <StoryboardScreen project={toProjectResourceOf(loaded)} version={version} />
+      <StoryboardScreen
+        project={toProjectResourceOf(loaded)}
+        version={version}
+        revisions={history.items.reverse()}
+        failedChange={failedChange}
+        requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
+      />
     </div>
   );
 }

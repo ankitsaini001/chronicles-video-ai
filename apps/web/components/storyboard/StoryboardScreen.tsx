@@ -1,10 +1,11 @@
 "use client";
 
 import { VOICE_TEXT_LANG, voicePresetFor, type VoiceLanguage } from "@bytereel/db/voices";
-import type { PlanVersionResource, ProjectResource } from "@bytereel/db";
+import type { PlanVersionResource, ProjectResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { sceneNotes, sceneNumber, type SceneLike } from "@/lib/storyboard/view";
+import { ChangesPanel } from "./ChangesPanel";
 import { apiSend, CLIENT_MESSAGES } from "./client";
 import { NarrationEditor } from "./NarrationEditor";
 import { Note } from "./Note";
@@ -23,6 +24,12 @@ import { VersionMenu } from "./VersionMenu";
 export type StoryboardScreenProps = {
   project: ProjectResource;
   version: PlanVersionResource;
+  /** Change requests on the storyboard, oldest first (D6). */
+  revisions: RevisionResource[];
+  /** The newest change request's job, when it failed (for its message and Try again). */
+  failedChange: { id: string; message: string } | null;
+  /** The project used all its 20 AI requests. */
+  requestsUsedUp: boolean;
 };
 
 const LANGUAGE_NAMES: Record<VoiceLanguage, { text: string; lang?: string; english?: string }> = {
@@ -47,7 +54,7 @@ export function StoryboardScreen(props: StoryboardScreenProps) {
 
 type Problem = { message: string; stale: boolean };
 
-function Body({ project, version, announce }: StoryboardScreenProps & { announce: (text: string) => void }) {
+function Body({ project, version, revisions, failedChange, requestsUsedUp, announce }: StoryboardScreenProps & { announce: (text: string) => void }) {
   const router = useRouter();
   const language = project.language as VoiceLanguage;
   const lang = VOICE_TEXT_LANG[language];
@@ -158,7 +165,8 @@ function Body({ project, version, announce }: StoryboardScreenProps & { announce
         </div>
       )}
 
-      <div className="flex flex-col gap-4 pt-6">
+      <div className="grid grid-cols-1 gap-8 pt-6 lg:grid-cols-12">
+      <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
         {(notes.general.problems.length > 0 || notes.general.warnings.length > 0) && (
           <div className="flex flex-col gap-2">
             {notes.general.problems.map((text) => (
@@ -211,6 +219,25 @@ function Body({ project, version, announce }: StoryboardScreenProps & { announce
             </li>
           ))}
         </ol>
+      </div>
+      <aside className="min-w-0 lg:col-span-4">
+        <div className="lg:sticky lg:top-6">
+          <ChangesPanel
+            projectId={project.id}
+            baseVersionId={version.id}
+            stateVersion={project.stateVersion}
+            scenes={plan.scenes}
+            revisions={revisions}
+            activeJob={project.activeJob}
+            failedJob={failedChange}
+            canRequest={project.allowedActions.includes("request_revision")}
+            canRetry={project.allowedActions.includes("retry_job")}
+            requestsUsedUp={requestsUsedUp}
+            disabled={busy || editing !== null}
+            announce={announce}
+          />
+        </div>
+      </aside>
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface px-4 py-3.5 sm:px-8">
