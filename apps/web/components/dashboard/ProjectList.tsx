@@ -62,14 +62,23 @@ export function ProjectList({ tab, initialItems, initialCursor, now, timeZone, e
   const [dialog, setDialog] = useState<Dialog>(null);
   const menuButtons = useRef(new Map<string, HTMLButtonElement>());
   const listRef = useRef<HTMLUListElement>(null);
+  const emptyRef = useRef<HTMLParagraphElement>(null);
+  // The server data this list started from; a "Load more" answer for older data is ignored.
+  const latestNow = useRef(now);
+  useEffect(() => {
+    latestNow.current = now;
+  }, [now]);
   const current = dialog ? (items.find((i) => i.id === dialog.id) ?? null) : null;
 
   async function loadMore() {
     if (!cursor || loading) return;
+    const startedFor = now;
     setLoading(true);
     setLoadError("");
     const answer = await apiSend<{ items: ProjectSummaryResource[]; nextCursor: string | null }>("GET", `/api/v1/projects?tab=${encodeURIComponent(tab)}&cursor=${encodeURIComponent(cursor)}`);
     setLoading(false);
+    // The list was reset meanwhile (a refresh after a change): this page belongs to the old list.
+    if (latestNow.current !== startedFor) return;
     if (!answer.ok) {
       setLoadError(answer.message);
       return;
@@ -83,7 +92,8 @@ export function ProjectList({ tab, initialItems, initialCursor, now, timeZone, e
     setDialog(null);
     const button = focusId ? menuButtons.current.get(focusId) : null;
     // After the dialog closes (next frame), put focus back where the creator was.
-    requestAnimationFrame(() => (button?.isConnected ? button.focus() : listRef.current?.focus()));
+    // The card is gone (archived): the list, or the empty-tab line when it was the last card.
+    requestAnimationFrame(() => (button?.isConnected ? button.focus() : (listRef.current ?? emptyRef.current)?.focus()));
   }
 
   function renamed(updated: { id: string; title: string; stateVersion: number; updatedAt: string }) {
@@ -111,7 +121,9 @@ export function ProjectList({ tab, initialItems, initialCursor, now, timeZone, e
         {announcement}
       </p>
       {items.length === 0 ? (
-        <p className="mx-auto max-w-md py-16 text-center text-base leading-relaxed text-muted">{emptyText}</p>
+        <p ref={emptyRef} tabIndex={-1} className="mx-auto max-w-md py-16 text-center text-base leading-relaxed text-muted outline-none">
+          {emptyText}
+        </p>
       ) : (
         <ul ref={listRef} tabIndex={-1} aria-label="Your videos" className="grid grid-cols-1 gap-4 outline-none sm:grid-cols-3 sm:gap-6 lg:grid-cols-4">
           {items.map((item) => (
@@ -178,7 +190,7 @@ function ProjectCard({
     <li className="relative flex gap-4 rounded-2xl border border-line bg-surface p-3 shadow-card transition-colors hover:border-amber/40 sm:flex-col sm:p-4">
       <Thumbnail item={item} />
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-        <h2 lang={titleLang} className="pr-9 font-display text-base leading-snug font-bold break-words text-text sm:pr-0">
+        <h2 lang={titleLang} className="pr-11 font-display text-base leading-snug font-bold break-words text-text sm:pr-0">
           {/* The link covers the whole card (after:inset-0); the ⋯ button sits above it. */}
           <Link
             href={projectHref(item)}
