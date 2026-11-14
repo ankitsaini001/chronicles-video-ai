@@ -48,6 +48,12 @@ export type ProjectStatusResource = {
   pollAfterMs: number | null;
 };
 
+/** C3 `Project` (API.md §11.3) with its active job embedded. */
+export function toProjectResourceOf({ project, activeJob, latestPlanJob }: ProjectWithJobs): ProjectResource {
+  const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
+  return toProjectResource(project, { activeJob: active, latestPlanJob });
+}
+
 /** C6 `ProjectStatus` (API.md §11.3): polling stops when `pollAfterMs` is null (no active job). */
 export function toProjectStatus({ project, activeJob, latestPlanJob }: ProjectWithJobs): ProjectStatusResource {
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;

@@ -59,7 +59,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ✅ Done |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ✅ Done |
 | F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ✅ Done |
-| F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | ⬜ Not started |
+| F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | 🔄 In progress |
 | F17 | [Edit narration + versions + undo](F17-narration-edit-undo.md) | F16 | ⬜ Not started |
 | F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | ⬜ Not started |
 | F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | ⬜ Not started |

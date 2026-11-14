@@ -1,6 +1,23 @@
 import { API_RATE_LIMITS, EditIdeaBodySchema, editProjectIdea, getLatestPlanJob, toProjectResource } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
-import { toApiProblem } from "@/lib/plan/api";
+import { ApiProblem } from "@/lib/api/v1";
+import { toApiProblem, toProjectResourceOf } from "@/lib/plan/api";
+import { loadProjectWithJobs } from "@/lib/plan/jobs";
+
+// C3 GET /api/v1/projects/{projectId} (docs/API.md C3, F16): the project with its active job
+// (stuck-job rule applied first, like C6) and what the creator may do now (`allowedActions`).
+// Header ETag: "<stateVersion>". Rate: the shared 300 reads per minute. Owner only (404 otherwise).
+export async function GET(request: Request, { params }: { params: Promise<{ projectId: string }> }): Promise<Response> {
+  const { projectId } = await params;
+  return apiRoute({
+    rateLimit: API_RATE_LIMITS.readsPerUser,
+    handle: async ({ db, user }) => {
+      const loaded = await loadProjectWithJobs(db, user.id, projectId);
+      if (!loaded) throw new ApiProblem(404, "NOT_FOUND", "We couldn't find this project.");
+      return Response.json(toProjectResourceOf(loaded), { headers: { ETag: `"${loaded.project.stateVersion}"` } });
+    },
+  })(request);
+}
 
 // C4 PATCH /api/v1/projects/{projectId} (docs/API.md C4), F15 part: "Edit idea" after a failed
 // storyboard. Body (strict): `text` (same length rules as C2 for the project's input type), optional
