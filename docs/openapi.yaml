@@ -2903,6 +2903,7 @@ components:
         - INVALID_INPUT
         - PAYLOAD_TOO_LARGE
         - PLAN_INVALID
+        - LANGUAGE_UNAVAILABLE
         - STALE_VERSION
         - INVALID_STATE
         - ALREADY_EXISTS

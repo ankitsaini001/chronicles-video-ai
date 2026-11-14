@@ -389,6 +389,7 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 | `NOT_FOUND` **§12.4** | 404 | Doesn't exist **or belongs to another user** | any `{id}` path |
 | `INVALID_INPUT` **§12.4** | 400 | Validation failed (body, query, headers, missing `Idempotency-Key`, wrong content type) | all |
 | `PAYLOAD_TOO_LARGE` | 413 | Body > 64 KB | all bodies |
+| `LANGUAGE_UNAVAILABLE` | 422 | The language is switched off (`packages/db/src/languages.ts`; Hindi and Hinglish since 2026-11-14). Message: "Only English is available right now." (lists the enabled languages); `details.language`. Checked **before** any quota count, job or AI/voice call. Existing projects in that language stay viewable and keep the free actions (rename, archive, narration edit, undo, approve); their AI actions leave `allowedActions` | C2, C7, D5, E2 (plan and revise jobs); the F23 generate job |
 | `PLAN_INVALID` | 422 | The plan version fails plan validation (schema + semantic rules); `details.issues[]` are `ValidationIssue`s. Also the job error when the AI can't produce a valid plan after the repair | D8 approve; plan/revise jobs |
 | `STALE_VERSION` **§12.4** | 409 | `expectedStateVersion` / `If-Match` doesn't match (another tab changed the project) | project mutations |
 | `INVALID_STATE` | 409 | The action isn't allowed in the current state (e.g. editing captions while generating, archiving while publishing) | most mutations |
@@ -1048,7 +1049,7 @@ Purpose: ① **Create storyboard**. Auth: creator. Rate: 10/hour + quota 5 proje
 
 Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title` = first 120 chars of the idea until the plan arrives, then `plan.topic`), `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`), `activeJobId`, `usageCounters.projects +1`; then Inngest `plan.requested`. `planRequestCount` starts at 0 and becomes 1 when the job sends its first Gemini request (§10.1, F15). Notes are stored as the plan's single `sources[]` entry (`id: "creator-notes"`).
 Success `202` → `{ project: Project, job: Job }`.
-Errors: `400 INVALID_INPUT` · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503 SPEND_CEILING`.
+Errors: `400 INVALID_INPUT` · `422 LANGUAGE_UNAVAILABLE` (language switched off; checked first: nothing saved or counted) · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503 SPEND_CEILING`.
 
 **As built (F12, F15).**
 - Before anything is saved: the AI planner (`GEMINI_API_KEY`, `GEMINI_MODEL`) and Inngest must be set up, else `500 INTERNAL` (reason in the server log), nothing saved or counted.
@@ -1114,6 +1115,7 @@ Errors: `404 NOT_FOUND`.
 ```
 
 **As built (F16).** Owner only (another user's project, a missing one or a malformed id → the same 404). The stuck-job rule (§8.5) is applied first, like C6. `activeJob` is filled while a job runs. `allowedActions` on a storyboard: `edit_storyboard` (D3, D4, D7), `request_revision` (D5, while under the 20 AI requests), `approve_storyboard` (D8, in `storyboard_ready`/`generate_failed` until the current version is the approved one), `retry_job` (E2, when the newest change request failed with a retryable error and the storyboard is still the version it was made on). Nothing while a job runs. Rate: the shared 300 reads/min.
+**Language switch (2026-11-14):** for a project whose language is switched off (`packages/db/src/languages.ts`), `request_revision`, `retry_job` and `edit_idea` are never listed; the free actions stay.
 **F21:** `rename` (first) and `archive` (last) whenever no job runs (`archive` not while `publishing`). An archived project answers with `state: "archived"`, `currentStep` = the step it was on (`stateBeforeArchive`) and `allowedActions: []` (read-only).
 
 #### C4. `PATCH /api/v1/projects/{projectId}` — Rename, or edit the idea after the storyboard failed
@@ -1198,7 +1200,7 @@ Success `200` → `ProjectStatus`. Errors: `404 NOT_FOUND`.
 Purpose: ① *✨ Brainstorm with AI*: a broad subject → **exactly 5** focused video ideas with hooks (founder, 2026-11-13; synchronous Gemini call, ARCHITECTURE §14). Doesn't create a project and doesn't count toward the projects quota. Auth: creator. **Limits per user: 10 per hour and 30 per day** (§10.1, §10.3; founder, 2026-11-13). **No Idempotency-Key** (C7 starts no job and saves nothing, §6); a header that is sent is ignored. **Built in F14.**
 Body (strict, unknown fields → 400): `subject` string 2–100, counted after the idea-text cleaning (control and invisible format characters removed, NFC, trim; §2) · `language` `Language` (required; ideas are written in that language: `hi` in Devanagari, `hinglish` in Roman script).
 Success `200` → `{ subject, language, ideas: [{ id: "idea-1"…"idea-5", title (3–120), hook (3–200), angle (3–200) }] }` (exactly 5; `subject` is the cleaned subject). Not stored: the UI keeps them until the user picks one and calls C2 with `inputType: "brainstorm"`.
-Errors: `400 INVALID_INPUT` · `429 RATE_LIMITED` (11th in the hour) · `429 QUOTA_EXCEEDED` (`quota: brainstorms_per_day`, `limit`, `used`, `resetsAt` = next midnight in the user's timezone) · `422 PROVIDER_REJECTED` · `503 PROVIDER_BUSY` (header `Retry-After: 60`) · `500 INTERNAL` (Gemini not set up, key/model refused: details only in the server log) · `503 SPEND_CEILING` / `MAINTENANCE` (not yet: F27/F36, see "How it works").
+Errors: `400 INVALID_INPUT` · `422 LANGUAGE_UNAVAILABLE` (language switched off; before the daily count and Gemini) · `429 RATE_LIMITED` (11th in the hour) · `429 QUOTA_EXCEEDED` (`quota: brainstorms_per_day`, `limit`, `used`, `resetsAt` = next midnight in the user's timezone) · `422 PROVIDER_REJECTED` · `503 PROVIDER_BUSY` (header `Retry-After: 60`) · `500 INTERNAL` (Gemini not set up, key/model refused: details only in the server log) · `503 SPEND_CEILING` / `MAINTENANCE` (not yet: F27/F36, see "How it works").
 
 **How it works (F14)**
 - Order: Origin → session → 10/hour (`rateLimits`, counted for every request, also refused ones) → body → 30/day (`usageCounters` kind `brainstorms`, the user's day; counted once the request is accepted, before Gemini; a busy or refused answer still counts) → Gemini. **A request refused by any of these never reaches Gemini.** TODO F27/F36: `SPEND_CEILING` / `MAINTENANCE` checked before the daily count.
@@ -1401,7 +1403,7 @@ Purpose: plain-language change to the whole storyboard/video or one scene (PRD �
 
 Allowed states: `storyboard_ready`, `generate_failed`, `video_ready`, `scheduled`, `publish_failed`; no active job. Effect (one transaction, at request time): `revisions` (`pending`), `jobs` (`revise`, key `rev:{revisionId}`), `activeJobId`, `project.planRequestCount + 1` (only if below the limit); a `scheduled` or `publish_failed` post → `approval_invalidated` **immediately** (PRD §7 hard rule: any revision cancels the publish approval when it is *requested*, not when the revision job succeeds; same as D3, D4 and F4) plus an `approval_invalidated` notification; the project state is otherwise unchanged while the job runs; Inngest `revision.requested`. The post stays `approval_invalidated` even if the revision later fails or is rejected; the creator re-approves with H2 or cancels with H5. On success: a new `ai_revision` version becomes current, project → `storyboard_ready` (the creator approves again; a video-stage revision regenerates only changed scenes' narration, PIPELINE_DESIGN §9). A revision can't change the project's language (the new plan keeps `project.language`, PRD decision #25; a request like "make it in Hindi" ends `rejected` with an `assistantReply` suggesting a new project). If the request is ambiguous ("make it better"), the revision ends `rejected` with an `assistantReply` question and no new version (PRD §12).
 Success `202` → `{ revision: Revision, job: Job }`.
-Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `429 QUOTA_EXCEEDED` (`plan_requests_per_project`, `resetsAt: null`) · `503 SPEND_CEILING`.
+Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING` · `422 LANGUAGE_UNAVAILABLE` (the project's language is switched off; nothing saved, no job) · `429 QUOTA_EXCEEDED` (`plan_requests_per_project`, `resetsAt: null`) · `503 SPEND_CEILING`.
 ```json
 { "stage": "storyboard", "scope": "scene", "sceneId": "scene-flow", "message": "Show this as a step sequence and mention that the PIN is encrypted on the phone.", "basePlanVersionId": "67330e019f1e4b2a7c0d2b02", "expectedStateVersion": 4 }
 ```
@@ -1519,6 +1521,8 @@ Response `202`: the job with `"state": "queued"`, `"attempt": 2`, `"error": null
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This step can't be retried. Please edit your idea or storyboard instead.", "details": { "jobState": "failed", "retryable": false }, "requestId": "req_01JCXM3G1H2J" } }
 ```
+
+**Language switch (2026-11-14):** a `plan` or `revise` job of a project whose language is switched off is refused with `422 LANGUAGE_UNAVAILABLE` right after the job and project are found (nothing re-queued or counted); `retry_job` (and `edit_idea`, which only leads to it) are left out of its `allowedActions`.
 
 **As built (F18):** also retries a failed `revise` job (a storyboard change request): only while the storyboard is still the version the request was made on (else `409 INVALID_STATE`, `reason: storyboard_changed`, ask again) and under the 20 AI requests (`429`); the project keeps its state, only `activeJobId` is set; the revision goes back to `pending`.
 

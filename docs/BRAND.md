@@ -122,6 +122,7 @@ Body text max width: ~65 characters.
 
 ## 8. Content patterns (home page)
 - **Nav:** logo · How it works · Examples · Hindi voices `NEW` · **Sign in** (small primary).
+- **While Hindi is switched off** (`ENABLED_LANGUAGES`, `packages/db/src/languages.ts`; since 2026-11-14) the home page never advertises Hindi: no "Hindi voices NEW" nav item, the हिंदी hero tile reads "Notes", the Hindi sample card is hidden (3 sample cards: one column on phones, 3 columns from 768 px, 960 px wide on desktop), the "Voice & languages" section is hidden, and the copy says "a natural voice" / FAQ "English." Everything comes back when Hindi is switched on.
 - **Hero:** chip "🎬 Idea in. Reel out." → tagline "Explain. Animate. Post." → headline "Turn any topic into a **ready-to-post Reel**" → sub-copy → 3 feature points → primary CTA "Create your first reel ↗".
 - **Voices are shown only as "Female voice" / "Male voice"** (Hindi UI: "महिला आवाज़" / "पुरुष आवाज़"). **Never show voice artist or narrator names, provider names (e.g. ElevenLabs), voice IDs, accents or audio-quality labels** anywhere in the product or marketing. Which voice is used is a backend configuration.
 - Copy rules: name what users recognize, use active verbs, keep errors specific with a fix ("Our AI is very busy right now. Your idea is saved; please try again in a few minutes.").

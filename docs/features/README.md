@@ -98,7 +98,13 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** video style decision. Founder chose v3 "clean + alive" (branch exp/video-style-v2; samples in runs/local-dev/how-the-water-cycle-works-85b912/v1/, kept for colleague feedback on 2026-11-15); end card without "Follow for more". Then: hide Hindi/Hinglish (one switch), "Video style upgrade" feature, then F23 (English only, free ElevenLabs plan, local render, app-wide voice guard). Phases A1–A3 done; F00 and F22 done.
+**Next up:** video style decision. Founder chose v3 "clean + alive" (branch exp/video-style-v2; samples in runs/local-dev/how-the-water-cycle-works-85b912/v1/, kept for colleague feedback on 2026-11-15); end card without "Follow for more". Hindi/Hinglish hidden behind one switch (2026-11-15, see "Language switch" below). Then: "Video style upgrade" feature, then F23 (English only, free ElevenLabs plan, local render, app-wide voice guard). Phases A1–A3 done; F00 and F22 done.
+
+## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
+Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
+- **The switch:** `ENABLED_LANGUAGES` in `packages/db/src/languages.ts` (now `["en"]`). A code constant, used by both the web app and the database/API code.
+- **While off:** home page without Hindi (nav "Hindi voices NEW", हिंदी hero tile → "Notes", the Hindi sample card, the Languages section, Hindi in the hero/meta/FAQ copy); Idea screen without the Language row (sends `"en"`); brainstorm in English only; the server answers `422 LANGUAGE_UNAVAILABLE` to C2, C7, D5 and E2 before counting anything or calling AI. Existing Hindi/Hinglish projects stay viewable (rename, archive, narration edit, undo, approve), without the voice chip, change requests or Try again.
+- **To turn back on:** set `ENABLED_LANGUAGES = ["en", "hi", "hinglish"]` (after the voice plan is decided and the Hindi samples are recorded), then run `npm test` (update `tests/language-switch.test.ts`) and the F13/F14/F15/F16–F20 e2e checks (their Hindi checks say what to expect when re-enabled).
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.

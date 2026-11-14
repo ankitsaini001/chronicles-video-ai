@@ -20,6 +20,9 @@ F20 built approval #1 without the video job. F23 MUST:
 - [ ] **Rename the storyboard button to "Approve & generate video"** (it reads "Approve storyboard" until F23; `components/storyboard/StoryboardScreen.tsx`).
 - [ ] **Decide what D3/D4/D5/D7 do to `currentRenderId` when they move a project out of `video_ready`** (today they set `storyboard_ready` and leave `currentRenderId` as it is): keep the old render as "the video" until a new one is ready, or clear it; and what ③ Video shows meanwhile. Write it in API.md D3/D4/D5/D7 and DATABASE.md §4.8.
 
+## MUST from the language switch (2026-11-15)
+- [ ] **The generate job follows the language switch:** D8's generate path and E2's generate retry call `assertLanguageEnabled(project.language)` (packages/db/src/projects.ts) **before** counting videos/day or voice characters and before any ElevenLabs call → `422 LANGUAGE_UNAVAILABLE`. The worker also refuses a queued job for a switched-off language before calling ElevenLabs (a job queued before a switch-off, or re-sent by the stuck-job rule). No `generate` action in `allowedActions` for those projects. English only while `ENABLED_LANGUAGES = ["en"]`.
+
 ## MUST from F22 (code review, 2026-11-14): R2 writers (ARCHITECTURE §9)
 - [ ] **Speech lock:** the unique `{ownerId, cacheKey}` `speechArtifacts` document is the lock. Claim it as `pending` with a conditional insert **before** calling ElevenLabs; the loser waits for `ready` or reuses it (no double payment, no audio and alignment from different requests).
 - [ ] **A new `renderId` for every render attempt** (never reuse a render folder).
