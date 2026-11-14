@@ -153,7 +153,7 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
   it("an edit keeping the cue words makes a valid new plan with new ids and a new hash", () => {
     const base = versionDoc();
     const text = `${base.plan.scenes[0]!.narration[0]!.text} Let's find out.`;
-    const built = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", narrationId: "line-hook-question", text }));
+    const built = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text }] }));
     expect(built.validation.valid).toBe(true);
     expect(built.plan.scenes[0]!.narration[0]!.text).toBe(text);
     expect(built.plan.versionId).toBe(ids.versionId.toHexString());
@@ -163,27 +163,39 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
   });
 
   it("an edit that removes a cue is saved as invalid with the problem on that scene", () => {
-    const built = buildPlanVersion(versionDoc(), ids, narrationChange({ sceneId: "scene-hook", narrationId: "line-hook-question", text: "Rain is interesting." }));
+    const built = buildPlanVersion(versionDoc(), ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: "Rain is interesting." }] }));
     expect(built.validation.valid).toBe(false);
     expect(built.validation.issues.some((i) => i.sceneId === "scene-hook" && /was not found/.test(i.message))).toBe(true);
     expect(built.planHash).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
   it("unknown scene or block → INVALID_INPUT; speech/display null clears, omitted keeps", () => {
-    expect(() => buildPlanVersion(versionDoc(), ids, narrationChange({ sceneId: "nope", narrationId: "x", text: "Hi" }))).toThrow(/reload/);
+    expect(() => buildPlanVersion(versionDoc(), ids, narrationChange({ sceneId: "nope", blocks: [{ narrationId: "x", text: "Hi" }] }))).toThrow(/reload/);
     const base = versionDoc();
     base.plan.scenes[0]!.narration[0]!.speech = "Where does rain come from";
-    const kept = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", narrationId: "line-hook-question", text: "Where does rain come from? Yes." }));
+    const kept = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: "Where does rain come from? Yes." }] }));
     expect(kept.plan.scenes[0]!.narration[0]!.speech).toBe("Where does rain come from");
-    const cleared = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", narrationId: "line-hook-question", text: "Where does rain come from? Yes.", speech: null }));
+    const cleared = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: "Where does rain come from? Yes.", speech: null }] }));
     expect(cleared.plan.scenes[0]!.narration[0]!.speech).toBeNull();
   });
 
-  it("D3 body: cleaned to one line, 1–300 characters, strict", () => {
-    const ok = NarrationEditBodySchema.safeParse({ basePlanVersionId: V1.toHexString(), sceneId: "scene-hook", narrationId: "line-hook-question", text: "  Two\nlines  ", expectedStateVersion: 3 });
-    expect(ok.success && ok.data.text).toBe("Two lines");
-    expect(NarrationEditBodySchema.safeParse({ basePlanVersionId: V1.toHexString(), sceneId: "scene-hook", narrationId: "x", text: "a".repeat(301), expectedStateVersion: 3 }).success).toBe(false);
-    expect(NarrationEditBodySchema.safeParse({ basePlanVersionId: V1.toHexString(), sceneId: "scene-hook", narrationId: "x", text: "ok", expectedStateVersion: 3, extra: 1 }).success).toBe(false);
+  it("D3 body: blocks of one scene, cleaned to one line, 1–300 characters, each block once, strict", () => {
+    const body = (blocks: unknown, extra: Record<string, unknown> = {}) => NarrationEditBodySchema.safeParse({ basePlanVersionId: V1.toHexString(), sceneId: "scene-hook", blocks, expectedStateVersion: 3, ...extra });
+    const ok = body([{ narrationId: "line-hook-question", text: "  Two\nlines  " }]);
+    expect(ok.success && ok.data.blocks[0]!.text).toBe("Two lines");
+    expect(body([{ narrationId: "x", text: "a".repeat(301) }]).success).toBe(false);
+    expect(body([]).success).toBe(false);
+    expect(body([{ narrationId: "x", text: "a" }, { narrationId: "x", text: "b" }]).success).toBe(false);
+    expect(body([{ narrationId: "x", text: "ok" }], { extra: 1 }).success).toBe(false);
+  });
+
+  it("two blocks of a scene → ONE new version; an unknown block saves nothing (all or nothing)", () => {
+    const base = versionDoc();
+    const [q, a] = base.plan.scenes[0]!.narration;
+    const built = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: q!.id, text: `${q!.text} One.` }, { narrationId: a!.id, text: `${a!.text} Two.` }] }));
+    expect(built.plan.scenes[0]!.narration.map((n) => n.text)).toEqual([`${q!.text} One.`, `${a!.text} Two.`]);
+    expect(() => buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: q!.id, text: "x" }, { narrationId: "nope", text: "y" }] }))).toThrow(/reload/);
+    expect(base.plan.scenes[0]!.narration[0]!.text).toBe(q!.text);
   });
 
   it("voice switch changes only the voice preset (project language), same voice → INVALID_INPUT", () => {

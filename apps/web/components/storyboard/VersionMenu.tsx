@@ -57,6 +57,7 @@ export function VersionMenu({
       <button
         ref={buttonRef}
         type="button"
+        data-focus="version"
         onClick={toggle}
         disabled={disabled}
         aria-expanded={open}

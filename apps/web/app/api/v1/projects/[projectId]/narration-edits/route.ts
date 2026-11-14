@@ -3,10 +3,12 @@ import { apiRoute } from "@/lib/api/server";
 import { toApiProblem } from "@/lib/plan/api";
 import { buildPlanVersion, narrationChange } from "@/lib/storyboard/edit-plan";
 
-// D3 POST /api/v1/projects/{projectId}/narration-edits (docs/API.md D3, F17): save one inline
-// narration edit as a NEW `user_edit` storyboard version. No AI call; doesn't count toward the 20.
-// Body (strict): basePlanVersionId (must be the current version), sceneId, narrationId, text
-// (1–300 after cleaning), optional speech/display (omitted = keep, null = clear), expectedStateVersion.
+// D3 POST /api/v1/projects/{projectId}/narration-edits (docs/API.md D3, F17): save one inline edit
+// of a scene's narration as ONE new `user_edit` storyboard version (one Save = one Undo step).
+// No AI call; doesn't count toward the 20.
+// Body (strict): basePlanVersionId (must be the current version), sceneId, blocks (1–4 of that
+// scene: narrationId, text 1–300 after cleaning, optional speech/display: omitted = keep, null =
+// clear), expectedStateVersion. All or nothing: an unknown block saves nothing.
 // ONE transaction (packages/db/src/storyboard-edits.ts): the new version (checked by the same plan
 // validator as the AI's plans; saved even when it fails, then it can't be approved), the project
 // points at it, approval cleared, +1 stateVersion. Another tab changed it → 409 STALE_VERSION.

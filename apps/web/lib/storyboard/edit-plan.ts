@@ -35,16 +35,23 @@ export function buildPlanVersion(base: PlanVersionDocument, ids: { versionId: Ob
   };
 }
 
-/** D3: the change for one narration block. Unknown scene or block → 400 INVALID_INPUT (nothing saved). */
-export function narrationChange(edit: { sceneId: string; narrationId: string; text: string; speech?: string | null | undefined; display?: string | null | undefined }): (plan: StoredPlan) => void {
+type BlockEdit = { narrationId: string; text: string; speech?: string | null | undefined; display?: string | null | undefined };
+
+/**
+ * D3: the change for the edited narration blocks of one scene, applied together (one version).
+ * Unknown scene or block → 400 INVALID_INPUT and nothing is saved (all or nothing).
+ */
+export function narrationChange(edit: { sceneId: string; blocks: readonly BlockEdit[] }): (plan: StoredPlan) => void {
   return (plan) => {
     const scene = plan.scenes.find((s) => s.id === edit.sceneId);
     if (!scene) throw new ProjectActionError("INVALID_INPUT", "Please reload the page and try again.", { issues: [{ path: "sceneId", message: "is not a scene of this storyboard" }] });
-    const block = scene.narration.find((n) => n.id === edit.narrationId);
-    if (!block) throw new ProjectActionError("INVALID_INPUT", "Please reload the page and try again.", { issues: [{ path: "narrationId", message: "is not a narration block of this scene" }] });
-    block.text = edit.text;
-    if (edit.speech !== undefined) block.speech = edit.speech;
-    if (edit.display !== undefined) block.display = edit.display;
+    edit.blocks.forEach((change, i) => {
+      const block = scene.narration.find((n) => n.id === change.narrationId);
+      if (!block) throw new ProjectActionError("INVALID_INPUT", "Please reload the page and try again.", { issues: [{ path: `blocks[${i}].narrationId`, message: "is not a narration block of this scene" }] });
+      block.text = change.text;
+      if (change.speech !== undefined) block.speech = change.speech;
+      if (change.display !== undefined) block.display = change.display;
+    });
   };
 }
 

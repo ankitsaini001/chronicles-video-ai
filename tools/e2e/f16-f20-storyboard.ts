@@ -128,19 +128,22 @@ async function main(): Promise<void> {
   // ---------- F17: edit → new version → undo ----------
   const scene = version.plan.scenes[0];
   const block = scene.narration[0];
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: `${block.text}  Really.`, expectedStateVersion: project.stateVersion });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: `${block.text}  Really.` }], expectedStateVersion: project.stateVersion });
   check("D3 → 201 new user_edit version 2 (Location), valid, Changed scene", r.status === 201 && r.json.versionNumber === 2 && r.json.source === "user_edit" && r.json.valid === true && r.json.changedSceneIds?.join() === scene.id && r.headers.get("location")?.endsWith(r.json.id) === true, `status ${r.status}`);
   const v2 = r.json;
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: "Another tab", expectedStateVersion: project.stateVersion });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: "Another tab" }], expectedStateVersion: project.stateVersion });
   check("D3 with the old stateVersion (another tab) → 409 STALE_VERSION, nothing saved", r.status === 409 && r.json.error?.code === "STALE_VERSION" && (await db.collection("planVersions").countDocuments({ projectId: oid(pid) })) === 2);
   ({ project, version } = await current(a.cookie, pid));
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: v2.parentVersionId, sceneId: scene.id, narrationId: block.id, text: "Old base", expectedStateVersion: project.stateVersion });
+  const twoParts = version.plan.scenes.find((s: Json) => s.narration.length >= 2);
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: twoParts.id, blocks: [{ narrationId: twoParts.narration[0].id, text: "x" }, { narrationId: "no-such-block", text: "y" }], expectedStateVersion: project.stateVersion });
+  check("D3 with one unknown block → 400, nothing saved (all or nothing)", r.status === 400 && (await db.collection("planVersions").countDocuments({ projectId: oid(pid) })) === 2);
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: v2.parentVersionId, sceneId: scene.id, blocks: [{ narrationId: block.id, text: "Old base" }], expectedStateVersion: project.stateVersion });
   check("D3 on an old base version → 409 STALE_VERSION", r.status === 409 && r.json.error?.code === "STALE_VERSION");
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: "no-such-scene", narrationId: block.id, text: "x", expectedStateVersion: project.stateVersion });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: "no-such-scene", blocks: [{ narrationId: block.id, text: "x" }], expectedStateVersion: project.stateVersion });
   check("D3 unknown scene → 400 INVALID_INPUT", r.status === 400 && r.json.error?.details?.issues?.[0]?.path === "sceneId");
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: "x".repeat(301), expectedStateVersion: project.stateVersion });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: "x".repeat(301) }], expectedStateVersion: project.stateVersion });
   check("D3 text over 300 → 400", r.status === 400);
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: "Completely different words.", expectedStateVersion: project.stateVersion });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: "Completely different words." }], expectedStateVersion: project.stateVersion });
   check("D3 that removes a cue → 201 saved as invalid (version 3) with issues", r.status === 201 && r.json.versionNumber === 3 && r.json.valid === false && r.json.validation?.issues?.length > 0);
   const v3 = r.json;
   page = (await (await fetch(`${base}/projects/${pid}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
@@ -187,7 +190,7 @@ async function main(): Promise<void> {
   check("approved: D2 approval set, allowedActions without approve_storyboard", version.approval?.id === r.json.approval?.id && version.isApproved && !project.allowedActions.includes("approve_storyboard"));
   page = (await (await fetch(`${base}/projects/${pid}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
   check("page shows the approved state and the plain note", page.includes("Approved · Version") && page.includes("Making the video comes in a later update."));
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: `${block.text} Really. Truly.`, expectedStateVersion: project.stateVersion });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: `${block.text} Really. Truly.` }], expectedStateVersion: project.stateVersion });
   check("an edit after approval → new version with no approval; project approval cleared", r.status === 201 && r.json.isApproved === false && (await projectOf(pid))?.approvedPlanVersionId === null);
   ({ project, version } = await current(a.cookie, pid));
   check("…and approve_storyboard is offered again", project.allowedActions.includes("approve_storyboard"));
@@ -206,7 +209,7 @@ async function main(): Promise<void> {
   const reviseJobId = r.json.job?.id;
   const replay = await send(a.cookie, "POST", `/api/v1/projects/${pid}/revisions`, revBody, { "idempotency-key": revKey });
   check("D5 repeated with the same key → replayed, one revision", replay.headers.get("idempotent-replayed") === "true" && (await db.collection("revisions").countDocuments({ projectId: oid(pid) })) === 1);
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: "During the job", expectedStateVersion: project.stateVersion + 1 });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: "During the job" }], expectedStateVersion: project.stateVersion + 1 });
   check("D3 while the change runs → 409 JOB_ALREADY_RUNNING", r.status === 409 && r.json.error?.code === "JOB_ALREADY_RUNNING");
   const done = await waitIdle(a.cookie, pid);
   ({ project, version } = await current(a.cookie, pid));
@@ -245,8 +248,9 @@ async function main(): Promise<void> {
   check("at 20: D5 → 429 QUOTA_EXCEEDED plan_requests_per_project, resetsAt null; nothing saved", r.status === 429 && r.json.error?.details?.quota === "plan_requests_per_project" && r.json.error?.details?.resetsAt === null && (await projectOf(pid))?.activeJobId === null);
   r = await send(a.cookie, "POST", `/api/v1/jobs/${busyJob}/retry`, {}, { "idempotency-key": key() });
   check("at 20: E2 on the failed change → 429", r.status === 429);
-  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: `${block.text} Still editable.`, expectedStateVersion: project.stateVersion });
-  check("at 20: narration edits still work (no AI)", r.status === 201);
+  const before20 = await db.collection("planVersions").countDocuments({ projectId: oid(pid) });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: twoParts.id, blocks: twoParts.narration.slice(0, 2).map((n: Json) => ({ narrationId: n.id, text: `${n.text} Still editable.` })), expectedStateVersion: project.stateVersion });
+  check("at 20: narration edits still work (no AI); two parts of a scene → ONE new version", r.status === 201 && (await db.collection("planVersions").countDocuments({ projectId: oid(pid) })) === before20 + 1);
   r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/revisions`, { stage: "storyboard", scope: "project", message: "x".repeat(501), basePlanVersionId: version.id, expectedStateVersion: project.stateVersion }, { "idempotency-key": key() });
   check("D5 message over 500 → 400", r.status === 400);
 
@@ -257,7 +261,7 @@ async function main(): Promise<void> {
     ["C3", await send(b.cookie, "GET", `/api/v1/projects/${pid}`)],
     ["D1", await send(b.cookie, "GET", `/api/v1/projects/${pid}/plan-versions`)],
     ["D2", await send(b.cookie, "GET", `/api/v1/projects/${pid}/plan-versions/current`)],
-    ["D3", await send(b.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, narrationId: block.id, text: "hi", expectedStateVersion: sv })],
+    ["D3", await send(b.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: "hi" }], expectedStateVersion: sv })],
     ["D4", await send(b.cookie, "POST", `/api/v1/projects/${pid}/voice`, { basePlanVersionId: version.id, voiceGender: "male", expectedStateVersion: sv })],
     ["D5", await send(b.cookie, "POST", `/api/v1/projects/${pid}/revisions`, { stage: "storyboard", scope: "project", message: "hello", basePlanVersionId: version.id, expectedStateVersion: sv }, { "idempotency-key": key() })],
     ["D6", await send(b.cookie, "GET", `/api/v1/projects/${pid}/revisions`)],

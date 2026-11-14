@@ -31,6 +31,7 @@ export function VoiceMenu({ language, current, samplePresets, disabled, onChoose
       <button
         ref={buttonRef}
         type="button"
+        data-focus="voice"
         onClick={() => {
           if (open) preview.stop();
           toggle();

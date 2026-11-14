@@ -38,16 +38,33 @@ const NarrationText = z
   .transform(cleanNarrationText)
   .pipe(z.string().min(1, { error: "can't be empty" }).max(NARRATION_MAX_CHARS, { error: `must be at most ${NARRATION_MAX_CHARS} characters` }));
 
-/** D3 body (API.md D3). Strict: unknown fields → 400. `speech`/`display`: omitted = keep, null = clear. */
-export const NarrationEditBodySchema = z.strictObject({
-  basePlanVersionId: ObjectIdString,
-  sceneId: SafeId,
+/** One narration block of a D3 edit. `speech`/`display`: omitted = keep, null = clear. */
+const NarrationBlockEdit = z.strictObject({
   narrationId: SafeId,
   text: NarrationText,
   speech: NarrationText.nullable().optional(),
   display: NarrationText.nullable().optional(),
-  expectedStateVersion: StateVersion,
 });
+
+/**
+ * D3 body (API.md D3; F17 after review): the edited narration blocks of ONE scene (1–4, each block
+ * once), saved together as ONE new version, all or nothing, so one Save = one Undo step.
+ * Strict: unknown fields → 400.
+ */
+export const NarrationEditBodySchema = z
+  .strictObject({
+    basePlanVersionId: ObjectIdString,
+    sceneId: SafeId,
+    blocks: z.array(NarrationBlockEdit, { error: "must be a list" }).min(1, { error: "must have at least one block" }).max(4, { error: "must have at most 4 blocks" }),
+    expectedStateVersion: StateVersion,
+  })
+  .superRefine((body, ctx) => {
+    const seen = new Set<string>();
+    body.blocks.forEach((b, i) => {
+      if (seen.has(b.narrationId)) ctx.addIssue({ code: "custom", path: ["blocks", i, "narrationId"], message: "is listed twice" });
+      seen.add(b.narrationId);
+    });
+  });
 export type NarrationEditBody = z.output<typeof NarrationEditBodySchema>;
 
 /** D4 body (API.md D4, F19): switch the narrator voice (Male ↔ Female). The language can't change. */

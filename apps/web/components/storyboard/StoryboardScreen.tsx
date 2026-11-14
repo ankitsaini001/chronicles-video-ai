@@ -3,7 +3,7 @@
 import { VOICE_TEXT_LANG, type VoiceLanguage, type VoicePresetId } from "@bytereel/db/voices";
 import type { PlanVersionResource, ProjectResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 import { sceneNotes, sceneNumber, type SceneLike } from "@/lib/storyboard/view";
 import { ChangesPanel } from "./ChangesPanel";
@@ -19,8 +19,10 @@ import { VoiceMenu } from "./VoiceMenu";
 // narration editing (F17), the notes for the whole storyboard and the bottom bar.
 // The data is the C3 project and the D2 current version, read by the server page. After any change
 // the page re-reads it (router.refresh). The inner part is keyed by version and stateVersion, so
-// the screen then starts fresh (editors and menus close), while the status line (`notice`,
-// aria-live) lives outside it, so "Saved as version 4" is still announced after the reload.
+// the screen then starts fresh (editors and menus close). What must survive that reload lives
+// outside it: the status line (`notice`, aria-live: "Saved as version 4"), the error box
+// (`problem`) and where keyboard focus goes back to (`focusTarget`: the scene's Edit button after
+// a save or cancel, the Version button after an undo or restore, the voice chip after a switch).
 // Every change sends the stateVersion this page was loaded with: another tab's change → "refresh".
 
 export type StoryboardScreenProps = {
@@ -46,19 +48,43 @@ const chip = "inline-flex min-h-8 items-center gap-1.5 rounded-full border borde
 
 export function StoryboardScreen(props: StoryboardScreenProps) {
   const [notice, setNotice] = useState("");
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
   return (
     <>
       <p role="status" aria-live="polite" className="sr-only">
         {notice}
       </p>
-      <Body key={`${props.version.id}:${props.project.stateVersion}`} {...props} announce={setNotice} />
+      <Body
+        key={`${props.version.id}:${props.project.stateVersion}`}
+        {...props}
+        announce={setNotice}
+        problem={problem}
+        setProblem={setProblem}
+        focusTarget={focusTarget}
+        setFocusTarget={setFocusTarget}
+      />
     </>
   );
 }
 
 type Problem = { message: string; stale: boolean };
 
-function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, announce }: StoryboardScreenProps & { announce: (text: string) => void }) {
+type BodyProps = StoryboardScreenProps & {
+  announce: (text: string) => void;
+  problem: Problem | null;
+  setProblem: (problem: Problem | null) => void;
+  focusTarget: string | null;
+  setFocusTarget: (target: string | null) => void;
+};
+
+/** Focus the element marked data-focus="target" (or the Version button when that one is disabled). */
+function focusMarked(target: string): void {
+  const find = (name: string) => document.querySelector<HTMLElement>(`[data-focus="${CSS.escape(name)}"]:not([disabled])`);
+  (find(target) ?? find("version"))?.focus();
+}
+
+function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
   const router = useRouter();
   const language = project.language as VoiceLanguage;
   const lang = VOICE_TEXT_LANG[language];
@@ -72,41 +98,38 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
 
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<Problem | null>(null);
+
+  // Give focus back after the reload (or after Cancel), then forget the target.
+  useEffect(() => {
+    if (!focusTarget) return;
+    focusMarked(focusTarget);
+    setFocusTarget(null);
+  }, [focusTarget, setFocusTarget]);
 
   function fail(answer: { code: string; message: string }) {
     setBusy(false);
     setProblem({ message: answer.code === "STALE_VERSION" ? CLIENT_MESSAGES.STALE : answer.message, stale: answer.code === "STALE_VERSION" });
   }
 
-  /** D3, one call per changed block (each makes a version), then the page reloads. */
+  /** D3: the changed blocks of one scene, saved as ONE new version (all or nothing). */
   async function saveNarration(sceneId: string, blocks: { id: string; text: string }[]) {
     setBusy(true);
     setProblem(null);
-    let base = version.id;
-    let stateVersion = project.stateVersion;
-    let saved: number | null = null;
-    for (const block of blocks) {
-      const original = plan.scenes.find((s) => s.id === sceneId)?.narration.find((n) => n.id === block.id);
-      // A new text replaces the old pronunciation/caption forms, so the new words are spoken and shown.
-      const clear = { ...(original?.speech ? { speech: null } : {}), ...(original?.display ? { display: null } : {}) };
-      const answer = await apiSend<{ id: string; versionNumber: number }>("POST", `/api/v1/projects/${project.id}/narration-edits`, {
-        basePlanVersionId: base,
-        sceneId,
-        narrationId: block.id,
-        text: block.text,
-        ...clear,
-        expectedStateVersion: stateVersion,
-      });
-      if (!answer.ok) {
-        if (saved !== null) router.refresh(); // part of it was saved: show it
-        return fail(answer);
-      }
-      base = answer.json.id;
-      stateVersion += 1;
-      saved = answer.json.versionNumber;
-    }
-    announce(`Saved as version ${saved}.`);
+    const scene = plan.scenes.find((s) => s.id === sceneId);
+    const answer = await apiSend<{ id: string; versionNumber: number }>("POST", `/api/v1/projects/${project.id}/narration-edits`, {
+      basePlanVersionId: version.id,
+      sceneId,
+      blocks: blocks.map((block) => {
+        const original = scene?.narration.find((n) => n.id === block.id);
+        // A new text replaces the old pronunciation/caption forms, so the new words are spoken and shown.
+        return { narrationId: block.id, text: block.text, ...(original?.speech ? { speech: null } : {}), ...(original?.display ? { display: null } : {}) };
+      }),
+      expectedStateVersion: project.stateVersion,
+    });
+    // Nothing was saved: the editor stays open with the text, and the error is shown.
+    if (!answer.ok) return fail(answer);
+    announce(`Saved as version ${answer.json.versionNumber}.`);
+    setFocusTarget(`edit:${sceneId}`);
     router.refresh();
   }
 
@@ -117,6 +140,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
     const answer = await apiSend("POST", `/api/v1/projects/${project.id}/plan-versions/${target.id}/restore`, { expectedStateVersion: project.stateVersion });
     if (!answer.ok) return fail(answer);
     announce(target.versionNumber ? `Restored version ${target.versionNumber}.` : "Undone: the previous version is back.");
+    setFocusTarget("version");
     router.refresh();
   }
 
@@ -131,6 +155,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
     });
     if (!answer.ok) return fail(answer);
     announce(`Voice changed. Saved as version ${answer.json.versionNumber}.`);
+    setFocusTarget("voice");
     router.refresh();
   }
 
@@ -200,7 +225,14 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
         <div role="alert" className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-text">
           <span className="min-w-0 flex-1">{problem.message}</span>
           {problem.stale && (
-            <button type="button" onClick={() => router.refresh()} className="cursor-pointer rounded-full border border-line px-3 py-1 text-xs font-medium hover:border-amber/40">
+            <button
+              type="button"
+              onClick={() => {
+                setProblem(null);
+                router.refresh();
+              }}
+              className="cursor-pointer rounded-full border border-line px-3 py-1 text-xs font-medium hover:border-amber/40"
+            >
               Refresh
             </button>
           )}
@@ -236,6 +268,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
                   canEdit && editing !== scene.id ? (
                     <button
                       type="button"
+                      data-focus={`edit:${scene.id}`}
                       disabled={busy || editing !== null}
                       onClick={() => setEditing(scene.id)}
                       className="inline-flex min-h-9 shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 text-xs text-muted transition hover:text-amber disabled:pointer-events-none disabled:opacity-50"
@@ -253,7 +286,10 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
                       lang={lang}
                       busy={busy}
                       onSave={(blocks) => saveNarration(scene.id, blocks)}
-                      onCancel={() => setEditing(null)}
+                      onCancel={() => {
+                        setEditing(null);
+                        setFocusTarget(`edit:${scene.id}`);
+                      }}
                     />
                   ) : undefined
                 }
