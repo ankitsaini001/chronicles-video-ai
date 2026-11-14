@@ -1,6 +1,7 @@
 import {
   allowedActionsFor,
   createProject,
+  editProjectIdea,
   ENABLED_LANGUAGES,
   enabledLanguageOr,
   isLanguageEnabled,
@@ -9,8 +10,11 @@ import {
   newPlanJob,
   ProjectActionError,
   requestRevision,
+  reservePlanRequest,
   retryPlanJob,
   retryReviseJob,
+  startPlanAttempt,
+  startReviseAttempt,
   type JobDocument,
   type ProjectDocument,
 } from "@bytereel/db";
@@ -222,5 +226,84 @@ describe("existing Hindi/Hinglish projects", () => {
       expect(allowedActionsFor(projectDoc({ language }), null, revise)).toEqual(["rename", "edit_storyboard", "approve_storyboard", "archive"]);
       expect(allowedActionsFor(projectDoc({ language, state: "plan_failed", currentPlanVersionId: null }), plan)).toEqual(["rename", "archive"]);
     }
+  });
+});
+
+/**
+ * A database for the job steps: reads answer with the given documents; `updateOne` is recorded with
+ * its filter and update (and matches); anything else (e.g. the start step's findOneAndUpdate that
+ * would make the job `running`) throws.
+ */
+function recordingDb(docs: { project: ProjectDocument; job: JobDocument }) {
+  const writes: { collection: string; filter: Record<string, unknown>; update: Record<string, any> }[] = [];
+  const reads: string[] = [];
+  const collection = (name: string) =>
+    new Proxy(
+      {},
+      {
+        get: (_t, method: string) => async (filter: Record<string, unknown>, update: Record<string, any>) => {
+          if (method === "findOne") {
+            reads.push(name);
+            return name === "projects" ? docs.project : name === "jobs" ? docs.job : null;
+          }
+          if (method === "updateOne") {
+            writes.push({ collection: name, filter, update });
+            return { matchedCount: 1, modifiedCount: 1 };
+          }
+          throw new Error(`unexpected ${name}.${method}`);
+        },
+      },
+    );
+  const session = { withTransaction: async (fn: () => Promise<void>) => fn(), endSession: async () => undefined };
+  return { db: { client: { startSession: () => session }, collection } as unknown as Db, writes, reads };
+}
+
+describe("workers: a job of a switched-off language never reaches Gemini (queued before the switch, stuck-job re-send, Inngest retry)", () => {
+  it("plan job start step: the job fails with LANGUAGE_UNAVAILABLE (not retryable), project → plan_failed, nothing to run", async () => {
+    const project = projectDoc({ state: "planning", currentPlanVersionId: null });
+    const job = { ...newPlanJob({ ownerId: OWNER, projectId: PROJECT, project, now: NOW }), state: "queued" } as JobDocument;
+    project.activeJobId = job._id;
+    const { db, writes } = recordingDb({ project, job });
+    expect(await startPlanAttempt(db, { jobId: job._id.toHexString(), attempt: 1, now: NOW })).toBeNull();
+    const jobWrite = writes.find((w) => w.collection === "jobs");
+    const projectWrite = writes.find((w) => w.collection === "projects");
+    expect(jobWrite?.update.$set).toMatchObject({ state: "failed", error: { code: "LANGUAGE_UNAVAILABLE", message: "Only English is available right now.", retryable: false } });
+    expect(projectWrite?.update.$set).toMatchObject({ state: "plan_failed", activeJobId: null, lastError: { code: "LANGUAGE_UNAVAILABLE" } });
+    expect(projectWrite?.update.$inc).toEqual({ stateVersion: 1 }); // no planRequestCount
+  });
+
+  it("revise job start step: the job and the revision fail, the storyboard and state stay, activeJobId cleared", async () => {
+    const project = projectDoc();
+    const base = newPlanJob({ ownerId: OWNER, projectId: PROJECT, project, now: NOW });
+    const revisionId = new ObjectId();
+    const job = { ...base, type: "revise", state: "queued", inputRef: { ...base.inputRef, planVersionId: VERSION, revisionId } } as JobDocument;
+    project.activeJobId = job._id;
+    const { db, writes } = recordingDb({ project, job });
+    expect(await startReviseAttempt(db, { jobId: job._id.toHexString(), attempt: 1, now: NOW })).toBeNull();
+    expect(writes.map((w) => w.collection)).toEqual(["jobs", "revisions", "projects"]);
+    expect(writes[0]!.update.$set).toMatchObject({ state: "failed", error: { code: "LANGUAGE_UNAVAILABLE", retryable: false } });
+    expect(writes[1]!.update.$set).toMatchObject({ status: "failed" });
+    expect(writes[2]!.update.$set).toEqual({ activeJobId: null, updatedAt: NOW });
+  });
+
+  it("reservePlanRequest: 'language' before anything is counted (no write at all)", async () => {
+    const project = projectDoc({ state: "planning" });
+    const job = newPlanJob({ ownerId: OWNER, projectId: PROJECT, project, now: NOW });
+    const running = { ...job, state: "running", planner: { attempt: 1, inputHash: job.inputHash, planVersionId: VERSION, requests: 0, answers: [] } } as JobDocument;
+    const { db, writes, reads } = recordingDb({ project, job: running });
+    expect(await reservePlanRequest(db, { jobId: job._id, attempt: 1, maxRequests: 4, message: "Writing…", percent: 10, now: NOW })).toBe("language");
+    expect(reads).toEqual(["jobs", "projects"]);
+    expect(writes).toEqual([]);
+    // English: counted as before.
+    const english = recordingDb({ project: projectDoc({ language: "en", state: "planning" }), job: running });
+    expect(await reservePlanRequest(english.db, { jobId: job._id, attempt: 1, maxRequests: 4, message: "Writing…", percent: 10, now: NOW })).toBe("ok");
+    expect(english.writes.map((w) => w.collection)).toEqual(["projects", "jobs"]);
+  });
+
+  it("C4 Edit idea is refused (422) and saves nothing; it would only lead to a refused Try again", async () => {
+    const { db, calls } = fakeDb({ project: projectDoc({ state: "plan_failed", currentPlanVersionId: null }) });
+    const error = await refusal(editProjectIdea(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), body: { text: "Savings account vs FD", expectedStateVersion: 3 }, now: NOW }));
+    expect(error.code).toBe("LANGUAGE_UNAVAILABLE");
+    expect(calls).toEqual(["projects.findOne"]);
   });
 });

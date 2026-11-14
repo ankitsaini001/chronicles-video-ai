@@ -457,6 +457,8 @@ export async function editProjectIdea(
   if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this project.");
   const check = () => {
     if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
+    // Language switch: Edit idea only leads to a Try again, which is refused for this language.
+    assertLanguageEnabled(project.language);
     if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");
     if (project.stateVersion !== input.body.expectedStateVersion) {
       throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", {
