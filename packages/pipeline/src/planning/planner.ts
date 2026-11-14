@@ -58,13 +58,33 @@ export function languageForVoicePreset(preset: VoicePreset): Language {
   throw new Error(`unknown voice preset "${preset}"`);
 }
 
+/**
+ * The fixed parts of every planner request for a language: the rules (system instruction) and the
+ * response schema. Used by planWithRepair and by the web app's plan job (one request per step).
+ */
+export function plannerRequestBase(language: Language): { systemInstruction: string; responseJsonSchema: Record<string, unknown> } {
+  return { systemInstruction: buildSystemInstruction(language), responseJsonSchema: plannerOutputJsonSchema() };
+}
+
+/**
+ * The conversation for the single repair attempt: the first prompt, the model's invalid answer,
+ * then the validation errors (buildRepairPrompt).
+ */
+export function repairTurns(initialPrompt: string, answerText: string, issues: readonly ValidationIssue[], stats: PlanStats | null, language: Language): PlannerTurn[] {
+  return [
+    { role: "user", text: initialPrompt },
+    { role: "model", text: answerText.trim() || "(empty response)" },
+    { role: "user", text: buildRepairPrompt(issues, stats, language) },
+  ];
+}
+
 export async function planWithRepair(options: PlanWithRepairOptions): Promise<PlannerResult> {
   const { provider, topic, voicePreset, ids, onProgress = () => undefined } = options;
   const language = languageForVoicePreset(voicePreset);
   const owned = { ...ids, language, voicePreset, sources: topicSources(topic) };
-  const systemInstruction = buildSystemInstruction(language);
-  const responseJsonSchema = plannerOutputJsonSchema();
-  const turns: PlannerTurn[] = [{ role: "user", text: buildUserPrompt({ topic, language, voicePreset }) }];
+  const { systemInstruction, responseJsonSchema } = plannerRequestBase(language);
+  const initialPrompt = buildUserPrompt({ topic, language, voicePreset });
+  let turns: PlannerTurn[] = [{ role: "user", text: initialPrompt }];
   const attempts: PlanAttempt[] = [];
 
   let lastIssues: ValidationIssue[] = [];
@@ -73,7 +93,7 @@ export async function planWithRepair(options: PlanWithRepairOptions): Promise<Pl
     const kind = attempt === 1 ? "initial" : "repair";
     onProgress(attempt === 1 ? `Asking ${provider.name} (${provider.model}) for a storyboard...` : `Plan invalid (${lastIssues.length} problem(s)); one repair attempt...`);
     const response = await provider.generate({ systemInstruction, turns: [...turns], responseJsonSchema });
-    const evaluated = evaluateResponse(response, owned);
+    const evaluated = evaluatePlannerResponse(response, owned);
     attempts.push({
       attempt,
       kind,
@@ -91,19 +111,20 @@ export async function planWithRepair(options: PlanWithRepairOptions): Promise<Pl
     }
     lastIssues = evaluated.issues;
     lastStats = evaluated.stats;
-    turns.push(
-      { role: "model", text: response.text.trim() || "(empty response)" },
-      { role: "user", text: buildRepairPrompt(evaluated.issues, evaluated.stats, language) },
-    );
+    turns = repairTurns(initialPrompt, response.text, evaluated.issues, evaluated.stats, language);
   }
   return { status: "needs-input", issues: lastIssues, stats: lastStats, attempts };
 }
 
-type Evaluated =
+export type PlannerEvaluation =
   | { ok: true; plan: Plan; stats: PlanStats; ignoredFields: string[] }
   | { ok: false; issues: ValidationIssue[]; stats: PlanStats | null; ignoredFields: string[] };
 
-function evaluateResponse(response: PlannerResponse, owned: Parameters<typeof assemblePlan>[1]): Evaluated {
+/**
+ * Parse one planner answer, add the code-owned fields (assemblePlan) and run the full plan
+ * validation (schema + semantic rules). Never trusts the model's JSON as it is.
+ */
+export function evaluatePlannerResponse(response: Pick<PlannerResponse, "text" | "finishReason">, owned: Parameters<typeof assemblePlan>[1]): PlannerEvaluation {
   let parsed: unknown;
   try {
     parsed = JSON.parse(response.text);
