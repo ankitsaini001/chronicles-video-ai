@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F23 (generate the video) — plan being discussed with the founder; voices stay on the ElevenLabs free plan for now (paid plan decided after all features). Phases A1–A3 done; F22 done.
+**Next up:** video style decision. Founder chose v3 "clean + alive" (branch exp/video-style-v2; samples in runs/local-dev/how-the-water-cycle-works-85b912/v1/, kept for colleague feedback on 2026-11-15); end card without "Follow for more". Then: hide Hindi/Hinglish (one switch), "Video style upgrade" feature, then F23 (English only, free ElevenLabs plan, local render, app-wide voice guard). Phases A1–A3 done; F00 and F22 done.
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
