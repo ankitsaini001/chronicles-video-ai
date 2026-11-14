@@ -144,5 +144,6 @@ Body text max width: ~65 characters.
   4. AI prompt text in `packages/pipeline/src/planning/prompts.ts` (says "storyboard planner for ByteReel"; not shown to users).
   5. CLI banner text in `tools/cli/*.ts` (developer-only).
   6. **Do not change** the Inngest app id `reel-app` (`apps/web/inngest/client.ts`). It is brand-neutral on purpose: changing it makes Inngest Cloud see a new app and can strand running jobs (F15).
-  7. Optional, internal only: npm package names `@bytereel/*`, temp-folder prefixes, repo name. Safe to leave.
-  8. Docs (`PRD.md`, `docs/*.md`) and the Stitch designs: find-and-replace when convenient.
+  7. **Do not change** the R2 bucket names `reel-app-dev` / `reel-app-prod` (F22). Brand-neutral on purpose: a bucket can't be renamed, only copied to a new one.
+  8. Optional, internal only: npm package names `@bytereel/*`, temp-folder prefixes, repo name. Safe to leave.
+  9. Docs (`PRD.md`, `docs/*.md`) and the Stitch designs: find-and-replace when convenient.

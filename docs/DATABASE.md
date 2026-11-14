@@ -108,7 +108,7 @@ A **transaction** groups several writes so they **all happen or none happen**, l
 
 | What | Where it lives | What MongoDB keeps |
 |---|---|---|
-| Videos (`output.mp4`), narration audio (`audio.mp3`), thumbnails, preview frames, timeline/captions/alignment JSON files | **Cloudflare R2**, a private file store in your own account (set up in F22), bucket `bytereel-dev` / `bytereel-prod` (ARCHITECTURE §9) | Only the **file key** (its path), e.g. `users/<ownerId>/projects/<projectId>/renders/<renderId>/output.mp4`, plus its size and SHA-256 hash |
+| Videos (`output.mp4`), narration audio (`audio.mp3`), thumbnails, preview frames, timeline/captions/alignment JSON files | **Cloudflare R2**, a private file store in your own account (set up in F22), bucket `reel-app-dev` / `reel-app-prod` (ARCHITECTURE §9) | Only the **file key** (its path), e.g. `users/<ownerId>/projects/<projectId>/renders/<renderId>/output.mp4`, plus its size and SHA-256 hash |
 | Secrets: API keys (Gemini, ElevenLabs, Meta), `BETTER_AUTH_SECRET`, the token encryption keys | **Environment variables** (`.env` locally, Vercel settings in production). Never in the database, never in git | Nothing |
 | Pre-recorded voice samples | Static files in `public/voices/` (decision D7) | Nothing |
 | Brainstorm ideas and AI caption suggestions | Not stored (only shown to the creator) | Only what the creator picks: `project.input.brainstormChoice`, `post.caption` |
@@ -551,7 +551,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - **Insert-only.** Never updated, never deleted (except account deletion).
 - A version is saved **even if it fails validation** (so no typing is lost); it just can't be approved until fixed.
 - `plan.ownerId`, `plan.projectId`, `plan.versionId` are set by code, never by the AI.
-- A copy of the plan is also written to R2 (`users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json`, ARCHITECTURE §9) for the render step; MongoDB is the record the app reads. **Not yet in F15** (R2 is set up in F22; the copy is written when the render step needs it).
+- **No copy of the plan in R2** (decision in F22): MongoDB holds every version, and the render step reads the plan from here. ARCHITECTURE §9 no longer has a `plans/` key.
 - **F15:** the AI's first plan is saved only when it is valid (an answer still invalid after the one repair fails the job with `PLAN_INVALID`, PRD decision #24b); `parentVersionId` is `null` for `ai_plan`; `versionNumber` = the project's highest + 1, in the same transaction that points the project at it. **Created in F15** (`packages/db/src/plan-versions.ts`).
 - **F17, F19 (`user_edit`):** a narration edit (D3: the edited blocks of one scene, together, as ONE version) or voice switch (D4) copies the current version's plan with the new `versionId`/`parentVersionId`, applies the change, runs the same plan validator as the AI's plans and saves it in ONE transaction with the project's pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, `stateVersion + 1`, and `voiceGender` for D4). Saved even when invalid. `plannerUsage: null`. Undo/restore (D7) adds no version. Until F30, D3/D4/D5/D7 are refused while the project is `scheduled` or `publish_failed` (F30 adds the post invalidation in the same transaction, then allows them). Code: `packages/db/src/storyboard-edits.ts`.
 - **F18 (`ai_revision`):** saved by the `revise` job only when valid and only when at least one scene changed; `parentVersionId` = the version the request was made on. Code: `packages/db/src/revisions.ts`.
@@ -1473,7 +1473,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F18 | `revisions`; `jobs` of type `revise`; `providerUsage` rows with `operation: "revise"`. Indexes: `npm run db -- indexes --feature F18 --apply` |
 | F20 | `storyboardApprovals`, `auditLogs` (no generate job and no videos counter yet: F23). Indexes: `npm run db -- indexes --feature F20 --apply` |
 | F21 | Archived projects (`state: "archived"`, `archivedAt`, `stateBeforeArchive`; no new collection). Index: `npm run db -- indexes --feature F21 --apply` |
-| F22 | Nothing in MongoDB: your R2 bucket |
+| F22 | Nothing in MongoDB: your R2 bucket `reel-app-dev` (one test file in `healthcheck/`) |
 | F23 | `speechArtifacts`, `renders` (files in R2) |
 | F25 | `captionOverrides` |
 | F27 | `settings`; the remaining limits in `usageCounters` (videos, voice characters) start being enforced (projects/day is enforced since F12, `projects.planRequestCount` since F15) |

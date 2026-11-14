@@ -418,11 +418,10 @@ One document with `_id: "global"`: `version`, `maintenance { active, message }`,
 
 ## 9. Object Storage (Cloudflare R2)
 
-- **One private bucket** per environment (`bytereel-dev`, `bytereel-prod`). No public bucket access.
-- **Key layout** (built only by `storage` code from IDs, never from client or model input):
+- **One private bucket** per environment: **`reel-app-dev`**, **`reel-app-prod`** (F22; brand-neutral names because the product name may change, BRAND.md §10: do not rename a bucket). No public bucket access, no `r2.dev` address. The API token has **Object Read & Write on that one bucket only**.
+- **Code:** `packages/storage` (F22): `readR2Config` (checks `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, naming what is missing, never printing values), `StorageKeys` (the key builder), `R2ArtifactStore` (implements the pipeline `ArtifactStore`, plus `put` with a content type, `get`, `head`, `presignedGet`). AWS SDK v3 S3 client, region `auto`, endpoint `https://<account>.r2.cloudflarestorage.com`, path-style. Check: `npm run storage -- check`.
+- **Key layout** (built only by `StorageKeys` from validated ObjectIds (24 lowercase hex) and hashes, never from client or model input; anything else, `..`, slashes in ids and empty values are refused):
 ```
-users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json
-users/{ownerId}/projects/{projectId}/plans/{planVersionId}/review.html
 users/{ownerId}/speech/{cacheKey}/audio.mp3
 users/{ownerId}/speech/{cacheKey}/alignment.json
 users/{ownerId}/speech/{cacheKey}/alignment.normalized.json
@@ -432,10 +431,16 @@ users/{ownerId}/projects/{projectId}/renders/{renderId}/output.mp4
 users/{ownerId}/projects/{projectId}/renders/{renderId}/thumbnail.jpg
 users/{ownerId}/projects/{projectId}/renders/{renderId}/frames/{n}.png
 users/{ownerId}/projects/{projectId}/renders/{renderId}/qa.json
+healthcheck/{UTC timestamp}-hello.txt     ← only `npm run storage -- check` (F22); the app never writes outside users/
 ```
-- **Access:** the browser plays and downloads via **presigned GET URLs** (TTL 15 min), issued only after an ownership check. Downloads use `Content-Disposition: attachment; filename="<title>.mp4"`.
+  - `{cacheKey}` in a key is the 64 hex characters of the speech `cacheKey` (stored in MongoDB as `sha256:<hex>`), without the `sha256:` prefix.
+  - `{n}` in `frames/{n}.png` is a whole number 0–9999.
+  - **Decision (F22): no storyboard copy in R2.** The former `plans/{planVersionId}/plan.json` and `review.html` keys are dropped for now: MongoDB `planVersions` holds every version, and the render step reads the plan from there. Add them back only if a step really needs a file.
+  - Content types are limited to JSON, MP4, MP3, PNG, JPEG and plain text (no HTML is ever served from the bucket).
+- **Pipeline runs in R2:** `R2ArtifactStore` stores a run's `timeline.json`, `captions.json`, `output.mp4` and `qa.json` in the render folder (the run's `versionId` is the `renderId`). Plans, approvals and the manifest are not R2 files (MongoDB). There is no lock object in R2: the single writer per render is the MongoDB job (one active job per project).
+- **Access:** the browser plays and downloads via **presigned GET URLs** (TTL 15 min = `presignedGet` default 900 s; the code refuses more than 7200 s), issued only after an ownership check. Downloads use `Content-Disposition: attachment; filename="<title>.mp4"` (safe ASCII) plus `filename*=UTF-8''…` (RFC 5987) when the title isn't plain ASCII, e.g. Hindi.
 - **Instagram fetch:** Meta needs a **public URL** for `video_url`. We issue a presigned GET with a TTL of **2 hours** (enough for container processing), used only for that container (decision D5). Verify during integration that Meta accepts presigned R2 URLs with query strings; if it doesn't, use a short-lived Next.js proxy route `/api/media/{token}` that streams from R2.
-- **Integrity:** the SHA-256 of each artifact is stored in MongoDB, and the render worker verifies inputs before rendering.
+- **Integrity:** `put` computes the SHA-256 before upload, sends it as the upload checksum (R2 refuses the upload if the bytes differ), saves it on the object (`x-amz-meta-sha256`, returned by `head`) and returns it; the caller stores it in MongoDB, and the render worker verifies inputs before rendering.
 - **Lifecycle:** keep everything in V1. Later: delete preview frames after 30 days, and delete unreferenced speech after 90 days.
 - **Account deletion:** delete the `users/{ownerId}/` prefix (§22).
 

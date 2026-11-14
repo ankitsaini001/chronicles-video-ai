@@ -57,6 +57,7 @@ the project, but the storyboard waits; start `npm run inngest` and it begins wit
 npm run dev                                                       # the website (http://localhost:3000)
 npm run inngest                                                   # F15: Inngest Dev Server for the background jobs (second terminal)
 npm run db -- indexes --feature F15 --apply                       # create a feature's MongoDB indexes (here: jobs, planVersions)
+npm run storage -- check                                          # R2 check (F22): test file in healthcheck/, private + expiring links (~80 s)
 npm run pipeline -- preflight                                    # runtime, disk, output folder, config presence (no network)
 npm run pipeline -- preflight --network                          # + read-only provider checks: Gemini model get/list, ElevenLabs models + voices
 npm run pipeline -- plan --topic-file examples/water-cycle.md --voice indian-english-female   # LIVE Gemini planner -> plan.json + plan-review.html

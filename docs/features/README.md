@@ -70,7 +70,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | ⬜ Not started |
+| F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | 🧪 Testing |
 | F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ⬜ Not started |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ⬜ Not started |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ⬜ Not started |
