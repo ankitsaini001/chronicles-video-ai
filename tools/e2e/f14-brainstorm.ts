@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   addInvite,
   API_RATE_LIMITS,
@@ -26,6 +28,9 @@ import { ObjectId } from "mongodb";
  *   3. MONGODB_DB=bytereel_test E2E_BASE_URL=http://localhost:3236 E2E_FAKE_GEMINI=1 npx tsx tools/e2e/f14-brainstorm.ts
  *   4. drop the bytereel_test database afterwards
  *
+ * Before ANY request it reads the environment of the server process listening on the port
+ * (Linux /proc) and stops unless it has E2E_FAKE_GEMINI=1 and MONGODB_DB=bytereel_test, so a
+ * misconfigured run can never reach the real Gemini (F14 review). No value from it is printed.
  * Uses only @example.com emails and random throw-away passwords. Prints no secrets.
  */
 
@@ -38,6 +43,17 @@ const settings = readDbConfig(process.env);
 if (!settings.ok) throw new Error(settings.problems.join(" "));
 if (settings.config.dbName !== TEST_DB) throw new Error(`Refusing to run: MONGODB_DB must be ${TEST_DB}.`);
 const db = getDb(settings.config);
+
+/** The environment of the process listening on the server's port (only the two names we check). */
+function serverSettings(port: string): { fake: boolean; testDb: boolean } {
+  const listing = execFileSync("ss", ["-ltnpH", `sport = :${port}`], { encoding: "utf8" });
+  const pid = /pid=(\d+)/.exec(listing)?.[1];
+  if (!pid) throw new Error(`No server process found on port ${port} (start it first, see the header).`);
+  const env = new Map(readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)] as const));
+  return { fake: env.get("E2E_FAKE_GEMINI") === "1", testDb: env.get("MONGODB_DB") === TEST_DB };
+}
+const server = serverSettings(new URL(base).port);
+if (!server.fake || !server.testDb) throw new Error("Stopping before any request: the server must run with E2E_FAKE_GEMINI=1 and MONGODB_DB=bytereel_test.");
 
 const tag = randomBytes(4).toString("hex");
 let failures = 0;
