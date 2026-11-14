@@ -20,7 +20,7 @@ import {
 } from "@bytereel/db";
 import { ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
-import { inngestProblem, INNGEST_APP_ID } from "../apps/web/inngest/client";
+import { inngestDevMode, inngestProblem, INNGEST_APP_ID } from "../apps/web/inngest/client";
 import { fakeGeminiFetch } from "../apps/web/lib/brainstorm/fake-gemini";
 import { toProjectStatus } from "../apps/web/lib/plan/api";
 import { plannerProviderFromEnv } from "../apps/web/lib/plan/provider";
@@ -114,11 +114,21 @@ class FakeStore implements PlanJobStore {
   async reserveRequest({ attempt, maxRequests, message }: { attempt: number; maxRequests: number; message: string }) {
     if (this.job.state !== "running" || this.job.attempt !== attempt) return "stale" as const;
     if (this.job.planner!.requests >= maxRequests) return "limit" as const;
+    // The attempt's first real request counts 1 toward the project's 20 (only below 20).
+    if (this.job.planner!.requests === 0) {
+      if (this.project.planRequestCount >= 20) return "quota" as const;
+      this.project.planRequestCount++;
+    }
     this.job.planner!.requests++;
     this.job.progress = { stage: "plan", percent: 10, message };
     return "ok" as const;
   }
+  saveFailures = 0;
   async saveAnswer({ answer }: { answer: PlannerAnswer }) {
+    if (this.saveFailures > 0) {
+      this.saveFailures--;
+      throw new Error("database blip");
+    }
     if (this.job.planner!.answers.some((a) => a.n === answer.n)) return false;
     this.job.planner!.answers.push(answer);
     return true;
@@ -192,12 +202,63 @@ async function run(store: FakeStore, planner: PlannerProvider | null, runner = i
       provider: () => (planner ? { ok: true, provider: planner } : { ok: false, problem: "GEMINI_API_KEY is missing." }),
       retryLater: (message, waitMs) => new RetryLaterError(message, waitMs),
       log: () => undefined,
+      sleep: async () => undefined,
     },
   );
   return { outcome, runner };
 }
 
 describe("plan-video job (runPlanJob)", () => {
+  it("counts 1 toward the project's 20 only on the attempt's FIRST real Gemini request", async () => {
+    const store = new FakeStore();
+    store.project.planRequestCount = 0;
+    await run(store, new FakePlanner([busy(), INVALID, VALID])); // a retry and a repair in one attempt
+    expect(store.project.planRequestCount).toBe(1);
+  });
+
+  it("a Try again that reuses a saved valid answer costs nothing toward the 20", async () => {
+    const store = new FakeStore();
+    store.project.planRequestCount = 0;
+    await run(store, new FakePlanner([VALID]));
+    store.job.state = "queued";
+    store.job.attempt = 2;
+    store.project.state = "planning";
+    await run(store, new FakePlanner([]), inngestLikeRunner(), 2);
+    expect(store.project.planRequestCount).toBe(1);
+  });
+
+  it("project already at 20 when the attempt asks Gemini → QUOTA_EXCEEDED, no request", async () => {
+    const store = new FakeStore();
+    store.project.planRequestCount = 20;
+    const planner = new FakePlanner([VALID]);
+    expect((await run(store, planner)).outcome).toBe("failed");
+    expect(store.failedWith).toEqual({ code: "QUOTA_EXCEEDED", stage: "plan" });
+    expect(planner.requests).toHaveLength(0);
+    expect(store.usage).toEqual([]);
+  });
+
+  it("a paid answer is saved first, with in-process save retries; the usage row is final, never 'busy'", async () => {
+    const store = new FakeStore();
+    store.saveFailures = 2;
+    const planner = new FakePlanner([VALID]);
+    const { outcome, runner } = await run(store, planner);
+    expect(outcome).toBe("saved");
+    expect(planner.requests).toHaveLength(1);
+    expect(runner.retries).toEqual([]);
+    expect(store.usage.map((u) => `${u.status}/${u.outcome}`)).toEqual(["final/ok"]);
+  });
+
+  it("if saving keeps failing, the job fails INTERNAL (not busy) and the usage row is still final", async () => {
+    const store = new FakeStore();
+    store.saveFailures = 99;
+    const planner = new FakePlanner([VALID, VALID]);
+    const { runner } = await run(store, planner);
+    expect(store.failedWith?.code).toBe("INTERNAL");
+    expect(runner.retries).toEqual([]); // no RetryAfter: saving problems never look like a busy Gemini
+    expect(planner.requests).toHaveLength(1);
+    expect(store.usage.map((u) => `${u.status}/${u.outcome}`)).toEqual(["final/ok"]);
+  });
+
   it("valid first answer → plan version saved; one request, logged before and after", async () => {
     const store = new FakeStore();
     const planner = new FakePlanner([VALID]);
@@ -465,6 +526,17 @@ describe("jobs, projects and limits (pure parts)", () => {
 });
 
 describe("Inngest and planner setup", () => {
+  it("dev mode only when asked for (INNGEST_DEV); otherwise both keys on any host", () => {
+    expect(inngestProblem({})).toMatch(/INNGEST_EVENT_KEY is missing/);
+    expect(inngestProblem({ INNGEST_EVENT_KEY: "k" })).toMatch(/INNGEST_SIGNING_KEY is missing/);
+    expect(inngestProblem({ INNGEST_EVENT_KEY: "k", INNGEST_SIGNING_KEY: "s", NODE_ENV: "production" })).toBeNull();
+    expect(inngestProblem({ NODE_ENV: "production", INNGEST_EVENT_KEY: "k" })).toMatch(/INNGEST_SIGNING_KEY is missing/);
+    expect(inngestProblem({ NODE_ENV: "production", INNGEST_DEV: "1" })).toMatch(/not allowed in a production build/);
+    expect(inngestProblem({ NODE_ENV: "production", INNGEST_DEV: "http://localhost:8299" })).toBeNull(); // the e2e test server
+    expect(inngestDevMode({})).toBe(false);
+    expect(inngestDevMode({ INNGEST_DEV: "1" })).toBe(true);
+  });
+
   it("Vercel: never dev mode, both keys required", () => {
     expect(inngestProblem({ VERCEL: "1", INNGEST_DEV: "1", INNGEST_EVENT_KEY: "k", INNGEST_SIGNING_KEY: "s" })).toMatch(/INNGEST_DEV is set on Vercel/);
     expect(inngestProblem({ VERCEL_ENV: "production", INNGEST_SIGNING_KEY: "s" })).toMatch(/INNGEST_EVENT_KEY is missing/);
@@ -472,14 +544,15 @@ describe("Inngest and planner setup", () => {
     expect(inngestProblem({ VERCEL: "1", INNGEST_EVENT_KEY: "k", INNGEST_SIGNING_KEY: "s" })).toBeNull();
   });
 
-  it("locally: dev mode, optionally another local Dev Server address", () => {
-    expect(inngestProblem({})).toBeNull();
+  it("locally (npm run dev sets INNGEST_DEV=1): dev mode, optionally another local Dev Server address", () => {
+    expect(inngestProblem({ INNGEST_DEV: "1", NODE_ENV: "development" })).toBeNull();
     expect(inngestProblem({ INNGEST_DEV: "http://localhost:8299" })).toBeNull();
     expect(inngestProblem({ INNGEST_DEV: "https://example.com" })).toMatch(/local Dev Server address/);
   });
 
-  it("the app id comes from the product name (SITE)", () => {
-    expect(INNGEST_APP_ID).toBe(SITE.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+  it("the app id is a fixed, brand-neutral constant (never derived from the product name)", () => {
+    expect(INNGEST_APP_ID).toBe("reel-app");
+    expect(INNGEST_APP_ID).not.toContain(SITE.name.toLowerCase());
   });
 
   it("planner: GEMINI_MODEL required and fixed; the fake only on a local test server", () => {

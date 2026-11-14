@@ -9,7 +9,7 @@ import { ObjectId } from "mongodb";
  * stand-in (E2E_FAKE_GEMINI=1, apps/web/lib/brainstorm/fake-gemini.ts: NO real AI call) and a
  * private Inngest Dev Server on port 8299 (never the default 8288).
  * Checks C2 (202 + queued job) → plan-video (Inngest) → plan version 1, the repair, PLAN_INVALID,
- * PROVIDER_BUSY, PROVIDER_REJECTED, C4 edit idea, E2 retry (+1 of 20, 429 at the limit, not
+ * PROVIDER_BUSY, PROVIDER_REJECTED, C4 edit idea, E2 retry (an attempt that asks Gemini counts 1 of 20, 429 at the limit, not
  * counted toward 5/day), C6/E1 polling, owner-only 404s, the stuck-job rule (dead job → failed,
  * lost event → sent again), the providerUsage log, the indexes and the project page.
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239.
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   const jobDoc = await db.collection("jobs").findOne({ _id: new ObjectId(job.id as string) });
   check("job key is plan:{projectId}:{inputHash}", typeof jobDoc?.idempotencyKey === "string" && new RegExp(`^plan:${project.id}:[0-9a-f]{64}$`).test(jobDoc.idempotencyKey));
   const projectDoc = await db.collection("projects").findOne({ _id: new ObjectId(project.id as string) });
-  check("project saved with planRequestCount 1", projectDoc?.planRequestCount === 1);
+  check("project saved with planRequestCount 0 (counted only when the job asks Gemini)", projectDoc?.planRequestCount === 0);
 
   const replay = await createProject(a.cookie, "Why do we see lightning before we hear thunder?", "fixed-key-" + tag);
   const replay2 = await createProject(a.cookie, "Why do we see lightning before we hear thunder?", "fixed-key-" + tag);
@@ -134,6 +134,7 @@ async function main(): Promise<void> {
   const version = await db.collection("planVersions").findOne({ projectId: new ObjectId(project.id as string) });
   check("plan version 1 saved: ai_plan, valid, hash, stats, plannerUsage", version?.versionNumber === 1 && version.source === "ai_plan" && version.validation?.valid === true && /^sha256:[0-9a-f]{64}$/.test(version.planHash) && version.stats?.sceneCount >= 3 && version.plannerUsage?.attempts === 1);
   check("the plan carries code-owned ids (owner, project, version = the document id)", version?.plan?.ownerId === a.id.toHexString() && version?.plan?.projectId === project.id && version?.plan?.versionId === version?._id.toHexString() && version?.plan?.voicePreset === "indian-english-female");
+  check("after the job asked Gemini once: planRequestCount 1", (await db.collection("projects").findOne({ _id: new ObjectId(project.id as string) }))?.planRequestCount === 1);
   check("C6: currentPlanVersionId points to it; title is the plan's topic", done.status.currentPlanVersionId === version?._id.toHexString() && (await db.collection("projects").findOne({ _id: new ObjectId(project.id as string) }))?.title === version?.plan?.topic);
   r = await send(a.cookie, "GET", `/api/v1/jobs/${job.id}`);
   check("E1: job succeeded, stages succeeded, result.planVersionId, pollAfterMs null", r.status === 200 && r.json.state === "succeeded" && r.json.stages.every((s: Json) => s.status === "succeeded") && r.json.result?.planVersionId === version?._id.toHexString() && r.json.pollAfterMs === null);
@@ -230,10 +231,10 @@ async function main(): Promise<void> {
   // --- 8. Two Try again clicks at the same moment (different keys): only one starts a run.
   const both = await Promise.all([retry(a.cookie, busyJob), retry(a.cookie, busyJob)]);
   check("two simultaneous Try again clicks → one 202, one 409", both.map((x) => x.status).sort().join() === "202,409", both.map((x) => `${x.status} ${x.json.error?.code ?? ""}`).join(", "));
-  check("…and only one counted (planRequestCount 3)", (await db.collection("projects").findOne({ _id: new ObjectId(busyProject) }))?.planRequestCount === 3);
   r = await editIdea(a.cookie, busyProject, { text: "Why is the sky blue?", expectedStateVersion: (await status(a.cookie, busyProject)).json.stateVersion });
   check("C4 while the storyboard is being written → 409 JOB_ALREADY_RUNNING", r.status === 409 && r.json.error?.code === "JOB_ALREADY_RUNNING");
   await waitDone(a.cookie, busyProject, 90_000);
+  check("…and only one counted (planRequestCount 3)", (await db.collection("projects").findOne({ _id: new ObjectId(busyProject) }))?.planRequestCount === 3);
 
   // --- 9. Safety block → PROVIDER_REJECTED: no Try again until the idea is edited (user b: a used its 5 projects today).
   r = await createProject(b.cookie, "e2e unsafe: something not allowed");
@@ -259,11 +260,12 @@ async function main(): Promise<void> {
   await db.collection("jobs").insertOne({ ...stuckJob, state: "running", attempt: 1, updatedAt: old, startedAt: old, event: { ...stuckJob.event, sentAt: old, lastTriedAt: old } });
   await db.collection("projects").insertOne({
     _id: stuckId, ownerId: a.id, schemaVersion: 1, title: "A job that died", language: "en", voiceGender: "female", input, state: "planning",
-    currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: stuckJob._id, stateVersion: 1, planRequestCount: 1,
+    currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: stuckJob._id, stateVersion: 1, planRequestCount: 0,
     lastError: null, createdAt: old, updatedAt: old, archivedAt: null,
   });
   const stuck = await status(a.cookie, stuckId.toHexString());
   check("running job with no update for 10+ min → failed INTERNAL, retryable, project plan_failed", stuck.json.state === "plan_failed" && stuck.json.lastError?.code === "INTERNAL" && stuck.json.allowedActions?.includes("retry_job") && stuck.json.pollAfterMs === null);
+  check("a job that never asked Gemini cost nothing toward the 20 (planRequestCount still 0)", (await db.collection("projects").findOne({ _id: stuckId }))?.planRequestCount === 0);
 
   const lostId = new ObjectId();
   const lostInput = { type: "topic", text: "A job whose event was lost", brainstormChoice: null };
