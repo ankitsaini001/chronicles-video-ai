@@ -44,8 +44,10 @@ export function libraryTabOf(state: ProjectState): LibraryTab | null {
 }
 
 /**
- * API.md §11.3 `ProjectSummary` (one card). `storyboardApproved` (F21, additive): the storyboard on
- * screen is the approved one, so the card can say "Approved" instead of "Storyboard ready".
+ * API.md §11.3 `ProjectSummary` (one card). Two additive fields (F21): `stateVersion`, sent back
+ * by the card's Rename (C4) and Archive (C5) so another tab's change is never overwritten; and
+ * `storyboardApproved`, the storyboard on screen is the approved one, so the card can say
+ * "Approved" instead of "Storyboard ready".
  */
 export type ProjectSummaryResource = {
   id: string;
@@ -57,6 +59,7 @@ export type ProjectSummaryResource = {
   thumbnailUrl: string | null;
   latestPost: null;
   activeJobType: JobType | null;
+  stateVersion: number;
   storyboardApproved: boolean;
   createdAt: string;
   updatedAt: string;
@@ -74,6 +77,7 @@ export function toProjectSummary(doc: ProjectDocument, activeJobType: JobType | 
     thumbnailUrl: null,
     latestPost: null,
     activeJobType: doc.activeJobId ? activeJobType : null,
+    stateVersion: doc.stateVersion,
     storyboardApproved: doc.currentPlanVersionId !== null && doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId) === true,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

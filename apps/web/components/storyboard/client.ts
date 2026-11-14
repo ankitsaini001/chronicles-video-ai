@@ -1,4 +1,4 @@
-// Calls from the storyboard screen to /api/v1 (browser only; F17–F20). Every change sends the
+// Calls from the storyboard screen and the My videos cards to /api/v1 (browser only; F17–F21). Every change sends the
 // project's `stateVersion` the page was loaded with, so another tab's change is never silently
 // overwritten: the server answers 409 STALE_VERSION and the screen offers "Refresh".
 
@@ -17,7 +17,7 @@ export function newIdempotencyKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function apiSend<T = Record<string, unknown>>(method: "GET" | "POST", url: string, body?: unknown, headers: Record<string, string> = {}): Promise<ApiAnswer<T>> {
+export async function apiSend<T = Record<string, unknown>>(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: unknown, headers: Record<string, string> = {}): Promise<ApiAnswer<T>> {
   let response: Response;
   try {
     response = await fetch(url, {
