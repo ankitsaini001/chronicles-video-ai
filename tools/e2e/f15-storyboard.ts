@@ -318,6 +318,26 @@ async function main(): Promise<void> {
   const hiPage = (await (await fetch(`${base}/projects/${hiId.toHexString()}`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
   check("Hindi project page: viewable, the note, no Try again / Edit idea", hiPage.includes("Hindi storyboards can") && hiPage.includes("Start a new project in English.") && !hiPage.includes(">Try again<") && !hiPage.includes(">Edit idea<"));
 
+  // A Hindi job queued before the switch-off whose event was lost: the stuck-job rule sends it
+  // again, and the worker fails it at the start step (LANGUAGE_UNAVAILABLE, not retryable) with no
+  // Gemini call and nothing counted; the project ends in plan_failed, never stuck in planning.
+  const queuedHiId = new ObjectId();
+  const queuedHiJob = newPlanJob({ ownerId: a.id, projectId: queuedHiId, project: { input: hiInput, language: "hi", voiceGender: "female" }, now });
+  await db.collection("jobs").insertOne(queuedHiJob);
+  await db.collection("projects").insertOne({
+    _id: queuedHiId, ownerId: a.id, schemaVersion: 1, title: "बचत खाता बनाम FD", language: "hi", voiceGender: "female", input: hiInput, state: "planning",
+    currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: queuedHiJob._id, stateVersion: 1, planRequestCount: 0,
+    lastError: null, createdAt: now, updatedAt: now, archivedAt: null,
+  });
+  done = await waitDone(a.cookie, queuedHiId.toHexString());
+  const queuedHiJobAfter = await db.collection("jobs").findOne({ _id: queuedHiJob._id });
+  const queuedHiAfter = await db.collection("projects").findOne({ _id: queuedHiId });
+  check(
+    "queued Hindi job (lost event) → re-sent → fails LANGUAGE_UNAVAILABLE, not retryable; plan_failed; no Gemini call, nothing counted",
+    done.status.state === "plan_failed" && queuedHiJobAfter?.error?.code === "LANGUAGE_UNAVAILABLE" && queuedHiJobAfter.error.retryable === false && queuedHiAfter?.planRequestCount === 0 && (await usageRows(queuedHiJob._id.toHexString())).length === 0 && done.status.allowedActions?.join() === "rename,archive",
+    `${done.status.state} ${queuedHiJobAfter?.error?.code}`,
+  );
+
   // --- 11. No secrets or provider details in page scripts.
   const scripts = [...failedPage.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]!);
   let leaks = 0;

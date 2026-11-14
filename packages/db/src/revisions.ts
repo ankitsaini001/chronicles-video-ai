@@ -3,6 +3,7 @@ import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { cleanIdeaText } from "./idea-text";
+import { isLanguageEnabled, languageUnavailableMessage } from "./languages";
 import { getJob, JOB_SCHEMA_VERSION, JOBS_COLLECTION, PLAN_ERROR_RETRYABLE, PLAN_STAGES, retryEventId, type JobDocument, type PlanCheckpoint, type PlanJobErrorCode } from "./jobs";
 import type { PlanJobContext, ValidPlanToSave } from "./plan-jobs";
 import { decodeCursor, diffScenes, encodeCursor, InvalidCursorError, PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type SceneDiff } from "./plan-versions";
@@ -64,6 +65,7 @@ export const REVISE_MESSAGES = {
   PROVIDER_REJECTED: "We can't make this change. Please ask for something else.",
   PLAN_INVALID: "Our AI couldn't make a good storyboard with this change. Try saying it differently.",
   QUOTA_EXCEEDED: "This project has reached 20 changes. Start a new project to keep going.",
+  LANGUAGE_UNAVAILABLE: languageUnavailableMessage(),
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
 
@@ -278,6 +280,13 @@ export async function startReviseAttempt(db: Db, input: { jobId: string; attempt
   if (!job || job.type !== "revise" || job.attempt !== input.attempt || (job.state !== "queued" && job.state !== "running")) return null;
   const project = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: job.projectId, ownerId: job.ownerId });
   if (!project || !project.activeJobId?.equals(job._id) || !STORYBOARD_EDIT_STATES.includes(project.state) || !job.inputRef.planVersionId || !project.currentPlanVersionId?.equals(job.inputRef.planVersionId)) return null;
+  // Language switch (languages.ts): a job queued before the switch-off, re-sent by the stuck-job
+  // rule or retried by Inngest never reaches Gemini. It fails for good (not retryable), the
+  // revision is `failed`, and the project's activeJobId is cleared (failReviseJob).
+  if (!isLanguageEnabled(project.language)) {
+    await failReviseJob(db, { jobId: job._id, attempt: input.attempt, code: "LANGUAGE_UNAVAILABLE", stage: "plan", now });
+    return null;
+  }
 
   let planner: PlanCheckpoint;
   if (job.planner && job.planner.attempt === input.attempt) {

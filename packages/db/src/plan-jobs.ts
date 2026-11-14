@@ -1,5 +1,6 @@
 import { type Db, ObjectId } from "mongodb";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
+import { isLanguageEnabled } from "./languages";
 import {
   canRetryPlanJob,
   getJob,
@@ -64,6 +65,13 @@ export async function startPlanAttempt(db: Db, input: { jobId: string; attempt: 
   if (!job || job.type !== "plan" || job.attempt !== input.attempt || (job.state !== "queued" && job.state !== "running")) return null;
   const project = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: job.projectId, ownerId: job.ownerId });
   if (!project || !project.activeJobId?.equals(job._id) || project.state !== "planning") return null;
+  // Language switch (languages.ts): a job queued before the switch-off, re-sent by the stuck-job
+  // rule or retried by Inngest never reaches Gemini. It fails for good (not retryable) and the
+  // project moves to `plan_failed` (failPlanJob), never left in `planning`.
+  if (!isLanguageEnabled(project.language)) {
+    await failPlanJob(db, { jobId: job._id, attempt: input.attempt, code: "LANGUAGE_UNAVAILABLE", stage: "plan", now });
+    return null;
+  }
 
   let planner: PlanCheckpoint;
   if (job.planner && job.planner.attempt === input.attempt) {
@@ -113,15 +121,19 @@ export async function loadPlanAttempt(db: Db, input: { jobId: string; attempt: n
  * The attempt's first request also adds 1 to `projects.planRequestCount` (only below 20), in the same
  * transaction: only an attempt that really asks Gemini counts toward the 20 (a job that never got to
  * Gemini, or a Try again that reuses a saved answer, costs nothing). F15, after code review.
+ * "language": the project's language is switched off (languages.ts): nothing counted, no request;
+ * the caller fails the job with LANGUAGE_UNAVAILABLE.
  */
+export type PlanRequestReservation = "ok" | "limit" | "quota" | "stale" | "language";
+
 export async function reservePlanRequest(
   db: Db,
   input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number; now?: Date },
-): Promise<"ok" | "limit" | "quota" | "stale"> {
+): Promise<PlanRequestReservation> {
   const now = input.now ?? new Date();
   const limit = USAGE_LIMITS.planRequestsPerProject;
   const session = db.client.startSession();
-  let result: "ok" | "limit" | "quota" | "stale" = "stale";
+  let result: PlanRequestReservation = "stale";
   try {
     await session.withTransaction(async () => {
       const jobs = db.collection<JobDocument>(JOBS_COLLECTION);
@@ -132,6 +144,13 @@ export async function reservePlanRequest(
       }
       if (job.planner.requests >= input.maxRequests) {
         result = "limit";
+        return;
+      }
+      // Checked on every request, before anything is counted (the language may be switched off
+      // between the start step and here).
+      const project = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: job.projectId }, { session, projection: { language: 1 } });
+      if (!project || !isLanguageEnabled(project.language)) {
+        result = project ? "language" : "stale";
         return;
       }
       if (job.planner.requests === 0) {

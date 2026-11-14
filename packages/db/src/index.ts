@@ -213,6 +213,7 @@ export {
   failPlanJob,
   loadPlanAttempt,
   reservePlanRequest,
+  type PlanRequestReservation,
   retryPlanJob,
   savePlannerAnswer,
   setPlanProgress,

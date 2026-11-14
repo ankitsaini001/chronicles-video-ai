@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { type ClientSession, type Db, ObjectId } from "mongodb";
+import { languageUnavailableMessage } from "./languages";
 
 // Background work (docs/DATABASE.md §4.9 `jobs`, docs/API.md §8 "Asynchronous Jobs and Polling").
 // F15 builds the first job type: `plan` (the AI writes the storyboard, Inngest function
@@ -19,7 +20,8 @@ export type JobType = "plan" | "revise" | "generate" | "caption" | "publish";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "needs_input" | "cancelled";
 export type StageStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 /** Error codes a plan or revise job can end with (API.md §4.2). */
-export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "QUOTA_EXCEEDED" | "INTERNAL";
+/** LANGUAGE_UNAVAILABLE: the project's language was switched off (languages.ts) before the job asked the AI. */
+export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "QUOTA_EXCEEDED" | "LANGUAGE_UNAVAILABLE" | "INTERNAL";
 
 /** Why a job stopped to ask the creator for something (API.md §8.2 `needsInput`). */
 export interface JobNeedsInput {
@@ -47,6 +49,7 @@ export const JOB_MESSAGES = {
   PROVIDER_REJECTED: "We can't make a video about this topic.",
   PLAN_INVALID: "Couldn't build a good storyboard, try rephrasing.",
   QUOTA_EXCEEDED: "This project has reached 20 storyboard requests. Start a new project to keep going.",
+  LANGUAGE_UNAVAILABLE: languageUnavailableMessage(),
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
 
@@ -56,6 +59,7 @@ export const PLAN_ERROR_RETRYABLE: Record<PlanJobErrorCode, boolean> = {
   PROVIDER_REJECTED: false,
   PLAN_INVALID: true,
   QUOTA_EXCEEDED: false,
+  LANGUAGE_UNAVAILABLE: false,
   INTERNAL: true,
 };
 

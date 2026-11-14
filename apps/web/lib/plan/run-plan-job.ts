@@ -1,4 +1,4 @@
-import type { PlanJobContext, PlanJobErrorCode, PlannerAnswer, ValidPlanToSave } from "@bytereel/db";
+import type { PlanJobContext, PlanJobErrorCode, PlannerAnswer, PlanRequestReservation, ValidPlanToSave } from "@bytereel/db";
 import { voicePresetFor } from "@bytereel/db/voices";
 import type { Language, VoicePreset } from "@bytereel/pipeline/contracts";
 import {
@@ -48,8 +48,9 @@ export interface PlanJobStore {
   /**
    * Count one Gemini request before it is sent. The attempt's FIRST request also counts 1 toward
    * the project's 20 (atomically, only below 20): "quota" when the project is already at 20.
+   * "language": the project's language is switched off (nothing counted, no request).
    */
-  reserveRequest(input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number }): Promise<"ok" | "limit" | "quota" | "stale">;
+  reserveRequest(input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number }): Promise<PlanRequestReservation>;
   saveAnswer(input: { jobId: ObjectId; attempt: number; answer: PlannerAnswer }): Promise<boolean>;
   setProgress(input: { jobId: ObjectId; attempt: number; stage: string; percent: number; message: string }): Promise<void>;
   complete(input: { jobId: ObjectId; attempt: number; result: ValidPlanToSave }): Promise<boolean>;
@@ -103,7 +104,7 @@ export type PlanJobEvent = { jobId: string; attempt: number };
 export type PlanJobOutcome = "saved" | "failed" | "skipped";
 
 /** What one ask step reports back (small and JSON-safe: Inngest stores it as the step's result). */
-type AskResult = { status: "valid" | "invalid" } | { status: "stale" | "limit" | "quota" | "rejected" | "setup" | "busy" };
+type AskResult = { status: "valid" | "invalid" } | { status: "stale" | "limit" | "quota" | "language" | "rejected" | "setup" | "busy" };
 
 /** Saving a paid answer is retried in-process this many times (short waits) before the step fails. */
 const SAVE_TRIES = 3;
@@ -311,6 +312,8 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
         return fail("PROVIDER_BUSY", "plan", result.status === "limit" ? "Request limit for this attempt reached" : "Gemini stayed busy after the allowed retries");
       case "quota":
         return fail("QUOTA_EXCEEDED", "plan", "The project already used its 20 storyboard requests");
+      case "language":
+        return fail("LANGUAGE_UNAVAILABLE", "plan", "The project's language is switched off");
       case "rejected":
         return fail("PROVIDER_REJECTED", "plan", "Gemini refused the content (safety)");
       case "setup":

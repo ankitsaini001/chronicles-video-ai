@@ -5,7 +5,9 @@ import {
   CREATE_PROJECT_STATUS,
   UpdateProjectBodySchema,
   indexesForFeatures,
+  isLanguageEnabled,
   newPlanJob,
+  PLAN_ERROR_RETRYABLE,
   planInputHash,
   planJobKey,
   retryEventId,
@@ -114,6 +116,8 @@ class FakeStore implements PlanJobStore {
   async reserveRequest({ attempt, maxRequests, message }: { attempt: number; maxRequests: number; message: string }) {
     if (this.job.state !== "running" || this.job.attempt !== attempt) return "stale" as const;
     if (this.job.planner!.requests >= maxRequests) return "limit" as const;
+    // Language switch: checked before anything is counted (like reservePlanRequest).
+    if (!isLanguageEnabled(this.project.language)) return "language" as const;
     // The attempt's first real request counts 1 toward the project's 20 (only below 20).
     if (this.job.planner!.requests === 0) {
       if (this.project.planRequestCount >= 20) return "quota" as const;
@@ -235,6 +239,19 @@ describe("plan-video job (runPlanJob)", () => {
     expect(store.failedWith).toEqual({ code: "QUOTA_EXCEEDED", stage: "plan" });
     expect(planner.requests).toHaveLength(0);
     expect(store.usage).toEqual([]);
+  });
+
+  it("language switched off after the start step → LANGUAGE_UNAVAILABLE (not retryable), zero Gemini calls, nothing counted", async () => {
+    const store = new FakeStore();
+    store.project.planRequestCount = 0;
+    store.project.language = "hi";
+    const planner = new FakePlanner([VALID]);
+    expect((await run(store, planner)).outcome).toBe("failed");
+    expect(store.failedWith).toEqual({ code: "LANGUAGE_UNAVAILABLE", stage: "plan" });
+    expect(planner.requests).toHaveLength(0);
+    expect(store.project.planRequestCount).toBe(0);
+    expect(store.usage).toEqual([]);
+    expect(PLAN_ERROR_RETRYABLE.LANGUAGE_UNAVAILABLE).toBe(false);
   });
 
   it("a paid answer is saved first, with in-process save retries; the usage row is final, never 'busy'", async () => {
