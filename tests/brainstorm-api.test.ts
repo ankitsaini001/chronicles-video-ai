@@ -258,6 +258,8 @@ describe("Gemini setup and the test-only fake switch", () => {
     const r = brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_MODEL: "gemini-3.6-flash", GEMINI_BRAINSTORM_MODEL: "gemini-3.6-flash" });
     expect(r.ok && r.fake === false && r.provider.model).toBe("gemini-3.6-flash");
     expect(brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_BRAINSTORM_MODEL: "gemini flash" })).toEqual({ ok: false, problem: expect.stringContaining("GEMINI_BRAINSTORM_MODEL") });
+    expect(brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_BRAINSTORM_MODEL: "gemini-flash-lite-latest" })).toEqual({ ok: false, problem: expect.stringContaining("-latest") });
+    expect(brainstormProviderFromEnv({ GEMINI_API_KEY: "k", GEMINI_BRAINSTORM_MODEL: "gemini-3.1-flash-lite-preview-06" }).ok).toBe(true);
     const f = brainstormProviderFromEnv(localTest);
     expect(f.ok && f.fake && f.provider.model).toBe("fake-gemini-e2e");
   });

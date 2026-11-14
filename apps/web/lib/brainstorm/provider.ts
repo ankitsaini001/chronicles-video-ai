@@ -41,5 +41,7 @@ export function brainstormProviderFromEnv(env: NodeJS.ProcessEnv = process.env):
   const model = env.GEMINI_BRAINSTORM_MODEL?.trim() || DEFAULT_BRAINSTORM_MODEL;
   if (!apiKey) return { ok: false, problem: "GEMINI_API_KEY is missing. Add it to the .env file (or Vercel's environment variables)." };
   if (!MODEL_ID.test(model)) return { ok: false, problem: "GEMINI_BRAINSTORM_MODEL is not a model id (e.g. gemini-3.1-flash-lite). Fix it or leave it empty for the default." };
+  // A "-latest" alias can switch to another model at any time (speed, quality, settings): PRD #26.
+  if (/(^|-)latest$/.test(model)) return { ok: false, problem: "GEMINI_BRAINSTORM_MODEL must be a fixed model id, not a moving \"-latest\" alias." };
   return { ok: true, fake: false, provider: createBrainstormProvider({ apiKey, model }) };
 }
