@@ -6,6 +6,7 @@ import { ProjectList } from "@/components/dashboard/ProjectList";
 import { Button, cn } from "@/components/ui";
 import { getMe } from "@/lib/account/me";
 import { requireUser } from "@/lib/auth/session";
+import { refreshJob } from "@/lib/plan/jobs";
 
 // "My videos" (F21; Stitch "My videos" and "My videos (empty)"). Sign-up and log in land here.
 // - No projects in My videos yet (none, or all archived): the first-visit page (how it works, your
@@ -43,7 +44,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const settings = readDbConfig(process.env);
   if (!settings.ok) throw new Error(settings.problems.join(" "));
   const db = getDb(settings.config);
-  const [hasProjects, page] = await Promise.all([hasLibraryProjects(db, user.id), listProjects(db, user.id, { tab: tab.id, limit: PAGE_LIMITS.default, cursor: null })]);
+  const [hasProjects, page] = await Promise.all([hasLibraryProjects(db, user.id), listProjects(db, user.id, { tab: tab.id, limit: PAGE_LIMITS.default, cursor: null }, (job) => refreshJob(db, job))]);
 
   if (!hasProjects) return <FirstVisit me={await getMe(user)} />;
 

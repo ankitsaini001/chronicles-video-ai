@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { addInvite, closeMongoClient, ensureIndexes, getDb, indexesForFeatures, readDbConfig } from "@bytereel/db";
+import { addInvite, closeMongoClient, ensureIndexes, getDb, indexesForFeatures, newPlanJob, readDbConfig } from "@bytereel/db";
 import { ObjectId } from "mongodb";
 
 /**
@@ -299,6 +299,15 @@ async function main(): Promise<void> {
   page = await html(b.cookie, "/dashboard");
   check("B archives its only project → first-visit page", r.status === 200 && page.text.includes("How it works") && page.text.includes("Create your first video"));
   check("C1 for B → empty", (await send(b.cookie, "GET", "/api/v1/projects")).json.items?.length === 0);
+
+  // ---------- F21 review: a stuck job on the list gets the same stuck-job rule as C3 ----------
+  const stuckProject = await seed(c.id, "Stuck storyboard", "planning", 30);
+  const stuckJob = newPlanJob({ ownerId: c.id, projectId: oid(stuckProject), project: { input: { type: "topic", text: "Stuck storyboard", brainstormChoice: null }, language: "en", voiceGender: "female" }, now: new Date(Date.now() - 30 * 60_000) });
+  await db.collection("jobs").insertOne({ ...stuckJob, state: "running", updatedAt: new Date(Date.now() - 11 * 60_000) });
+  await projects().updateOne({ _id: oid(stuckProject) }, { $set: { activeJobId: stuckJob._id } });
+  r = await send(c.cookie, "GET", "/api/v1/projects");
+  check("C1: a job with no progress for 10+ min → the card shows plan_failed (not Writing… forever)", r.json.items?.[0]?.id === stuckProject && r.json.items?.[0]?.state === "plan_failed" && r.json.items?.[0]?.activeJobType === null, JSON.stringify(r.json.items?.[0]?.state));
+  check("…and the job is failed INTERNAL (retryable)", (await db.collection("jobs").findOne({ _id: stuckJob._id }))?.error?.code === "INTERNAL");
 }
 
 main()

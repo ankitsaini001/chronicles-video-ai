@@ -1,5 +1,5 @@
 import { type Db, type Filter, ObjectId, type UpdateFilter } from "mongodb";
-import { JOBS_COLLECTION, type JobDocument, type JobType } from "./jobs";
+import { isTerminal, JOBS_COLLECTION, type JobDocument, type JobType } from "./jobs";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./plan-versions";
 import {
   currentStepOf,
@@ -91,8 +91,17 @@ const NOT_ARCHIVED = { $ne: "archived" as const };
 /**
  * C1: one page of the owner's projects. `tab` null = every non-archived project. Throws
  * InvalidCursorError for a tampered cursor or one made for another tab.
+ * `refreshJob` (F21 review): the stuck-job rule C3/C6 apply (lib/plan/jobs.ts refreshJob), run on
+ * each card's active job. It only writes when a job is really stuck, so a healthy page costs no
+ * extra query; if a job changed (e.g. a dead one became failed), the page is read once more, so
+ * the card shows "Storyboard failed" instead of "Writing storyboard…" forever.
  */
-export async function listProjects(db: Db, ownerId: string, page: { tab: LibraryTab | null; limit: number; cursor: string | null }): Promise<LibraryPage> {
+export async function listProjects(
+  db: Db,
+  ownerId: string,
+  page: { tab: LibraryTab | null; limit: number; cursor: string | null },
+  refreshJob?: (job: JobDocument) => Promise<JobDocument>,
+): Promise<LibraryPage> {
   if (!/^[0-9a-f]{24}$/.test(ownerId)) return { items: [], nextCursor: null };
   const tabKey = page.tab ?? "all";
   const filter: Filter<ProjectDocument> = {
@@ -115,12 +124,17 @@ export async function listProjects(db: Db, ownerId: string, page: { tab: Library
     .toArray();
   const items = docs.slice(0, page.limit);
   const jobIds = items.flatMap((d) => (d.activeJobId ? [d.activeJobId] : []));
-  const jobs = jobIds.length
-    ? await db
-        .collection<JobDocument>(JOBS_COLLECTION)
-        .find({ _id: { $in: jobIds }, ownerId: new ObjectId(ownerId) }, { projection: { type: 1 } })
-        .toArray()
-    : [];
+  // A creator has at most a couple of running jobs (concurrency limit), so this is a small read.
+  const jobs = jobIds.length ? await db.collection<JobDocument>(JOBS_COLLECTION).find({ _id: { $in: jobIds }, ownerId: new ObjectId(ownerId) }).toArray() : [];
+  if (refreshJob) {
+    let changed = false;
+    for (const job of jobs) {
+      if (isTerminal(job.state)) continue;
+      const fresh = await refreshJob(job);
+      if (fresh.state !== job.state) changed = true;
+    }
+    if (changed) return listProjects(db, ownerId, page);
+  }
   const typeOf = (id: ObjectId | null) => (id ? (jobs.find((j) => j._id.equals(id))?.type ?? null) : null);
   const last = items[items.length - 1];
   return {
