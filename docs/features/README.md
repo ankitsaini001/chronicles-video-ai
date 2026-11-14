@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F14 (Brainstorm with AI) is built and in testing (live Gemini check passed with `gemini-3.1-flash-lite`): waiting for the code review and the founder's test. Phases A1 and A2 done; F12–F13 done.
+**Next up:** F14 (Brainstorm with AI) is built and in testing (live Gemini check passed with `gemini-3.1-flash-lite`, code review passed): waiting for the founder's test. Phases A1 and A2 done; F12–F13 done.
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.

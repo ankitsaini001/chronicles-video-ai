@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (built; live smoke call passed with gemini-3.1-flash-lite; waiting for the code review and the founder's test) |
+| **Status** | 🧪 Testing (built; live smoke call passed with gemini-3.1-flash-lite; code review passed and fixes applied; waiting for the founder's test) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F12 |
 | **Design** | Stitch: ByteReel — Step 1 Idea ("✨ Brainstorm with AI" pill + "IDEAS FROM AI" panel) |
@@ -36,6 +36,7 @@ The 'IDEAS FROM AI' panel on the Idea screen.
 - [x] **7. End-to-end check** (`a4e76f7`): `tools/e2e/f14-brainstorm.ts` with the Gemini stand-in (no real AI call), test database only.
 - [x] **8. Brainstorm's own model** (`5a48a10`): `GEMINI_BRAINSTORM_MODEL` (optional, default `gemini-3.1-flash-lite`) with `thinkingLevel: "low"`; the storyboard planner keeps `GEMINI_MODEL` (PRD decision #26). The 30 s limit stays.
 - [x] **9. Live smoke call** through C7 on `bytereel_test`: 200 in 3.5 s, 5 good ideas (below).
+- [x] **10. Code review fixes** (`150d1d2`, `4bfbbec`, `45118df`, `70f7e3c`, `3297701`, `3a761c8`, `c9c77f3`): see the progress log.
 
 ## How we test it (done when all are ticked)
 - [x] Ideas are relevant (live smoke call, below; please judge them too)
@@ -43,7 +44,7 @@ The 'IDEAS FROM AI' panel on the Idea screen.
 - [x] Busy state shows 'Our AI is very busy right now…' (unit tests + e2e with the stand-in: "Our AI is very busy right now. Please try again in a few minutes.")
 - [x] Limits: 11th in an hour and 31st in a day are refused without calling Gemini (unit tests + e2e, also 5 clicks at once)
 - [x] Every Gemini request is in `providerUsage` (e2e on `bytereel_test`)
-- [ ] Code review passed (code-reviewer agent)
+- [x] Code review passed (code-reviewer agent; no must-fix, all suggestions applied)
 - [ ] Founder tested it and said OK
 
 ### Live smoke calls (2026-11-13)
@@ -64,8 +65,9 @@ The 'IDEAS FROM AI' panel on the Idea screen.
 - **`estCostInr` = 0 on the free tier** (what we really pay). Tokens are always stored (output = answer + thinking), so a paid price can be applied later. Written into DATABASE.md §4.15.
 - **`providerUsage` got two fields**, `outcome` and `latencyMs` (DATABASE.md §4.15). One row per request: each retry and the repair are rows of their own.
 - **Idea text after a pick:** "Title. Hook" (only the title if both are over 300 characters, the C2 brainstorm limit). The creator can still edit it; it stays a brainstorm idea while 3–300 characters; emptied or longer, it's sent as a normal topic/notes. Picking replaces what was in the box.
+- **A picked idea keeps its language** (main session, review): if the Language chip no longer matches when you press Create storyboard, the text is sent as a plain topic (no `brainstormChoice`), and a line under the box says e.g. "This idea was suggested in Hindi. Brainstorm again for English ideas."
 - **The subject box starts with the idea box's text** when that is 2–100 characters (smart default).
-- **Changing the Language chip hides the ideas** (they were written in the old language); "Get ideas" again gives them in the new one. A picked idea stays in the box.
+- **Changing the Language chip hides the ideas** (they were written in the old language); "Get ideas" again gives them in the new one. A picked idea stays in the box (sent as a plain topic, see above).
 - **Brainstorm's model is separate from the planner's** (`GEMINI_BRAINSTORM_MODEL`, default `gemini-3.1-flash-lite`, low thinking; main session's measurements, PRD decision #26). Not added to the real `.env`: the default covers it. A value that isn't a plain model id makes brainstorm refuse to run (500, reason in the server log).
 - **The web app now uses the pipeline package** (only `@bytereel/pipeline/brainstorm`). `next.config.ts` was not changed.
 
@@ -86,5 +88,6 @@ npm run db -- indexes --feature F14 --apply
 | Date | What happened |
 |---|---|
 | 2026-11-13 | Founder decisions: exactly 5 ideas; limits 10/hour + 30/day per creator; brainstorm-specific busy message. |
-| 2026-11-13 | Built steps 1–7 (8 commits). 591 unit tests, typecheck and `next build` pass (no `next.config.ts` change). E2E with the Gemini stand-in on `bytereel_test`: F14 38/38, F12 and F13 all pass; test database dropped afterwards. Live smoke call: timed out (25.1 s, then the retry was cut at 30 s); per-request limit raised to the full 30 s. API.md (C7, §4.2, §4.3, §10.1, §10.3, C2), openapi.yaml, DATABASE.md (§4.14, §4.15), ARCHITECTURE §16.1 updated. Status 🧪; waiting for the founder's choice on the smoke call, the code review and the founder's test. |
+| 2026-11-13 | Built steps 1–7 (8 commits). 591 unit tests, typecheck and `next build` pass (no `next.config.ts` change). E2E with the Gemini stand-in on `bytereel_test`: F14 37/37, F12 and F13 all pass; test database dropped afterwards. Live smoke call: timed out (25.1 s, then the retry was cut at 30 s); per-request limit raised to the full 30 s. API.md (C7, §4.2, §4.3, §10.1, §10.3, C2), openapi.yaml, DATABASE.md (§4.14, §4.15), ARCHITECTURE §16.1 updated. Status 🧪; waiting for the founder's choice on the smoke call, the code review and the founder's test. |
 | 2026-11-13 | Main session measured the models (3.6 Flash 55–57 s even with low thinking; 3.1 Flash-Lite ~8 s). Brainstorm now has its own model `GEMINI_BRAINSTORM_MODEL` (default `gemini-3.1-flash-lite`, low thinking), the planner keeps `GEMINI_MODEL`; PRD decision #26, ARCHITECTURE §16.1, API.md C7, `.env.example` updated. Live smoke call through C7 on `bytereel_test`: 200 in 3.5 s, 5 good ideas, one Gemini request (559 + 537 tokens); test database dropped. 592 unit tests, typecheck and `next build` pass. |
+| 2026-11-14 | Code review: no must-fix. Applied all suggestions: (1) a retry or the repair starts only with at least 5 s of the 30 s left (`150d1d2`); (2) a picked idea is sent as a brainstorm only while the Language chip matches its language, otherwise as a plain topic with a hint under the box (`4bfbbec`, pure helper `apps/web/lib/project/idea-payload.ts` + tests); (3) `-latest` brainstorm models refused, `.env.example` says the model must accept thinkingLevel (`45118df`); (4) invisible format characters (bidi, zero-width space, BOM) removed from AI output and from idea text/subject, ZWJ/ZWNJ kept for Devanagari; English/Hinglish ideas must be at least 80% Latin letters (`70f7e3c`); (5) one shared constant for 10/hour and 30/day (`3297701`); (6) the e2e check reads the server's environment and stops before any request unless the Gemini stand-in and `bytereel_test` are on (`3a761c8`); (7) docs: F27 TODO to clean old `reserved` usage rows, warning that the daily limits need the `usageCounters` unique index, F15 note to treat brainstorm text as delimited untrusted data (`c9c77f3`). Not done: `import "server-only"` (the `server-only` package isn't installed; Next only aliases it internally and the unit tests couldn't load it; no new dependency). No real Gemini calls. Unit tests, typecheck and `next build` pass; e2e F14 37/37 and F12 pass on `bytereel_test` (dropped afterwards). Code review ticked; waiting for the founder's test. |
