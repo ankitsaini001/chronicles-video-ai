@@ -319,18 +319,16 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             ≈ {seconds}s · {version.stats.sceneCount} scenes · Version {version.versionNumber}
           </p>
           {approved ? (
-            <div className="flex min-w-0 flex-1 flex-col items-end gap-0.5 text-right sm:flex-none">
-              <p className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
-                <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
-              </p>
-              <p className="text-xs text-muted">Making the video comes in a later update. Any change to the storyboard needs a new approval.</p>
-            </div>
+            <p className="ml-auto inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
+              <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
+            </p>
           ) : (
             <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
               {!version.valid && <p className="text-xs text-danger">Fix the scenes marked in red first.</p>}
               {version.valid && changeRunning && <p className="text-xs text-muted">Wait for your change to finish.</p>}
               <Button type="button" onClick={() => void approve()} disabled={!canApprove} className="whitespace-nowrap">
-                {approving ? "Approving…" : "Approve & generate video"}
+                {/* F23 MUST rename it "Approve & generate video" when approving starts the video. */}
+                {approving ? "Approving…" : "Approve storyboard"}
               </Button>
             </div>
           )}

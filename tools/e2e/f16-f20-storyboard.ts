@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   const redirectHtml = redirect.status === 200 ? await redirect.text() : "";
   check("/projects/[id] sends a storyboard project to /storyboard", (redirect.status >= 300 && redirect.status < 400 && (redirect.headers.get("location") ?? "").endsWith(`/projects/${pid}/storyboard`)) || redirectHtml.includes(`/projects/${pid}/storyboard`), `status ${redirect.status}`);
   let page = (await (await fetch(`${base}/projects/${pid}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
-  check("storyboard page: scene cards, pattern badge, Visual line, change box, approve button", ["Scene 01", "Hook", "Visual:", "Ask for changes", "Approve &amp; generate video", "Version 1", "Undo"].every((t) => page.includes(t)));
+  check("storyboard page: scene cards, pattern badge, Visual line, change box, approve button", ["Scene 01", "Hook", "Visual:", "Ask for changes", "Approve storyboard", "Version 1", "Undo"].every((t) => page.includes(t)));
   check("storyboard page: stepper links to /storyboard", page.includes(`href="/projects/${pid}/storyboard"`));
   let r = await send(a.cookie, "GET", `/api/v1/projects/${pid}`);
   check("C3 → 200 Project with ETag and storyboard actions", r.status === 200 && r.headers.get("etag") === `"${r.json.stateVersion}"` && r.json.allowedActions?.join() === "edit_storyboard,request_revision,approve_storyboard" && r.json.currentStep === "storyboard");
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
   ({ project, version } = await current(a.cookie, pid));
   check("approved: D2 approval set, allowedActions without approve_storyboard", version.approval?.id === r.json.approval?.id && version.isApproved && !project.allowedActions.includes("approve_storyboard"));
   page = (await (await fetch(`${base}/projects/${pid}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
-  check("page shows the approved state and the plain note", page.includes("Approved · Version") && page.includes("Making the video comes in a later update."));
+  check("page shows the plain approved state (no coming-soon note)", page.includes("Approved · Version") && !page.includes("later update"));
   r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/narration-edits`, { basePlanVersionId: version.id, sceneId: scene.id, blocks: [{ narrationId: block.id, text: `${block.text} Really. Truly.` }], expectedStateVersion: project.stateVersion });
   check("an edit after approval → new version with no approval; project approval cleared", r.status === 201 && r.json.isApproved === false && (await projectOf(pid))?.approvedPlanVersionId === null);
   ({ project, version } = await current(a.cookie, pid));
