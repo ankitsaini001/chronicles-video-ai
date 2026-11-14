@@ -1,3 +1,4 @@
+import { isLanguageEnabled } from "@bytereel/db/languages";
 import Link from "next/link";
 import { Suspense } from "react";
 import { Logo } from "@/components/Logo";
@@ -8,6 +9,7 @@ import { HeaderAccount, HeaderAccountPlaceholder } from "./HeaderAccount";
 // "FAQ" (there is no pricing in the beta, and no separate features page).
 // F09: when signed in, "Log in" is replaced by the user's name and menu (HeaderAccount). Only that
 // part waits for the session; the rest of the page streams first.
+// "Hindi voices NEW" shows only while Hindi is switched on (packages/db/src/languages.ts).
 
 const linkClass = "inline-flex min-h-11 items-center rounded font-mono text-xs text-muted transition hover:text-text";
 
@@ -23,12 +25,14 @@ export function SiteHeader() {
           <Link href="/#examples" className={linkClass}>
             Examples
           </Link>
-          <Link href="/#languages" className={`${linkClass} gap-1.5`}>
-            Hindi voices
-            <span className="rounded-full bg-amber px-1.5 py-0.5 text-[10px] leading-none font-bold text-on-amber shadow-[0_0_10px_#f5a5244d]">
-              NEW
-            </span>
-          </Link>
+          {isLanguageEnabled("hi") && (
+            <Link href="/#languages" className={`${linkClass} gap-1.5`}>
+              Hindi voices
+              <span className="rounded-full bg-amber px-1.5 py-0.5 text-[10px] leading-none font-bold text-on-amber shadow-[0_0_10px_#f5a5244d]">
+                NEW
+              </span>
+            </Link>
+          )}
           <Link href="/#faq" className={linkClass}>
             FAQ
           </Link>
