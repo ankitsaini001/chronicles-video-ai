@@ -16,8 +16,8 @@ import { STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalDocument } from
 // - Every change sends the `stateVersion` the browser saw (`expectedStateVersion`); if another tab
 //   changed the project meanwhile, nothing is written: 409 STALE_VERSION ("refresh").
 // - Each one is ONE transaction: the checks and the writes can't be split by another request.
-// TODO F30: a `scheduled` / `publish_failed` post must become `approval_invalidated` in the same
-// transaction (API.md §9). Posts don't exist before F30.
+// Not in `scheduled` / `publish_failed` until F30 (STORYBOARD_EDIT_STATES): there a change must also
+// move the post to `approval_invalidated` in the same transaction (API.md §9).
 
 /** A storyboard scene/narration id (SAFE_ID_PATTERN in packages/pipeline/src/contracts/common.ts). */
 const SafeId = z.string({ error: "must be text" }).regex(/^[a-z0-9][a-z0-9-]{0,63}$/, { error: "is not a valid id" });

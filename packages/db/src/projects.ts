@@ -42,8 +42,11 @@ export type ProjectStep = "idea" | "storyboard" | "video" | "publish";
 /**
  * States in which the storyboard may be changed (API.md D3–D7): edit, voice, revision, undo.
  * Anything but a running job; a change after a video exists makes a new version to approve again.
+ * NOT YET `scheduled` / `publish_failed` (F16–F20 review): a change there must also move the post
+ * to `approval_invalidated` in the same transaction (API.md §9), which F30 builds. Until then those
+ * two states are refused with 409 INVALID_STATE. F30 MUST add them back with the post invalidation.
  */
-export const STORYBOARD_EDIT_STATES: readonly ProjectState[] = ["storyboard_ready", "generate_failed", "video_ready", "scheduled", "publish_failed"];
+export const STORYBOARD_EDIT_STATES: readonly ProjectState[] = ["storyboard_ready", "generate_failed", "video_ready"];
 
 /** Idea text limits per input type (API.md C2, DATABASE.md §4.8), counted after trim + NFC. */
 export const IDEA_LIMITS = {

@@ -214,6 +214,9 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
     expect(allowedActionsFor(projectDoc({ planRequestCount: 20 }), null)).toEqual(["edit_storyboard", "approve_storyboard"]);
     expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null)).toEqual(["edit_storyboard", "request_revision"]);
     expect(allowedActionsFor(projectDoc({ activeJobId: new ObjectId() }), null)).toEqual([]);
+    // Until F30 (post invalidation), a scheduled or failed-publish project's storyboard can't change.
+    expect(allowedActionsFor(projectDoc({ state: "scheduled" }), null)).toEqual([]);
+    expect(allowedActionsFor(projectDoc({ state: "publish_failed" }), null)).toEqual([]);
     const failed = { ...newPlanJob({ ownerId: OWNER, projectId: PROJECT, project: projectDoc(), now: NOW }), type: "revise" as const, state: "failed" as const, inputRef: { planVersionId: V1 }, error: { code: "PROVIDER_BUSY", message: "", retryable: true } };
     expect(allowedActionsFor(projectDoc(), null, failed)).toContain("retry_job");
     expect(allowedActionsFor(projectDoc({ currentPlanVersionId: new ObjectId() }), null, failed)).not.toContain("retry_job");
