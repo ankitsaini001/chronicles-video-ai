@@ -599,6 +599,18 @@ Idempotent-Replayed: true
 - **Retry** (`POST /jobs/{jobId}/retry`, E2): only for `failed` jobs with `error.retryable = true` (and `cancelled` plan/caption jobs). Same job id, `attempt + 1`, state → `queued`, completed stages are reused (no repeated paid calls). Retrying a generate job re-checks the storyboard approval: if the plan changed meanwhile → `409 APPROVAL_REQUIRED`.
 - **Cancel** (`POST /jobs/{jobId}/cancel`, E3): for `queued`/`running` plan, revise, generate and caption jobs. Sets `cancelRequestedAt`, sends `job.cancelled`; the job stops between steps (an in-flight provider call finishes and its artifact is kept). Publish jobs are cancelled through the **post** (H5).
 
+### 8.5 Stuck jobs (as built in F15)
+Checked whenever an active job's status is read (C6, E1, the project page), so no cron is needed yet and nothing waits forever (ARCHITECTURE §20.3, DATABASE.md Q11):
+
+| Situation | What happens |
+|---|---|
+| Job `running` with no update for **10 min** (the run died: crash, deploy, Inngest timeout) | Job `failed` with `INTERNAL` (retryable), project `plan_failed`: the creator sees **Try again** |
+| Job `queued` and its start event never reached Inngest | The event is sent again after **15 s** (same event id, so Inngest drops a duplicate) |
+| Job `queued`, event sent, not started after **2 min** | The event is sent again (same id), at most every 2 min |
+| Job still `queued` after **15 min** | Job `failed` with `INTERNAL` (retryable) |
+
+Every background write is conditional on "still running this attempt", so a late write from a run that was failed by this rule changes nothing. A global `sweep-stuck-jobs` cron (for jobs nobody looks at) can come later; until then such a job is fixed the next time its project is opened.
+
 ---
 
 ## 9. Approval Semantics
@@ -622,7 +634,7 @@ Idempotent-Replayed: true
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
 | Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count. **Counted and enforced since F12** (inside C2's transaction, so concurrent clicks can't pass 5) | same | `quota: projects_per_day` |
-| Plan + revision requests per project | 20 | C2 (counts 1), each D5 accepted, and each plan retry after an Edit idea (C4 → E2); stored in `projects.planRequestCount` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Plan + revision requests per project | 20 | C2 (counts 1), each D5 accepted, and each plan retry (E2, with or without an Edit idea; F15); stored in `projects.planRequestCount`. **Enforced since F15** (inside E2's transaction: +1 only while below 20) | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
 | Brainstorms (C7) per user per day | 30 | C7 accepted (after the 10/hour check and the body check, before Gemini); busy or refused answers still count. Not in a transaction: one atomic "add 1 while under 30" on the counter (F14) | 00:00 in the user's timezone | `quota: brainstorms_per_day` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
@@ -636,15 +648,15 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | Endpoints | Limit |
 |---|---|
 | Auth (A1, A2, A5, A6) | see §3.7 |
-| Polling reads (C6, E1, H4) | 120 / min |
+| Polling reads (C6, E1, H4) | 120 / min (one shared counter per user; F15) |
 | Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
 | C7 brainstorm, H1 caption suggestions | 10 / hour each (C7 also 30 / day, §10.1) |
 | C2 create project | 10 / hour (plus the daily quota) |
-| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min |
+| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min (one shared counter per user; F15 counts C4) |
 | D5 revision | 20 / hour |
 | D8 approve, F4 caption overrides | 10 / hour |
 | H2 publish/schedule, H5, H6 | 10 / hour |
-| E2, E3 retry/cancel | 30 / hour |
+| E2, E3 retry/cancel | 30 / hour (one shared counter per user; F15 counts E2) |
 | B2, B3, B6 | 30 / min (B3: 3 / hour) |
 | G2 connect | 10 / hour |
 | Admin endpoints | 120 / min per admin |
@@ -1028,13 +1040,15 @@ Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title
 Success `202` → `{ project: Project, job: Job }`.
 Errors: `400 INVALID_INPUT` · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503 SPEND_CEILING`.
 
-**Until F15 (built in F12, no AI yet).** C2 saves the project but starts no job. Differences from the spec above:
-- Effect (one transaction): `usageCounters.projects +1` (only while within 5/day, otherwise `429 QUOTA_EXCEEDED` and nothing is saved), insert `projects` with **state `draft`**, `stateVersion 1`, **`planRequestCount: 0`**, `activeJobId: null`, `title` = the picked idea's own title for `brainstorm`, otherwise the idea text (spaces and line breaks collapsed; over 120 characters it is cut at the last word break and ends with "…"), and the answer saved on the `Idempotency-Key` record. No `jobs` document, no Inngest event.
-- Success **`201`** → `{ project: Project, job: null }` (`currentStep: "idea"`, `activeJobType: null`, `allowedActions: []` until rename/archive and the job actions exist).
+**As built (F12, F15).**
+- Before anything is saved: the AI planner (`GEMINI_API_KEY`, `GEMINI_MODEL`) and Inngest must be set up, else `500 INTERNAL` (reason in the server log), nothing saved or counted.
+- Effect (one transaction): `usageCounters.projects +1` (only while within 5/day, otherwise `429 QUOTA_EXCEEDED` and nothing is saved), `projects` in state `planning` with `stateVersion 1`, `planRequestCount: 1`, `activeJobId` = the job, `title` = the picked idea's own title for `brainstorm`, otherwise the idea text (spaces and line breaks collapsed; over 120 characters it is cut at the last word break and ends with "…"); `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`, `inputHash` = sha256 of the idea type, text, picked brainstorm choice, language and voice); and the answer saved on the `Idempotency-Key` record. **After** the commit, Inngest `plan.requested` (event id = the job key, data = ids only). If that send fails the answer is still `202`: the job stays `queued` and the stuck-job rule (§8.5) sends it again.
+- When the job succeeds, `title` becomes the plan's `topic` (same 120-character rule).
+- `allowedActions` is `[]` while the job runs (`cancel_job` arrives with E3).
 - The UI sends `inputType: "topic"` when the trimmed text is ≤ 300 characters and `"notes"` above that (one box for both, PRD §6.1). **Since F14**, after the creator picks a C7 idea, the box holds "Title. Hook" (only the title if both together are over 300 characters) and the UI sends `inputType: "brainstorm"` with `brainstormChoice { subject, title, hook }` copied from the idea. The creator may still edit the text: it stays `brainstorm` while it is 3–300 characters; emptied or over 300, the choice is dropped and the text is sent as `topic`/`notes`.
 - No `503 SPEND_CEILING` / `MAINTENANCE` yet (they arrive with the `settings` document, F27/F36).
-- After success the UI goes to the temporary project page **`/projects/[id]`** (owner only; another user's project, a missing one or a malformed id → the same 404 page). F15/F16 turn it into a redirect to the project's current step.
-- F15 switches to the full spec: state `planning`, the queued `plan` job in the same transaction, `planRequestCount: 1`, `202` with the job.
+- After success the UI goes to the temporary project page **`/projects/[id]`** (owner only; another user's project, a missing one or a malformed id → the same 404 page): "Writing storyboard…" with progress while the job runs, the failure message with **Try again** / **Edit idea**, or the saved storyboard as a simple read-only list. F16 builds the storyboard screen and turns this page into a redirect to the project's current step.
+- Projects saved by F12 before F15 stay in state `draft` with no job; their page says to start a new project.
 
 ```http
 POST /api/v1/projects
@@ -1051,7 +1065,7 @@ Idempotency-Key: 9b2f4c1e-7d3a-4e8b-a1c5-2f6d8e0b4a71
     "language": "en", "voiceGender": "female", "state": "planning", "currentStep": "idea", "thumbnailUrl": null, "latestPost": null, "activeJobType": "plan",
     "input": { "type": "topic", "text": "How UPI payments work — from scanning the QR code to money reaching the shop", "brainstormChoice": null },
     "stateVersion": 1, "currentPlanVersionId": null, "approvedPlanVersionId": null, "currentRenderId": null,
-    "activeJobId": "67330d5f9f1e4b2a7c0d3c01", "activeJob": null, "lastError": null, "allowedActions": ["cancel_job"],
+    "activeJobId": "67330d5f9f1e4b2a7c0d3c01", "activeJob": null, "lastError": null, "allowedActions": [],
     "archivedAt": null, "createdAt": "2026-11-12T05:00:00.000Z", "updatedAt": "2026-11-12T05:00:00.000Z"
   },
   "job": {
@@ -1094,6 +1108,8 @@ Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `te
 - **Rename** (`title` only): allowed in every state except `archived`. Doesn't touch plans or approvals.
 - **Edit idea** (`text`, optionally with `title`): allowed **only in `plan_failed`** with no active job (the "Edit idea" button after a failed storyboard, §4.3). Effect (transaction): `project.input.text` replaced (`inputType` and `brainstormChoice` unchanged), `title` = the sent `title`, else the first 120 chars of the new text (as in C2), `stateVersion + 1`; the project stays `plan_failed` with its `lastError`, and `allowedActions` includes `retry_job`. The creator then presses **Try again** (E2 on the failed `plan` job), which plans from the edited idea. Editing the idea and trying again **does not count toward the 5 projects/day quota** (no new project is created), but each retry that plans from an edited idea **counts 1 toward the 20 plan + revision requests per project** (it is a paid AI call; founder, 2026-11-13). At the limit, E2 returns `429 QUOTA_EXCEEDED` (`plan_requests_per_project`). Language and voice are not editable here (language: create a new project, PRD decision #25; voice: D4 once a storyboard exists).
 Success `200` → `Project`. Errors: `400 INVALID_INPUT` (no field, text length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived; `text` sent outside `plan_failed`) · `409 JOB_ALREADY_RUNNING`.
+
+**As built (F15): the edit-idea part only.** `text` is required (a body with only `title` → `400`; rename alone arrives with F21) and `expectedStateVersion` goes in the body (the `If-Match` header isn't read yet). One conditional update (single document). The text is cleaned like C2 (control and invisible format characters removed, NFC, trimmed) and checked against the project's own `inputType` limits. `allowedActions` after a failure: `edit_idea`, plus `retry_job` while E2 would accept the job (retryable error, or the idea was edited since) and the project is under its 20 storyboard requests.
 ```json
 { "title": "UPI in 2 seconds", "expectedStateVersion": 4 }
 ```
@@ -1122,6 +1138,7 @@ If-Match: "9"
 
 #### C6. `GET /api/v1/projects/{projectId}/status` — Polling
 Purpose: the one call the project pages poll **every 2 s** while `pollAfterMs` is not null (decision D2). Auth: creator. Rate: 120/min. Header `ETag`. Supports `If-None-Match` → `304` with no body when nothing changed (saves bandwidth).
+**As built (F15):** the 120/min counter is shared with E1; the stuck-job rule (§8.5) is applied on every poll; `ETag: "<stateVersion>"` is sent but `If-None-Match`/`304` is not supported yet (the job's progress changes without a new `stateVersion`); every poll gets `200`. `latestPost` is `null` until F30.
 Success `200` → `ProjectStatus`. Errors: `404 NOT_FOUND`.
 ```json
 {
@@ -1452,7 +1469,7 @@ Example: see §8.2 (running) and §8.3 (`needs_input`). Failed example:
 
 #### E2. `POST /api/v1/jobs/{jobId}/retry` — Retry / resume
 Purpose: **Retry** / **Try again** buttons. Resumes from the last good checkpoint; finished stages and paid artifacts are reused (ARCHITECTURE §13.2). Auth: creator. Rate: 30/hour. **Idempotency-Key required.** Body: `{}`.
-Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; a retry that plans from an edited idea counts 1 toward the per-project plan + revision limit (§10.1). Effect (one transaction): state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared, `project.planRequestCount + 1` when it counts; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
+Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; **every plan retry counts 1 toward the per-project plan + revision limit (§10.1)** (F15 decision: each Try again is a new paid AI request, edited idea or not; at the limit `429 QUOTA_EXCEEDED`, `plan_requests_per_project`, `resetsAt: null`). A valid AI answer that an earlier attempt already received for the same idea (e.g. the save failed) is reused, not asked for again. Effect (one transaction): state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared, `project.planRequestCount + 1` when it counts; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
 Success `202` → `Job`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
 ```json
 {}

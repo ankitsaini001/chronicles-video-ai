@@ -31,9 +31,31 @@ npx remotion browser ensure   # one-time: Remotion's own headless Chromium (~100
 cp .env.example .env          # optional for P0/P1; fill in real values for live runs (P2)
 ```
 
+## Run the website locally (two terminals)
+
+From F15 the storyboard is written by a background job (Inngest). On your computer that needs the
+**Inngest Dev Server** running next to the website:
+
+```bash
+# Terminal 1: the website on http://localhost:3000
+npm run dev
+
+# Terminal 2: the Inngest Dev Server (runs the background jobs; dashboard on http://localhost:8288)
+npm run inngest
+```
+
+`npm run inngest` downloads the pinned Inngest Dev Server (`inngest-cli@1.49.0`) the first time and
+connects it to http://localhost:3000/api/inngest. No Inngest account or keys are needed locally
+(the keys are only for production, F38). If terminal 2 isn't running, "Create storyboard" still saves
+the project, but the storyboard waits; start `npm run inngest` and it begins within a few seconds
+(the project page sends the job again automatically).
+
 ## Commands
 
 ```bash
+npm run dev                                                       # the website (http://localhost:3000)
+npm run inngest                                                   # F15: Inngest Dev Server for the background jobs (second terminal)
+npm run db -- indexes --feature F15 --apply                       # create a feature's MongoDB indexes (here: jobs, planVersions)
 npm run pipeline -- preflight                                    # runtime, disk, output folder, config presence (no network)
 npm run pipeline -- preflight --network                          # + read-only provider checks: Gemini model get/list, ElevenLabs models + voices
 npm run pipeline -- plan --topic-file examples/water-cycle.md --voice indian-english-female   # LIVE Gemini planner -> plan.json + plan-review.html

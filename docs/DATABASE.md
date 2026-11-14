@@ -430,7 +430,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `currentRenderId` | ObjectId? → `renders` | "The video" (latest successful render) | No |
 | `activeJobId` | ObjectId? → `jobs` | The one job running for this project, or null | No |
 | `stateVersion` | int ≥ 1 | +1 on every change. Stops two browser tabs from overwriting each other (`STALE_VERSION`, §7.3) | Auto |
-| `planRequestCount` | int 0–limit | How many of the **20 plan + revision requests** this project has used: 1 at creation (C2), +1 per accepted revision (D5) and per plan retry from an edited idea (E2). Increased in the same transaction, and only if still below the limit (Q7) | Auto |
+| `planRequestCount` | int 0–limit | How many of the **20 plan + revision requests** this project has used: 1 at creation (C2), +1 per accepted revision (D5) and per plan retry (E2, with or without an edited idea; F15). Increased in the same transaction, and only if still below the limit (Q7) | Auto |
 | `lastError` | `{ code, message, at }`? | Plain-language error shown to the creator | No |
 | `createdAt`, `updatedAt` | date | Timestamps | Auto |
 | `archivedAt` | date? | When it was archived (soft delete, §6.6) | No |
@@ -438,7 +438,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 
 **Rules**
 - Idea text length: topic 3–300, notes 20–5,000, brainstorm 3–300 characters (after trimming and NFC). `brainstormChoice` only when `type = brainstorm`.
-- **F12 (until F15):** a new project starts in state `draft` with `planRequestCount: 0` and no job; F15 makes C2 start in `planning` with the `plan` job and `planRequestCount: 1` (API.md C2 "Until F15"). Code: `packages/db/src/projects.ts`.
+- **Since F15:** C2 saves a new project in state `planning` with `planRequestCount: 1` and its queued `plan` job (API.md C2). Projects saved by F12 before F15 stay in state `draft` with `planRequestCount: 0` and no job. Code: `packages/db/src/projects.ts`, `packages/db/src/plan-jobs.ts`.
+- **`planRequestCount` is enforced since F15:** every plan retry (E2) adds 1, only while below 20, inside E2's transaction; at 20 E2 answers `429` (API.md E2, §10.1).
 - At most **one active job** per project: `activeJobId` is set with a conditional update ("only if it is currently null").
 - Every change needs the caller's `stateVersion`; a mismatch changes nothing.
 
@@ -491,12 +492,16 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `error` | `{ code, message, retryable }`? | Why it failed; `retryable` → show **Retry** | No |
 | `needsInput` | `{ reason, message, sceneId }`? | When the creator must change something (e.g. video longer than 90 s) | No |
 | `result` | `{ planVersionId?, renderId?, revisionId?, postId? }`? | What the job produced | No |
-| `idempotencyKey` | string, unique, **required** | Stops duplicate jobs from double-clicks. One format per job type (Q6): `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. Also used as the Inngest event id | Yes |
+| `idempotencyKey` | string, unique, **required** | Stops duplicate jobs from double-clicks. One format per job type (Q6): `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. Also used as the Inngest event id of the first attempt | Yes |
+| `inputHash` | string (64 hex) | **Plan jobs (F15):** sha256 of the idea the job plans from (type, text, picked brainstorm choice, language, voice). An E2 retry after an Edit idea updates it and the key | Plan |
+| `event` | `{ id, sentAt, lastTriedAt }` | **F15:** the Inngest event that starts the current attempt (`id` = the key, or `{jobId}:retry:{attempt}`), when it was handed to Inngest and when that was last tried (for the stuck-job rule, API.md §8.5) | Yes |
+| `planner` | `{ attempt, inputHash, planVersionId, requests, answers[] }`? | **Plan jobs (F15): the checkpoint.** `requests` = Gemini requests made in this attempt (counted before sending, at most 4); `answers` = each answer as soon as it arrives `{ n (1 first, 2 repair), text, model, finishReason, usage, valid, issueCount }`; `planVersionId` = the id the saved version gets. A re-run step or a retry for the same idea reuses a saved answer instead of asking again | Plan |
+| `queuedAt` | date | When the job last became `queued` (C2 or E2), for the stuck-job rule | Yes |
 | `inngestRunId` | string? | Link to the run in the Inngest dashboard (for debugging) | No |
 | `cancelRequestedAt` | date? | Set when the creator presses Cancel; the job stops between steps | No |
 | `createdAt`, `updatedAt`, `startedAt`, `finishedAt` | date | Timestamps | Auto |
 
-**Rules:** every job **must** have an `idempotencyKey` (a missing key would count as `null` in the unique index, so only one such job could ever exist). Only one active job per project (`projects.activeJobId`). A retry keeps the same job, adds 1 to `attempt`, and skips finished stages (no repeated paid calls). Jobs never create approvals.
+**Rules:** every job **must** have an `idempotencyKey` (a missing key would count as `null` in the unique index, so only one such job could ever exist). Only one active job per project (`projects.activeJobId`). A retry keeps the same job, adds 1 to `attempt`, and skips finished stages (no repeated paid calls). Jobs never create approvals. **F15:** every write of the background function is conditional on "still running this attempt", so a late write of an older attempt or of a job the stuck-job rule already failed changes nothing. `planner.answers[].text` is the model's answer (the storyboard JSON, not what the creator typed) and stays on the job. **Created in F15** (`packages/db/src/jobs.ts`, `plan-jobs.ts`).
 
 **Indexes**
 - unique `idempotencyKey`: the same job can't be created twice.
@@ -545,7 +550,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - **Insert-only.** Never updated, never deleted (except account deletion).
 - A version is saved **even if it fails validation** (so no typing is lost); it just can't be approved until fixed.
 - `plan.ownerId`, `plan.projectId`, `plan.versionId` are set by code, never by the AI.
-- A copy of the plan is also written to R2 (`users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json`, ARCHITECTURE §9) for the render step; MongoDB is the record the app reads.
+- A copy of the plan is also written to R2 (`users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json`, ARCHITECTURE §9) for the render step; MongoDB is the record the app reads. **Not yet in F15** (R2 is set up in F22; the copy is written when the render step needs it).
+- **F15:** the AI's first plan is saved only when it is valid (an answer still invalid after the one repair fails the job with `PLAN_INVALID`, PRD decision #24b); `parentVersionId` is `null` for `ai_plan`; `versionNumber` = the project's highest + 1, in the same transaction that points the project at it. **Created in F15** (`packages/db/src/plan-versions.ts`).
 
 **Indexes**
 - unique `{ projectId: 1, versionNumber: -1 }`: no two "version 3"s in one project; also lists versions newest first.
@@ -733,7 +739,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `units` | `{ promptTokens, outputTokens, characters, renderSeconds }` | How much was used. Gemini `outputTokens` = answer + thinking tokens (both are billed as output) | Yes |
 | `estCostInr` | number | Estimated cost in rupees. **Rule (F14): what we actually pay, so `0` while on Gemini's free tier**; the tokens are always stored, so a paid-tier price can be applied later (price table with the spend ceilings, F27) | Yes |
 | `status` | `reserved` \| `final` \| `failed` | `reserved` = written before the call with the estimate; `final` = the call finished, real units filled in; `failed` = the call failed (kept with the units the provider still billed, usually 0) | Yes |
-| `outcome` | string? | How the call ended (null while `reserved`). Brainstorm: `ok`, `invalid_output` (answer failed our check), `unsuitable` (model said no safe video), `rejected` (safety block), `busy`, `timeout`, `error` (F14) | Yes (null while reserved) |
+| `outcome` | string? | How the call ended (null while `reserved`). Brainstorm: `ok`, `invalid_output` (answer failed our check), `unsuitable` (model said no safe video), `rejected` (safety block), `busy`, `timeout`, `error` (F14). Storyboard planner (`operation: "plan"`, with `projectId` and `jobId`, F15): `ok`, `invalid_output` (failed plan validation), `rejected`, `busy`, `timeout`, `error` | Yes (null while reserved) |
 | `latencyMs` | int? | From sending the request to its end (null while `reserved`) (F14) | Yes (null while reserved) |
 | `at` | date | When | Yes |
 
@@ -1302,14 +1308,14 @@ The checks (is this still the current version? is the job slot free? quota left?
 
 | # | Action | Endpoint · feature | Changes together | What would go wrong without it |
 |---|---|---|---|---|
-| 1 | Create project | C2 · F12/F15 | insert `projects` (`planning`, `planRequestCount: 1`) + insert `plan` job + set `activeJobId` + `usageCounters` projects +1. **F12 (until F15):** `usageCounters` projects +1 (within 5) + insert `projects` (`draft`, `planRequestCount: 0`, no job) + the answer saved on the `idempotencyKeys` record | A project stuck in "planning" with no job, or a used quota with no project |
+| 1 | Create project | C2 · F12/F15 | `usageCounters` projects +1 (within 5) + insert `projects` (`planning`, `planRequestCount: 1`, `activeJobId`) + insert the queued `plan` job + the answer saved on the `idempotencyKeys` record (as built since F15; the Inngest event is sent after the commit) | A project stuck in "planning" with no job, or a used quota with no project |
 | 2 | Edit idea after a failed storyboard | C4 · F15 | `projects` idea text, title, `stateVersion` (one document: atomic anyway) | — |
 | 3 | Edit narration / switch voice | D3, D4 · F17, F19 | insert `planVersions` + project pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, state, `stateVersion`) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | A new storyboard while an old publish approval stays live |
 | 4 | Revision request | D5 · F18, F26 | insert `revisions` + insert `revise` job + `activeJobId` + `planRequestCount` +1 (only if below the limit) + `scheduled`/`publish_failed` post → `approval_invalidated` + notification | Same as 3; or a revision with no job, or a counted change with no revision |
 | 5 | Undo / restore a version | D7 · F17 | project pointers + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (ARCHITECTURE §17.5) | Same as 3 |
 | 6 | **Approve storyboard** (approval #1) | D8 · F20 | insert `storyboardApprovals` + insert `generate` job + project `generating`, `approvedPlanVersionId`, `activeJobId` + `usageCounters` videos +1. Re-approving a version that already has a video instead points the project back to that render (no job, no quota) | Approval with no job, or a counted video with no job |
 | 7 | Caption fix | F4 · F25 | insert `captionOverrides` + insert `caption` job + project `generating`, `activeJobId` + `scheduled`/`publish_failed` post → `approval_invalidated` + notification (**no** quota counter) | A caption change while the old approval stays live |
-| 8 | Retry a job | E2 (and admin I9) · F15, F23 | job `queued`, `attempt` +1 + project back to `planning`/`generating`, `activeJobId`, `lastError` cleared + `planRequestCount` +1 when a plan retry uses an edited idea | A queued job the project doesn't know about, or a counted retry that never runs |
+| 8 | Retry a job | E2 (and admin I9) · F15, F23 | job `queued`, `attempt` +1 + project back to `planning`/`generating`, `activeJobId`, `lastError` cleared + `planRequestCount` +1 for every plan retry (only below 20; F15) + the answer saved on the `idempotencyKeys` record | A queued job the project doesn't know about, or a counted retry that never runs |
 | 9 | **Publish now / schedule** (approval #2) | H2 · F30, F31 | insert `posts` (approval snapshot with a new approval id, `publishKey`) + insert `publish` job + project `publishing`/`scheduled` + audit `post.approved` | A post without a job (never published), or a job without its approval record |
 | 10 | Cancel a scheduled post | H5 · F31 | post → `cancelled` + job cancelled + project → `video_ready` | A cancelled post whose job still wakes up, or a project stuck in "scheduled" |
 | 11 | Retry a failed publish | H6 (and admin I9) · F30 | post → `publishing`, `attempts` +1 + publish job re-queued (after the full re-check, §4.22) | A post marked "publishing" with no job behind it |
@@ -1453,7 +1459,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | ✅ **End of A2** | `user`, `session`, `account`, `allowlist`, `rateLimits` (and the Better Auth indexes, including those for `verification`) |
 | F12 | `projects`, `idempotencyKeys`, `usageCounters` (projects counted **and** limited to 5/day; the other limits in F27). Projects are saved in state `draft` with no job until F15 |
 | F14 | `providerUsage` (brainstorm calls) |
-| F15 | `jobs`, `planVersions` |
+| F15 | `jobs`, `planVersions` (and `providerUsage` rows with `operation: "plan"`). Indexes: `npm run db -- indexes --feature F15 --apply` |
 | F17, F19 | More `planVersions` (`user_edit`) |
 | F18 | `revisions` |
 | F20 | `storyboardApprovals`, `auditLogs` |
@@ -1461,7 +1467,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F22 | Nothing in MongoDB: your R2 bucket |
 | F23 | `speechArtifacts`, `renders` (files in R2) |
 | F25 | `captionOverrides` |
-| F27 | `settings`; the remaining limits in `usageCounters` (videos, voice characters) and `projects.planRequestCount` start being enforced (projects/day is enforced since F12) |
+| F27 | `settings`; the remaining limits in `usageCounters` (videos, voice characters) start being enforced (projects/day is enforced since F12, `projects.planRequestCount` since F15) |
 | F28 | `instagramConnections` |
 | F30, F31 | `posts`, `publishAttempts` |
 | F32 | `notifications` |
@@ -1536,7 +1542,7 @@ These were the gaps and contradictions in the source documents. **Decided 2026-1
 | Q4 | `planVersions.stats` names | **Decided 2026-11-13.** The code's names: `sceneCount`, `wordCount`, `estimatedSeconds` (`PlanStats`, `packages/pipeline/src/planning/semantic-validation.ts`). ARCHITECTURE §8.4 fixed |
 | Q5 | One-live-post index | **Decided 2026-11-13.** Covers `scheduled`, `publishing` **and `outcome_unknown`** (API A-14). ARCHITECTURE §8.12 fixed |
 | Q6 | Job `idempotencyKey` formats | **Decided 2026-11-13.** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. The key is **required** on every job (4.9) |
-| Q7 | Where the per-project and per-user limits are counted | **Decided 2026-11-13.** The 20 plan + revision requests: `projects.planRequestCount`, increased in the same transaction and only if below the limit. Per-user daily/monthly counts (projects, videos, voice characters): `usageCounters`. **Counting starts in F12. Enforcement: projects/day since F12 (F12 review, protects the paid storyboard calls); the other limits in F27** |
+| Q7 | Where the per-project and per-user limits are counted | **Decided 2026-11-13.** The 20 plan + revision requests: `projects.planRequestCount`, increased in the same transaction and only if below the limit. Per-user daily/monthly counts (projects, videos, voice characters): `usageCounters`. **Counting starts in F12. Enforcement: projects/day since F12 (F12 review, protects the paid storyboard calls), `planRequestCount` (20 per project) since F15; the other limits in F27** |
 | Q8 | Indexes not defined in the docs | **Decided 2026-11-13.** The list in §8: required Better Auth indexes, partial unique `deletionRequests.confirmationCode`, `notifications { ownerId: 1, createdAt: -1 }`, `publishAttempts { postId: 1 }`, plus the `rateLimits`/`idempotencyKeys`/`usageCounters` indexes. **No** extra indexes on `captionOverrides` or `auditLogs`; the sparse `activeJobId` index is dropped |
 | Q9 | Database validators | **Decided 2026-11-13.** A **minimal** validator: on owner-scoped collections, only `ownerId` (ObjectId) and `schemaVersion` are required (`idempotencyKeys`, `usageCounters`: `ownerId` only). Zod in our code is the real check (§1.4) |
 | Q10 | **Account deletion details** | **Decided by the founder, 2026-11-13.** 30-day soft delete (account hidden and restorable by an admin), Instagram data deleted right away, then personal data erased and one anonymous `deletionLog` entry kept forever (rounded months and cost range, random id). `providerUsage` and `auditLogs` anonymized, `allowlist` entry deleted. See 6.7 and 4.26 |

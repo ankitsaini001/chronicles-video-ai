@@ -569,13 +569,11 @@ paths:
       operationId: createProject
       summary: Create a project and start the storyboard
       description: |
-        C2. ① Create storyboard. Creates the project (state planning) and a `plan` job; answers 202.
+        C2. ① Create storyboard. Creates the project (state planning, planRequestCount 1) and its queued
+        `plan` job in one transaction, then sends Inngest `plan.requested`; answers 202 (F15).
         **Idempotency-Key required.** Rate limit 10/hour; quota 5 projects/day (429 QUOTA_EXCEEDED);
-        503 SPEND_CEILING / MAINTENANCE.
-
-        **Until F15 (built in F12, no AI yet):** creates only the project, in state `draft` with
-        `planRequestCount` 0 and no job, and answers **201** `{ project, job: null }`. No 503 yet.
-        See API.md C2 "Until F15".
+        503 SPEND_CEILING / MAINTENANCE (from F27/F36). If the AI planner or Inngest isn't set up: 500,
+        nothing saved. F15: `allowedActions` is `[]` while planning (cancel_job arrives with E3).
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -595,21 +593,6 @@ paths:
                 summary: Chosen brainstorm idea
                 value: { inputType: brainstorm, text: "Why the monsoon reaches Kerala first. Every June, Kerala gets wet before Delhi.", language: en, voiceGender: female, brainstormChoice: { subject: Indian monsoon, title: Why the monsoon reaches Kerala first, hook: 'Every June, Kerala gets wet before Delhi. The reason is a giant sea breeze.' } }
       responses:
-        '201':
-          description: Until F15 (F12) - project saved in state draft; no job (`job` is null).
-          headers:
-            Idempotent-Replayed:
-              $ref: '#/components/headers/IdempotentReplayed'
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [project, job]
-                properties:
-                  project:
-                    $ref: '#/components/schemas/Project'
-                  job:
-                    type: 'null'
         '202':
           description: Project created; plan job queued.
           headers:
@@ -623,7 +606,7 @@ paths:
                 created:
                   summary: Project + plan job
                   value:
-                    project: { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work — from scanning the QR code to money reaching the shop, language: en, voiceGender: female, state: planning, currentStep: idea, thumbnailUrl: null, latestPost: null, activeJobType: plan, input: { type: topic, text: How UPI payments work — from scanning the QR code to money reaching the shop, brainstormChoice: null }, stateVersion: 1, currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: 67330d5f9f1e4b2a7c0d3c01, activeJob: null, lastError: null, allowedActions: [cancel_job], archivedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:00:00.000Z' }
+                    project: { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work — from scanning the QR code to money reaching the shop, language: en, voiceGender: female, state: planning, currentStep: idea, thumbnailUrl: null, latestPost: null, activeJobType: plan, input: { type: topic, text: How UPI payments work — from scanning the QR code to money reaching the shop, brainstormChoice: null }, stateVersion: 1, currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: 67330d5f9f1e4b2a7c0d3c01, activeJob: null, lastError: null, allowedActions: [], archivedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:00:00.000Z' }
                     job: { id: 67330d5f9f1e4b2a7c0d3c01, projectId: 67330d5e9f1e4b2a7c0d2a10, type: plan, state: queued, attempt: 1, stages: [ { name: plan, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: validate, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null } ], progress: { stage: plan, percent: 0, message: Writing your storyboard… }, error: null, needsInput: null, result: null, cancelRequestedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:00:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: 2000 }
         '400':
           $ref: '#/components/responses/InvalidInput'
@@ -697,6 +680,8 @@ paths:
         Then retry the failed plan job (POST /api/v1/jobs/{jobId}/retry), which plans from the edited idea.
         Does not count toward the 5 projects/day quota. 409 INVALID_STATE (archived, or text outside
         plan_failed), STALE_VERSION, JOB_ALREADY_RUNNING.
+        **F15 builds the edit-idea part only:** `text` is required (rename alone arrives with F21) and
+        `expectedStateVersion` goes in the body (the If-Match header isn't read yet).
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -788,7 +773,7 @@ paths:
     get:
       operationId: getProjectStatus
       summary: Lightweight project status for 2-second polling
-      description: C6. Poll every 2 s while `pollAfterMs` is not null (decision D2). Supports If-None-Match → 304. Rate limit 120/min.
+      description: C6. Poll every 2 s while `pollAfterMs` is not null (decision D2). Rate limit 120/min (shared with E1). Applies the stuck-job rule (API.md §8.5). ETag is sent; If-None-Match → 304 is not supported yet (F15), every poll gets 200.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -1357,9 +1342,9 @@ paths:
       description: |
         E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable,
         cancelled plan/caption jobs, and failed plan jobs whose idea was edited (PATCH project `text`) after the
-        failure; plan retries use the current idea and never count toward projects/day, but a retry that plans
-        from an edited idea counts 1 toward the 20 plan + revision requests per project (429 QUOTA_EXCEEDED
-        plan_requests_per_project at the limit). Not for publish jobs: use the post retry. **Idempotency-Key required.**
+        failure; plan retries use the current idea and never count toward projects/day, but every plan retry
+        counts 1 toward the 20 plan + revision requests per project (F15: each one is a new paid AI request;
+        429 QUOTA_EXCEEDED plan_requests_per_project at the limit). Not for publish jobs: use the post retry. **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
       tags: [Jobs]
       security:
