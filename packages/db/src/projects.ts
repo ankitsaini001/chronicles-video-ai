@@ -171,7 +171,7 @@ export type ProjectResource = {
 const hexOrNull = (id: ObjectId | null) => (id ? id.toHexString() : null);
 
 /** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
-export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision";
+export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard";
 
 /**
  * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs.
@@ -180,6 +180,8 @@ export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard" | "req
  * - F17, with a storyboard: `edit_storyboard` (D3 narration edit, D4 voice, D7 undo/restore).
  * - F18: `request_revision` (D5) while under the 20 AI requests; `retry_job` (E2) when the last
  *   change request failed with a retryable error and the storyboard is still the one it was made on.
+ * - F20: `approve_storyboard` (D8) in storyboard_ready / generate_failed while the current version
+ *   isn't the approved one (whether it passes the checks is on the version: `valid`).
  * Rename and archive arrive with F21.
  */
 export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
@@ -199,6 +201,7 @@ export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocume
     latestReviseJob.error?.retryable === true &&
     latestReviseJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true;
   if (reviseRetry && underLimit) actions.push("retry_job");
+  if ((doc.state === "storyboard_ready" || doc.state === "generate_failed") && !doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId)) actions.push("approve_storyboard");
   return actions;
 }
 
@@ -347,7 +350,7 @@ export async function getOwnedProject(db: Db, ownerId: string, projectId: string
  */
 export class ProjectActionError extends Error {
   constructor(
-    readonly code: "NOT_FOUND" | "INVALID_STATE" | "STALE_VERSION" | "JOB_ALREADY_RUNNING" | "QUOTA_EXCEEDED" | "INVALID_INPUT",
+    readonly code: "NOT_FOUND" | "INVALID_STATE" | "STALE_VERSION" | "JOB_ALREADY_RUNNING" | "QUOTA_EXCEEDED" | "INVALID_INPUT" | "APPROVAL_STALE" | "PLAN_INVALID",
     message: string,
     readonly details?: Record<string, unknown>,
   ) {

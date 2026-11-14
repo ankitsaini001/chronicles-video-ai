@@ -192,6 +192,11 @@ export {
   type ValidationIssueDoc,
 } from "./plan-versions";
 export {
+  APPROVABLE_STATES,
+  approveStoryboard,
+  AUDIT_LOGS_COLLECTION,
+  StoryboardApprovalBodySchema,
+  type StoryboardApprovalBody,
   STORYBOARD_APPROVAL_SCHEMA_VERSION,
   STORYBOARD_APPROVALS_COLLECTION,
   toStoryboardApprovalResource,

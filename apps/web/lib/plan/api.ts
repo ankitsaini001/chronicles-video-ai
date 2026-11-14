@@ -14,6 +14,8 @@ const STATUS: Record<ProjectActionError["code"], number> = {
   JOB_ALREADY_RUNNING: 409,
   QUOTA_EXCEEDED: 429,
   INVALID_INPUT: 400,
+  APPROVAL_STALE: 409,
+  PLAN_INVALID: 422,
 };
 
 /** A refused project/job action → its documented API error (API.md §4.2). Anything else is rethrown. */
