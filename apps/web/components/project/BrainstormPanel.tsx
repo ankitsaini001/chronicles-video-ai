@@ -1,6 +1,6 @@
 "use client";
 
-import { BRAINSTORM_SUBJECT_LIMITS, cleanIdeaText } from "@bytereel/db/idea-text";
+import { BRAINSTORM_LIMITS, BRAINSTORM_SUBJECT_LIMITS, cleanIdeaText } from "@bytereel/db/idea-text";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button, cn } from "@/components/ui";
 import type { Language } from "@/lib/auth/session";
@@ -30,7 +30,7 @@ type BrainstormPanelProps = {
   disabled?: boolean;
 };
 
-type ApiErrorBody = { error?: { code?: string; message?: string; details?: { retryAfterSeconds?: number; resetsAt?: string } } };
+type ApiErrorBody = { error?: { code?: string; message?: string; details?: { retryAfterSeconds?: number; resetsAt?: string; limit?: number } } };
 type Result = { subject: string; language: Language; ideas: BrainstormIdea[] };
 
 /** The server stops at 30 s; this is only a safety net if the network hangs. */
@@ -139,7 +139,9 @@ export function BrainstormPanel({ language, ideaText, picked, onPick, timezone, 
         subjectRef.current?.focus();
         return;
       case "RATE_LIMITED":
-        return setError(`You've asked for ideas 10 times this hour. Please try again in ${minutesText(json.error?.details?.retryAfterSeconds)}.`);
+        return setError(
+          `You've asked for ideas ${json.error?.details?.limit ?? BRAINSTORM_LIMITS.perHour} times this hour. Please try again in ${minutesText(json.error?.details?.retryAfterSeconds)}.`,
+        );
       case "QUOTA_EXCEEDED":
         return setError((json.error?.message ?? "You've used today's brainstorms. Try again tomorrow.") + resetText(json.error?.details?.resetsAt, timezone));
       case "PROVIDER_REJECTED":

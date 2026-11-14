@@ -12,6 +12,8 @@ export const IDEA_MAX_CHARS = 5000;
 export const IDEA_TOPIC_MAX_CHARS = 300;
 /** A topic needs at least 3 characters. */
 export const IDEA_MIN_CHARS = 3;
+/** C7 brainstorm limits per creator (founder, 2026-11-13). One place for the server and the screen. */
+export const BRAINSTORM_LIMITS = { perHour: 10, perDay: 30 } as const;
 /** C7 brainstorm subject: 2–100 characters, cleaned the same way (API.md C7, F14). */
 export const BRAINSTORM_SUBJECT_LIMITS = { min: 2, max: 100 } as const;
 

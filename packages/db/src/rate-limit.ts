@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Db } from "mongodb";
+import { BRAINSTORM_LIMITS } from "./idea-text";
 
 // "Too many attempts" counters (docs/DATABASE.md §4.6, Q13; docs/API.md §3.7).
 // One collection for every limit. Each attempt does one atomic "add 1, create if missing" on the
@@ -38,7 +39,7 @@ export const API_RATE_LIMITS = {
   /** C2 create project: 10 per hour per user (plus the 5 projects/day quota). */
   createProjectPerUser: { name: "create-project", limit: 10, windowSeconds: 60 * 60 },
   /** C7 brainstorm: 10 per hour per user (plus 30 per day, USAGE_LIMITS.brainstormsPerDay; F14). */
-  brainstormPerUser: { name: "brainstorm", limit: 10, windowSeconds: 60 * 60 },
+  brainstormPerUser: { name: "brainstorm", limit: BRAINSTORM_LIMITS.perHour, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

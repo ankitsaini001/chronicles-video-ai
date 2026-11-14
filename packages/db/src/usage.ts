@@ -1,3 +1,5 @@
+import { BRAINSTORM_LIMITS } from "./idea-text";
+
 // Per-user product limits (docs/API.md §10.1, DATABASE.md §4.14 `usageCounters`) and the
 // day / month periods they are counted in. ONE place for the numbers: the header pill
 // ("Videos today: 0 of 3"), GET /api/v1/me (B1) and, later, the counting (F12) and the
@@ -12,7 +14,7 @@ export const USAGE_LIMITS = {
   /** ElevenLabs narration characters per user per calendar month. */
   voiceCharactersPerMonth: 3000,
   /** C7 "Brainstorm with AI" requests per user per day (plus 10 per hour, API_RATE_LIMITS; F14). */
-  brainstormsPerDay: 30,
+  brainstormsPerDay: BRAINSTORM_LIMITS.perDay,
 } as const;
 
 /** Every user starts in this timezone (API.md §2); also the fallback for an unknown zone. */
