@@ -20,6 +20,13 @@ F20 built approval #1 without the video job. F23 MUST:
 - [ ] **Rename the storyboard button to "Approve & generate video"** (it reads "Approve storyboard" until F23; `components/storyboard/StoryboardScreen.tsx`).
 - [ ] **Decide what D3/D4/D5/D7 do to `currentRenderId` when they move a project out of `video_ready`** (today they set `storyboard_ready` and leave `currentRenderId` as it is): keep the old render as "the video" until a new one is ready, or clear it; and what ③ Video shows meanwhile. Write it in API.md D3/D4/D5/D7 and DATABASE.md §4.8.
 
+## MUST from F22 (code review, 2026-11-14): R2 writers (ARCHITECTURE §9)
+- [ ] **Speech lock:** the unique `{ownerId, cacheKey}` `speechArtifacts` document is the lock. Claim it as `pending` with a conditional insert **before** calling ElevenLabs; the loser waits for `ready` or reuses it (no double payment, no audio and alignment from different requests).
+- [ ] **A new `renderId` for every render attempt** (never reuse a render folder).
+- [ ] **Create-only uploads for finished artifacts:** `store.put(key, data, { createOnly: true })`; `already_exists` means another attempt got there first.
+- [ ] **Publish (F29/F30) verifies the R2 object's SHA-256 against `renders.mp4Sha256` before sending it to Instagram** (write it into that feature's file when it starts).
+- [ ] Call `R2ArtifactStore` directly with keys from `StorageKeys` (no ArtifactStore adapter); call `checkBucket()` at worker start.
+
 ## Goal
 Turn the approved storyboard into an MP4 in the background, with progress steps.
 

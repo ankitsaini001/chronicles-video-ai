@@ -185,7 +185,7 @@ A single repo using **npm workspaces**; no extra monorepo tooling.
 
 **Migration rules**
 1. Move the prototype code into `packages/pipeline` and `packages/video` **without behavior changes**; all 185 tests keep passing.
-2. Replace `LocalArtifactStore` with an `R2ArtifactStore` that implements the same `ArtifactStore` interface. The local store stays for tests and the CLI.
+2. Files go to R2 through `R2ArtifactStore` (`packages/storage`, F22): a simple store (`put`/`get`/`head`/`presignedGet` with keys from `StorageKeys`) that F23 calls directly. It does **not** implement the pipeline's run-based `ArtifactStore` (decided in the F22 code review: the R2 layout is per render and per speech clip, not per run). `LocalArtifactStore` stays for the CLI and tests.
 3. Replace the local `manifest.json` run state with MongoDB `jobs` records (§8.9). The manifest states map 1:1.
 4. Stage functions keep their signatures; they receive an **owner-scoped job reference** instead of a filesystem run path (as required by PIPELINE_DESIGN §4).
 
@@ -419,7 +419,7 @@ One document with `_id: "global"`: `version`, `maintenance { active, message }`,
 ## 9. Object Storage (Cloudflare R2)
 
 - **One private bucket** per environment: **`reel-app-dev`**, **`reel-app-prod`** (F22; brand-neutral names because the product name may change, BRAND.md §10: do not rename a bucket). No public bucket access, no `r2.dev` address. The API token has **Object Read & Write on that one bucket only**.
-- **Code:** `packages/storage` (F22): `readR2Config` (checks `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, naming what is missing, never printing values), `StorageKeys` (the key builder), `R2ArtifactStore` (implements the pipeline `ArtifactStore`, plus `put` with a content type, `get`, `head`, `presignedGet`). AWS SDK v3 S3 client, region `auto`, endpoint `https://<account>.r2.cloudflarestorage.com`, path-style. Check: `npm run storage -- check`.
+- **Code:** `packages/storage` (F22): `readR2Config` (checks `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, naming what is missing, never printing values), `StorageKeys` (the key builder), `R2ArtifactStore` (`checkBucket`, `put` with an optional create-only mode, `get`, `head`, `presignedGet`; the content type comes from the key's extension; every failure is a `StorageError` with a plain message, the operation and the HTTP status, and a redacted cause). AWS SDK v3 S3 client, region `auto`, endpoint `https://<account>.r2.cloudflarestorage.com`, path-style, connection timeout 5 s, request timeout 120 s, 3 attempts. `get` returns "missing" only for R2's `NoSuchKey`; workers call `checkBucket()` at start so a wrong bucket fails loudly. Check: `npm run storage -- check`.
 - **Key layout** (built only by `StorageKeys` from validated ObjectIds (24 lowercase hex) and hashes, never from client or model input; anything else, `..`, slashes in ids and empty values are refused):
 ```
 users/{ownerId}/speech/{cacheKey}/audio.mp3
@@ -437,7 +437,11 @@ healthcheck/{UTC timestamp}-hello.txt     ← only `npm run storage -- check` (F
   - `{n}` in `frames/{n}.png` is a whole number 0–9999.
   - **Decision (F22): no storyboard copy in R2.** The former `plans/{planVersionId}/plan.json` and `review.html` keys are dropped for now: MongoDB `planVersions` holds every version, and the render step reads the plan from there. Add them back only if a step really needs a file.
   - Content types are limited to JSON, MP4, MP3, PNG, JPEG and plain text (no HTML is ever served from the bucket).
-- **Pipeline runs in R2:** `R2ArtifactStore` stores a run's `timeline.json`, `captions.json`, `output.mp4` and `qa.json` in the render folder (the run's `versionId` is the `renderId`). Plans, approvals and the manifest are not R2 files (MongoDB). There is no lock object in R2: the single writer per render is the MongoDB job (one active job per project).
+- **Writers and locks (MUST for F23, from the F22 code review).** R2 has no lock objects; MongoDB provides them:
+  1. **Speech:** the unique `{ownerId, cacheKey}` `speechArtifacts` document is the lock. Claim it as `pending` with a conditional insert **before** calling ElevenLabs; whoever loses waits for `ready` or reuses it. No double payment, no audio and alignment from two different requests.
+  2. **Renders:** a **new `renderId` for every attempt**, so two attempts never write into the same folder.
+  3. **Finished artifacts are uploaded create-only** (`put(key, data, { createOnly: true })`, `If-None-Match: *`): an existing file is never overwritten (`StorageError` `already_exists`).
+  4. **Publishing:** the publish job verifies the R2 object's SHA-256 against `renders.mp4Sha256` before sending it to Instagram.
 - **Access:** the browser plays and downloads via **presigned GET URLs** (TTL 15 min = `presignedGet` default 900 s; the code refuses more than 7200 s), issued only after an ownership check. Downloads use `Content-Disposition: attachment; filename="<title>.mp4"` (safe ASCII) plus `filename*=UTF-8''…` (RFC 5987) when the title isn't plain ASCII, e.g. Hindi.
 - **Instagram fetch:** Meta needs a **public URL** for `video_url`. We issue a presigned GET with a TTL of **2 hours** (enough for container processing), used only for that container (decision D5). Verify during integration that Meta accepts presigned R2 URLs with query strings; if it doesn't, use a short-lived Next.js proxy route `/api/media/{token}` that streams from R2.
 - **Integrity:** `put` computes the SHA-256 before upload, sends it as the upload checksum (R2 refuses the upload if the bytes differ), saves it on the object (`x-amz-meta-sha256`, returned by `head`) and returns it; the caller stores it in MongoDB, and the render worker verifies inputs before rendering.
