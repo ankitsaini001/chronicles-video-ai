@@ -514,15 +514,15 @@ Every endpoint still follows the same order: auth → input validation (Zod) →
 
 | Function | Trigger | Concurrency / limits | Steps (each checkpointed) |
 |---|---|---|---|
-| `plan-video` | `plan.requested` | key `ownerId`, limit 2; global limit 5 | load project → quota check → Gemini plan (+1 repair) → validate → insert `planVersion` → project `storyboard_ready` |
-| `revise-plan` | `revision.requested` | key `projectId`, limit 1 | load base version → Gemini revise → validate → diff → insert version → state |
+| `plan-video` | `plan.requested` | key `ownerId`, limit 2; global limit 5 | load project → quota check → Gemini plan (+1 repair) → validate → insert `planVersion` → project `storyboard_ready`. **As built (F15):** steps `start` → `ask-1` (one Gemini request) → `ask-2` (the repair, only if needed) → `save` or `fail-…`; each request is counted on the job before it is sent and its answer saved as soon as it arrives (DATABASE.md §4.9 `planner`); 2 retries per step; Inngest timeouts start 15 min, finish 20 min; code `apps/web/inngest/functions/plan-video.ts`, `apps/web/lib/plan/run-plan-job.ts` |
+| `revise-plan` | `revision.requested` | key `projectId`, limit 1 | load base version → Gemini revise → validate → diff → insert version → state. **As built (F18):** the same durable steps as `plan-video` (`runPlanJob` with a `prepare` hook: `start` → `ask-1` → `ask-2` repair → `save`/`fail-…`; count before sending, save each answer, 2 retries per step), the revision prompt in `packages/pipeline/src/planning/revision.ts` (current storyboard + change request as delimited data); ONE concurrency limit shared with `plan-video` (`PLANNER_CONCURRENCY` in `apps/web/inngest/client.ts`, `scope: env`: 2 per creator and 5 in total across both functions; one per project anyway); code `apps/web/inngest/functions/revise-plan.ts`, `packages/db/src/revisions.ts` |
 | `generate-video` | `video.generate.requested` | key `ownerId` limit 1; global limit **📏 2** | verify approval → spend check → **speech per scene** (`step.run` per scene, cache-aware) → validate audio + alignment → compile timeline/captions → upload → **render** (invoke `render-video`) → validate MP4 → project `video_ready` |
 | `render-video` | invoked | global limit **📏 1–2** (Sandbox cost) | create Sandbox → run render-worker → wait for completion (poll with `step.sleep`) → verify the R2 outputs → teardown |
 | `recaption-video` | `video.recaption.requested` | key `projectId`, limit 1 | apply overrides → recompile captions → render → validate |
 | `publish-post` | `post.publish.requested` (optional `ts` for scheduling) | key `connectionId` limit 1 | `step.sleepUntil(scheduledAt)` → **re-check approval** (§18) → check the publishing limit → create container → poll status (`step.sleep` 15 s, up to 10 min) → publish → save permalink |
 | `reconcile-publish` | `post.publish.unknown` | key `postId` | list recent media → match by container/caption/time → `published` or safe retry |
 | `refresh-instagram-tokens` | cron daily 03:00 IST | — | refresh tokens expiring in < 10 days (and older than 24 h) |
-| `sweep-stuck-jobs` | cron every 15 min | — | jobs `running` with no update for > 30 min → mark failed with a retry option (one short transaction that also clears `activeJobId`); jobs still `queued` after ~2 min → **re-send their event** (event id = the job key, so Inngest drops a duplicate) |
+| `sweep-stuck-jobs` | cron every 15 min (F18: the on-read rule, `packages/db/src/stuck-jobs.ts`, covers `plan` and `revise` jobs) | — | jobs `running` with no update for > 30 min → mark failed with a retry option (one short transaction that also clears `activeJobId`); jobs still `queued` after ~2 min → **re-send their event** (event id = the job key, so Inngest drops a duplicate). **F15: not a cron yet.** The same rule runs whenever an active plan job's status is read (C6, E1, the project page): running with no update for 10 min → failed (retryable); unsent event → re-sent after 15 s, sent but not started → re-sent every 2 min; queued 15 min → failed (API.md §8.5). The cron comes with the longer jobs (F23) |
 | `spend-rollup` | cron hourly | — | aggregate `providerUsage` → ceilings cache |
 
 ### 13.2 Rules
@@ -531,6 +531,7 @@ Every endpoint still follows the same order: auth → input validation (Zod) →
 - **Cancellation:** `cancelOn` matches `job.cancelled` with the same `jobId`; steps also check `cancelRequestedAt`.
 - **Vercel function duration:** each step must finish within the plan's function limit. Long waits use `step.sleep` / `step.waitForEvent`, never in-process waiting. Rendering happens **in the Sandbox**, not in the function.
 - **Events carry IDs only** (no plan bodies, no secrets).
+- **Dev vs cloud mode (F15):** `apps/web/inngest/client.ts` never guesses: dev mode only when `INNGEST_DEV` asks for it (`npm run dev` sets `INNGEST_DEV=1`; the local Inngest Dev Server, `npm run inngest`, http://localhost:8288; or a local Dev Server address such as the e2e test's http://localhost:8299). Otherwise cloud mode on any host, with `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` required. `INNGEST_DEV` is refused on Vercel, and `INNGEST_DEV=1` is refused in a production build (dev mode turns signature checks off). App id: the fixed, brand-neutral `reel-app` (BRAND.md §10: never change it). `/api/inngest` has `maxDuration` 300 s (one Gemini request may take 180 s).
 
 ---
 
@@ -590,7 +591,8 @@ Measure cold start, render time and cost per 60/90 s video at 2/4/8 vCPUs. If to
 - Adapter from the prototype (`@google/genai`, streaming, structured JSON output).
 - **Model config:** one model, `GEMINI_MODEL` (currently `gemini-3.6-flash`). **No automatic model fallback** (decision D4). When Gemini stays busy after the allowed retries, the job fails with `PROVIDER_BUSY` and the creator sees: *"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."* with a **Try again** button. Changing the model is an admin config change, recorded on each plan version (`plannerUsage.model`).
 - Schema compatibility: no `minItems`/`maxItems` in the response schema (verified incompatibility); limits are enforced by our validation + one repair.
-- Timeouts: 180 s per request; at most 3 requests per plan job (initial + up to 2 transient retries) plus 1 repair.
+- **Brainstorm (C7, F14):** its own model, `GEMINI_BRAINSTORM_MODEL` (optional, default `gemini-3.1-flash-lite`; PRD decision #26), sent with `thinkingConfig { thinkingLevel: "low" }` (gemini-3.6-flash took 55–57 s on the free tier); same adapter, no retries of its own; `packages/pipeline/src/brainstorm/` runs it with a **30 s limit for the whole brainstorm**, at most 2 quick retries for busy errors (never past the 30 s), 1 repair of an invalid answer, then `PROVIDER_BUSY` with the brainstorm wording *"Our AI is very busy right now. Please try again in a few minutes."* (no project exists). Each request is logged in `providerUsage`.
+- Timeouts: 180 s per request; at most 3 requests per plan job (initial + up to 2 transient retries) plus 1 repair. **As built (F15):** at most **4 requests per job attempt** in any mix (the first answer with up to 2 retries for busy/network errors, the repair with retries while the 4 last), counted on the job before each request; waits 2 s then 5 s, or the Retry-After (up to 60 s; longer → `PROVIDER_BUSY` at once). A Try again (E2) starts a new attempt with a new budget; an attempt counts 1 toward the project's 20 when it sends its first Gemini request.
 - **Data use:** on the free tier, Google may use content to improve its products. **Before real beta users, switch to the paid tier** (§22).
 
 ### 16.2 ElevenLabs (speech)
@@ -601,7 +603,7 @@ Measure cold start, render time and cost per 60/90 s video at 2/4/8 vCPUs. If to
 - Error policy: transient → ≤2 retries; `402`/quota/voice errors → non-retriable with a clear message; **no silent voice substitution**.
 
 ### 16.3 Prompt-injection posture
-User notes and topics are passed as **data** inside clearly delimited sections. The model's output is strictly schema-validated, and it has no tools and no side effects. The worst case is a bad plan, which the creator reviews before anything is generated.
+User notes and topics are passed as **data** inside clearly delimited sections (F15: `buildCreatorIdeaPrompt`, the idea text in `<<<CREATOR IDEA … CREATOR IDEA>>>` and a picked brainstorm choice in `<<<PICKED IDEA … PICKED IDEA>>>`; marker characters in creator text are removed so it can't close its block). The model's output is strictly schema-validated, and it has no tools and no side effects. The worst case is a bad plan, which the creator reviews before anything is generated.
 
 ---
 
@@ -671,8 +673,9 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 ## 19. Progress, Notifications and Real-Time Status
 
 - **Progress model:** `jobs.progress = { stage, percent, message }`, updated by Inngest steps (e.g. "Recording narration · scene 3 of 5").
-- **Delivery:** simple client polling via TanStack Query: every **2 s** while a job is active, then stop (decision D2). Push updates (Server-Sent Events / Inngest Realtime) are a later improvement.
+- **Delivery:** simple client polling via TanStack Query: every **2 s** while a job is active, then stop (decision D2). Push updates (Server-Sent Events / Inngest Realtime) are a later improvement. **As built (F15):** a plain `fetch` loop in `components/project/PlanJobPanel.tsx` (no extra library): C6 every 2 s, every 15 s while the tab is hidden (immediately again when it is shown), backing off up to 10 s after network errors, stopped when the job ends or the page is left.
 - **Leaving the page:** jobs continue; the library shows the state badge; returning restores the step.
+- **Storyboard screen (F16–F18):** `/projects/[id]/storyboard` reads the project and current version on the server; while a change request runs, `components/storyboard/ChangesPanel.tsx` polls C6 the same way (2 s / 15 s hidden / back-off) and reloads the page data when the job ends.
 - **Notifications in V1:** in-app only: a banner and toast on the next visit ("Your video is ready", "Post published", "Instagram needs reconnecting"). **No email notifications** (decision D3).
 
 ---

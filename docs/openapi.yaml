@@ -415,7 +415,7 @@ paths:
     get:
       operationId: listVoices
       summary: Voice presets with preview samples
-      description: B4. Pre-recorded static MP3 samples (decision D7). Voice IDs are never exposed.
+      description: B4. Pre-recorded static MP3 samples (decision D7). Voice IDs are never exposed. Order English, Hindi, Hinglish, female first. `enabled` is always true until admin settings (I12). An empty or repeated `language` is 400 INVALID_INPUT.
       tags: [Account]
       security:
         - sessionCookie: []
@@ -534,6 +534,10 @@ paths:
         C1. Tabs: drafts (draft, planning, plan_failed, storyboard_ready, generating, generate_failed), ready
         (video_ready, publish_failed), scheduled (scheduled, publishing), published. Omitted = all non-archived.
         Sorted by updatedAt desc. Cursor pagination.
+        As built (F21): only the signed-in user's projects, never archived ones; sorted updatedAt desc then _id desc
+        (index projects.ownerId_updatedAt_id); the cursor is made for one tab (another tab, or a tampered cursor:
+        400 INVALID_INPUT on `cursor`); unknown or repeated `tab` → 400. Items are ProjectListItem (ProjectSummary
+        plus stateVersion and storyboardApproved, additive). Rate: the shared 300 reads/min.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -555,7 +559,7 @@ paths:
                 $ref: '#/components/schemas/ProjectSummaryPage'
               example:
                 items:
-                  - { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work, language: en, voiceGender: female, state: video_ready, currentStep: video, thumbnailUrl: 'https://bytereel-prod.r2.example-account.r2.cloudflarestorage.com/users/67330c1a9f1e4b2a7c0d1e01/projects/67330d5e9f1e4b2a7c0d2a10/renders/67330f109f1e4b2a7c0d6f01/thumbnail.jpg?X-Amz-Expires=900&X-Amz-Signature=3f1c', latestPost: null, activeJobType: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:46:12.000Z' }
+                  - { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work, language: en, voiceGender: female, state: video_ready, currentStep: video, thumbnailUrl: 'https://bytereel-prod.r2.example-account.r2.cloudflarestorage.com/users/67330c1a9f1e4b2a7c0d1e01/projects/67330d5e9f1e4b2a7c0d2a10/renders/67330f109f1e4b2a7c0d6f01/thumbnail.jpg?X-Amz-Expires=900&X-Amz-Signature=3f1c', latestPost: null, activeJobType: null, stateVersion: 9, storyboardApproved: true, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:46:12.000Z' }
                 nextCursor: null
         '400':
           $ref: '#/components/responses/InvalidInput'
@@ -569,9 +573,11 @@ paths:
       operationId: createProject
       summary: Create a project and start the storyboard
       description: |
-        C2. ① Create storyboard. Creates the project (state planning) and a `plan` job; answers 202.
+        C2. ① Create storyboard. Creates the project (state planning, planRequestCount 0) and its queued
+        `plan` job in one transaction, then sends Inngest `plan.requested`; answers 202 (F15).
         **Idempotency-Key required.** Rate limit 10/hour; quota 5 projects/day (429 QUOTA_EXCEEDED);
-        503 SPEND_CEILING / MAINTENANCE.
+        503 SPEND_CEILING / MAINTENANCE (from F27/F36). If the AI planner or Inngest isn't set up: 500,
+        nothing saved. F15: `allowedActions` is `[]` while planning (cancel_job arrives with E3).
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -604,7 +610,7 @@ paths:
                 created:
                   summary: Project + plan job
                   value:
-                    project: { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work — from scanning the QR code to money reaching the shop, language: en, voiceGender: female, state: planning, currentStep: idea, thumbnailUrl: null, latestPost: null, activeJobType: plan, input: { type: topic, text: How UPI payments work — from scanning the QR code to money reaching the shop, brainstormChoice: null }, stateVersion: 1, currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: 67330d5f9f1e4b2a7c0d3c01, activeJob: null, lastError: null, allowedActions: [cancel_job], archivedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:00:00.000Z' }
+                    project: { id: 67330d5e9f1e4b2a7c0d2a10, title: How UPI payments work — from scanning the QR code to money reaching the shop, language: en, voiceGender: female, state: planning, currentStep: idea, thumbnailUrl: null, latestPost: null, activeJobType: plan, input: { type: topic, text: How UPI payments work — from scanning the QR code to money reaching the shop, brainstormChoice: null }, stateVersion: 1, currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: 67330d5f9f1e4b2a7c0d3c01, activeJob: null, lastError: null, allowedActions: [], archivedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:00:00.000Z' }
                     job: { id: 67330d5f9f1e4b2a7c0d3c01, projectId: 67330d5e9f1e4b2a7c0d2a10, type: plan, state: queued, attempt: 1, stages: [ { name: plan, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null }, { name: validate, status: pending, startedAt: null, endedAt: null, attempts: 0, error: null } ], progress: { stage: plan, percent: 0, message: Writing your storyboard… }, error: null, needsInput: null, result: null, cancelRequestedAt: null, createdAt: '2026-11-12T05:00:00.000Z', updatedAt: '2026-11-12T05:00:00.000Z', startedAt: null, finishedAt: null, pollAfterMs: 2000 }
         '400':
           $ref: '#/components/responses/InvalidInput'
@@ -642,7 +648,10 @@ paths:
     get:
       operationId: getProject
       summary: Project detail
-      description: C3. Project with activeJob and allowedActions. ETag = stateVersion. Archived projects are still returned.
+      description: |
+        C3. Project with activeJob and allowedActions. ETag = stateVersion. Archived projects are still returned.
+        As built (F16): owner only (404 otherwise); the stuck-job rule is applied first (like C6); ETag "<stateVersion>". allowedActions on a storyboard: edit_storyboard, request_revision (under 20 AI requests), approve_storyboard (until the current version is approved), retry_job (last change request failed and is retryable).
+        F21: `rename` first and `archive` last whenever no job runs (archive not while publishing); nothing on an archived project (state archived, currentStep = the step it was on).
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -678,6 +687,10 @@ paths:
         Then retry the failed plan job (POST /api/v1/jobs/{jobId}/retry), which plans from the edited idea.
         Does not count toward the 5 projects/day quota. 409 INVALID_STATE (archived, or text outside
         plan_failed), STALE_VERSION, JOB_ALREADY_RUNNING.
+        As built (F15 edit idea, F21 rename): `expectedStateVersion` goes in the body (If-Match isn't read on C4).
+        The title is cleaned (control/invisible characters removed, NFC), spaces and line breaks collapsed to one
+        space, trimmed, then 1–120. Rename is also refused while a job runs (409 JOB_ALREADY_RUNNING: a storyboard
+        job would otherwise overwrite the title with the plan's topic). Rename counts toward no limit.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -725,7 +738,9 @@ paths:
     delete:
       operationId: archiveProject
       summary: Archive a project (soft delete)
-      description: C5. **If-Match required.** Blocked while a post is publishing or outcome_unknown (409 INVALID_STATE). Cancels the active job and a scheduled or publish_failed post (so it can never be published or retried). Nothing is deleted from R2.
+      description: |
+        C5. **If-Match required.** Blocked while a post is publishing or outcome_unknown (409 INVALID_STATE). Cancels the active job and a scheduled or publish_failed post (so it can never be published or retried). Nothing is deleted from R2.
+        As built (F21): one conditional update (owner, stateVersion, no active job): state archived, archivedAt, stateBeforeArchive, stateVersion + 1. **Refused while a job runs (409 JOB_ALREADY_RUNNING)** instead of cancelling it (there is no job cancel yet, E3). No posts exist yet; F30 must add the post cancellation (one transaction). Missing/malformed If-Match → 400 INVALID_INPUT (`headers.If-Match`). Already archived → 409 INVALID_STATE. Rate: 60/min shared with C4. The archived project still opens by direct link (C3, pages), read-only.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -748,7 +763,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: STALE_VERSION or INVALID_STATE (publishing, already archived).
+          description: STALE_VERSION, JOB_ALREADY_RUNNING (F21) or INVALID_STATE (publishing, already archived).
           content:
             application/json:
               schema:
@@ -769,7 +784,7 @@ paths:
     get:
       operationId: getProjectStatus
       summary: Lightweight project status for 2-second polling
-      description: C6. Poll every 2 s while `pollAfterMs` is not null (decision D2). Supports If-None-Match → 304. Rate limit 120/min.
+      description: C6. Poll every 2 s while `pollAfterMs` is not null (decision D2). Rate limit 120/min (shared with E1). Applies the stuck-job rule (API.md §8.5). ETag is sent; If-None-Match → 304 is not supported yet (F15), every poll gets 200.
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -816,7 +831,7 @@ paths:
     post:
       operationId: brainstormIdeas
       summary: Brainstorm video ideas with AI
-      description: C7. Synchronous Gemini call (30 s timeout) returning 5–8 ideas; nothing stored. Rate limit 10/hour. 422 PROVIDER_REJECTED; 503 PROVIDER_BUSY / SPEND_CEILING.
+      description: 'C7. Synchronous Gemini call (30 s overall, at most 2 quick retries for busy errors and 1 repair of an invalid answer) returning exactly 5 ideas in the requested language; nothing stored, no project, no Idempotency-Key. Limits per user: 10 per hour (429 RATE_LIMITED) and 30 per day in the user timezone (429 QUOTA_EXCEEDED brainstorms_per_day); a refused request never reaches Gemini. Every Gemini request is logged in providerUsage (operation brainstorm), never the subject. 422 PROVIDER_REJECTED (safety block, or the model finds no safe educational video); 503 PROVIDER_BUSY (busy after the retries, 30 s reached, or no valid answer after the repair; Retry-After: 60). 503 SPEND_CEILING / MAINTENANCE arrive with F27/F36.'
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -859,20 +874,32 @@ paths:
                 $ref: '#/components/schemas/Error'
               examples:
                 rejected:
-                  $ref: '#/components/examples/ErrProviderRejected'
+                  $ref: '#/components/examples/ErrBrainstormRejected'
         '429':
-          $ref: '#/components/responses/RateLimited'
+          description: RATE_LIMITED (10 per hour, Retry-After) or QUOTA_EXCEEDED (30 brainstorms per day, details.resetsAt).
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                quotaBrainstorms:
+                  $ref: '#/components/examples/ErrQuotaBrainstorms'
+                rateLimited:
+                  $ref: '#/components/examples/ErrRateLimited'
         '500':
           $ref: '#/components/responses/Internal'
         '503':
-          description: PROVIDER_BUSY, SPEND_CEILING or MAINTENANCE.
+          description: PROVIDER_BUSY (with Retry-After), SPEND_CEILING or MAINTENANCE.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
               examples:
                 busy:
-                  $ref: '#/components/examples/ErrProviderBusy'
+                  $ref: '#/components/examples/ErrBrainstormBusy'
 
   # =============================== Storyboard ===============================
   /api/v1/projects/{projectId}/plan-versions:
@@ -881,7 +908,9 @@ paths:
     get:
       operationId: listPlanVersions
       summary: Plan version history
-      description: D1. Sorted by versionNumber desc. Cursor pagination.
+      description: |
+        D1. Sorted by versionNumber desc. Cursor pagination.
+        As built (F17): limit 1-50 (20), cursor = opaque base64url of the last versionNumber; a bad cursor or limit → 400. isApproved = this exact version has a storyboard approval.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -917,7 +946,9 @@ paths:
     get:
       operationId: getPlanVersion
       summary: Full plan version (or `current`)
-      description: D2. The plan exactly as the code contract (packages/pipeline/src/contracts/plan.ts), validation issues/warnings, stats, approval and changed scenes. 404 with details.reason = no_plan_yet before the first plan exists.
+      description: |
+        D2. The plan exactly as the code contract (packages/pipeline/src/contracts/plan.ts), validation issues/warnings, stats, approval and changed scenes. 404 with details.reason = no_plan_yet before the first plan exists.
+        As built (F16): `current` or a version id of this project; no storyboard yet → 404 details.reason no_plan_yet; changedSceneIds = scenes changed or added compared to the parent version ([] for version 1).
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -950,13 +981,14 @@ paths:
       - $ref: '#/components/parameters/ProjectId'
     post:
       operationId: editNarration
-      summary: Edit one narration block (new user_edit version)
+      summary: Edit a scene's narration (one new user_edit version)
       description: |
         D3. Inline narration edit → new `user_edit` plan version (re-validated, re-hashed); the approval is
         reset. Saved even if validation fails (validation.valid = false). **expectedStateVersion required.**
         Allowed in storyboard_ready, generate_failed, video_ready, scheduled, publish_failed with no active job. A scheduled
         or publish_failed post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
+        As built (F17, after review): body = one scene's edited blocks (1-4, each once), saved as ONE new version, all or nothing (one Save = one Undo step); text cleaned (control/format characters removed, NFC, line breaks and space runs → one space), 1-300; unknown scene/narration id → 400 and nothing saved; refused in scheduled/publish_failed (409 INVALID_STATE) until F30; the new version goes through the same plan validator as AI plans and is saved even when invalid (valid false, issues). No AI call, not counted toward the 20. Posts (F30) don't exist yet, so nothing to invalidate there.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -966,7 +998,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/NarrationEditRequest'
-            example: { basePlanVersionId: 67330e019f1e4b2a7c0d2b02, sceneId: scene-takeaway, narrationId: line-take, text: 'So remember: UPI is a fast switch between banks, and only you should ever know your PIN.', expectedStateVersion: 4 }
+            example: { basePlanVersionId: 67330e019f1e4b2a7c0d2b02, sceneId: scene-takeaway, blocks: [ { narrationId: line-take, text: 'So remember: UPI is a fast switch between banks, and only you should ever know your PIN.' } ], expectedStateVersion: 4 }
       responses:
         '201':
           description: The new plan version.
@@ -1004,7 +1036,9 @@ paths:
     post:
       operationId: changeVoice
       summary: Switch the narrator voice (new user_edit version)
-      description: D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled or publish_failed; that post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
+      description: |
+        D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled or publish_failed; that post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
+        As built (F19): only the voice preset of the project's own language changes; same voice → 400 INVALID_INPUT (issues[0].message unchanged). No AI call, not counted.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1065,6 +1099,7 @@ paths:
         + notification), not when the revise job succeeds (PRD §7).
         **Idempotency-Key and expectedStateVersion required.** Rate limit 20/hour; quota 20 plan+revision
         requests per project (429, resetsAt null); 503 SPEND_CEILING.
+        As built (F18): stage `video` needs a currentRenderId (409 INVALID_STATE until F23). The request is NOT counted at acceptance: its revise job counts 1 of the 20 when it sends its first Gemini request (same rule as F15's Try again); D5 refuses at 20. A request whose answer changes no scene ends `rejected` (job `needs_input`, reason clarification_needed) with a reply asking what to change. No SPEND_CEILING yet (F27).
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1119,7 +1154,9 @@ paths:
     get:
       operationId: listRevisions
       summary: Revision chat history
-      description: D6. Sorted by createdAt desc. Optional stage filter. Cursor pagination.
+      description: |
+        D6. Sorted by createdAt desc. Optional stage filter. Cursor pagination.
+        As built (F18): query stage (storyboard|video), limit, cursor (createdAt + _id; bound to the stage filter).
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1159,7 +1196,9 @@ paths:
     post:
       operationId: restorePlanVersion
       summary: Undo / restore an earlier plan version
-      description: D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
+      description: |
+        D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
+        As built (F17): answers the Project as C3 (with its jobs); the project's voiceGender follows the restored plan's voice preset; approvedPlanVersionId = the version when it has a storyboard approval.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1213,6 +1252,7 @@ paths:
         Re-approval: if a generate job for this exact plan version already succeeded (e.g. after undo), no new
         job is started and no quota is used; the answer is 200 with that job, and the project moves to
         video_ready with currentRenderId = the newest ready render of that version.
+        AS BUILT IN F20 (until F23): only the approval part. No generate job, no videos/day count, no Inngest event; the answer is **200** `{ approval, job: null, project }` (project as C3, with its jobs; the button reads "Approve storyboard" until F23) and the project stays storyboard_ready with approvedPlanVersionId = currentPlanVersionId (F23 starts the job from exactly that state). An existing approval of the same version (e.g. after undo) is reused. Each new approval writes an auditLogs entry `storyboard.approved`.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1326,10 +1366,12 @@ paths:
       description: |
         E2. Same job id, attempt + 1, finished stages reused. Allowed for failed jobs with error.retryable,
         cancelled plan/caption jobs, and failed plan jobs whose idea was edited (PATCH project `text`) after the
-        failure; plan retries use the current idea and never count toward projects/day, but a retry that plans
-        from an edited idea counts 1 toward the 20 plan + revision requests per project (429 QUOTA_EXCEEDED
-        plan_requests_per_project at the limit). Not for publish jobs: use the post retry. **Idempotency-Key required.**
+        failure; plan retries use the current idea and never count toward projects/day, but every plan retry
+        that makes a new AI request counts 1 toward the 20 plan + revision requests per project (counted when
+        the job sends its first Gemini request, F15); refused with 429 QUOTA_EXCEEDED plan_requests_per_project
+        when the project is already at 20. Not for publish jobs: use the post retry. **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
+        As built (F18): also retries a failed `revise` job (a change request), while the storyboard is still the version the request was made on (else 409 INVALID_STATE reason storyboard_changed) and under 20 AI requests (429).
       tags: [Jobs]
       security:
         - sessionCookie: []
@@ -3210,8 +3252,8 @@ components:
         label:
           type: string
         sampleUrl:
-          type: string
-          description: Static pre-recorded MP3 under /voices/ (decision D7).
+          type: [string, 'null']
+          description: Static pre-recorded MP3 under /voices/ (decision D7). null while the preset's sample isn't recorded yet (F13 - the Hindi/Hinglish samples wait for the voice-plan decision before F23); the Idea screen shows no play button then.
         sampleText:
           type: string
         enabled:
@@ -3261,15 +3303,18 @@ components:
       properties:
         id:
           type: string
-          pattern: '^idea-[1-8]$'
+          pattern: '^idea-[1-5]$'
         title:
           type: string
+          minLength: 3
           maxLength: 120
         hook:
           type: string
+          minLength: 3
           maxLength: 200
         angle:
           type: string
+          minLength: 3
           maxLength: 200
     PostSummary:
       type: object
@@ -3319,6 +3364,20 @@ components:
           $ref: '#/components/schemas/Timestamp'
         updatedAt:
           $ref: '#/components/schemas/Timestamp'
+    ProjectListItem:
+      description: One C1 card (F21) = ProjectSummary plus two additive fields.
+      allOf:
+        - $ref: '#/components/schemas/ProjectSummary'
+        - type: object
+          required: [stateVersion, storyboardApproved]
+          properties:
+            stateVersion:
+              type: integer
+              minimum: 1
+              description: Sent back by the card's Rename (C4 expectedStateVersion) and Archive (C5 If-Match).
+            storyboardApproved:
+              type: boolean
+              description: The storyboard on screen (currentPlanVersionId) is the approved one; the card says "Approved".
     ProjectInput:
       type: object
       required: [type, text, brainstormChoice]
@@ -4275,6 +4334,7 @@ components:
       properties:
         title:
           type: string
+          description: Cleaned (control/invisible characters removed, NFC), spaces and line breaks collapsed, trimmed, then 1–120 characters.
           minLength: 1
           maxLength: 120
         text:
@@ -4294,31 +4354,45 @@ components:
           type: string
           minLength: 2
           maxLength: 100
+          description: Counted after removing control characters, Unicode NFC and trimming (like the idea text).
         language:
           $ref: '#/components/schemas/Language'
     NarrationEditRequest:
       type: object
       additionalProperties: false
-      required: [basePlanVersionId, sceneId, narrationId, text, expectedStateVersion]
+      description: The edited narration blocks of ONE scene, saved together as one new version (all or nothing; F17 review).
+      required: [basePlanVersionId, sceneId, blocks, expectedStateVersion]
       properties:
         basePlanVersionId:
           $ref: '#/components/schemas/ObjectId'
         sceneId:
           $ref: '#/components/schemas/SafeId'
-        narrationId:
-          $ref: '#/components/schemas/SafeId'
-        text:
-          type: string
-          minLength: 1
-          maxLength: 300
-        speech:
-          type: [string, 'null']
-          minLength: 1
-          maxLength: 300
-        display:
-          type: [string, 'null']
-          minLength: 1
-          maxLength: 300
+        blocks:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: Each narration block of the scene at most once.
+          items:
+            type: object
+            additionalProperties: false
+            required: [narrationId, text]
+            properties:
+              narrationId:
+                $ref: '#/components/schemas/SafeId'
+              text:
+                type: string
+                minLength: 1
+                maxLength: 300
+              speech:
+                type: [string, 'null']
+                minLength: 1
+                maxLength: 300
+                description: Omitted = keep, null = clear.
+              display:
+                type: [string, 'null']
+                minLength: 1
+                maxLength: 300
+                description: Omitted = keep, null = clear.
         expectedStateVersion:
           type: integer
           minimum: 1
@@ -4568,7 +4642,7 @@ components:
         ideas:
           type: array
           minItems: 5
-          maxItems: 8
+          maxItems: 5
           items:
             $ref: '#/components/schemas/BrainstormIdea'
     DeletionAccepted:
@@ -4617,7 +4691,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectSummary'
+            $ref: '#/components/schemas/ProjectListItem'
         nextCursor:
           $ref: '#/components/schemas/NextCursor'
     PlanVersionSummaryPage:
@@ -5026,6 +5100,18 @@ components:
       summary: Gemini busy
       value:
         error: { code: PROVIDER_BUSY, message: Our AI is very busy right now. Your idea is saved; please try again in a few minutes., requestId: req_01JCXM1V4W5X }
+    ErrBrainstormBusy:
+      summary: Gemini busy (brainstorm; no project exists)
+      value:
+        error: { code: PROVIDER_BUSY, message: Our AI is very busy right now. Please try again in a few minutes., requestId: req_01JCXM1V4W6Y }
+    ErrBrainstormRejected:
+      summary: Unsafe brainstorm subject
+      value:
+        error: { code: PROVIDER_REJECTED, message: "We can't suggest ideas for this subject. Please try a different one.", requestId: req_01JCXKZZ0007 }
+    ErrQuotaBrainstorms:
+      summary: Daily brainstorm limit reached
+      value:
+        error: { code: QUOTA_EXCEEDED, message: "You've used today's 30 brainstorms. Try again tomorrow.", details: { quota: brainstorms_per_day, limit: 30, used: 30, resetsAt: '2026-11-12T18:30:00.000Z' }, requestId: req_01JCXM3A7B8D }
     ErrProviderRejected:
       summary: Unsafe topic
       value:

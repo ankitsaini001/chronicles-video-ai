@@ -5,6 +5,7 @@
   "description": "ByteReel AI engine: plan contracts, planning (Gemini), speech (ElevenLabs), timing/caption compiler, validation, artifact storage.",
   "type": "module",
   "exports": {
+    "./brainstorm": "./src/brainstorm/index.ts",
     "./config/config": "./src/config/config.ts",
     "./contracts": "./src/contracts/index.ts",
     "./pipeline": "./src/pipeline/index.ts",
@@ -14,6 +15,7 @@
     "./providers": "./src/providers/index.ts",
     "./storage": "./src/storage/index.ts",
     "./theme": "./src/theme.ts",
-    "./timing": "./src/timing/index.ts"
+    "./timing": "./src/timing/index.ts",
+    "./validation": "./src/validation/index.ts"
   }
 }

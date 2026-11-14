@@ -9,6 +9,9 @@
 | **Data (MongoDB / storage)** | `posts` |
 | **API endpoints** (docs/API.md) | H2, H3, H4, H6 |
 
+## MUST from F16–F20 (code review, 2026-11-14)
+- [ ] **Add the post approval invalidation to every storyboard change and re-allow the two states.** Until F30, D3 (narration edit), D4 (voice), D5 (revision) and D7 (undo/restore) are refused with `409 INVALID_STATE` while the project is `scheduled` or `publish_failed` (`STORYBOARD_EDIT_STATES` in `packages/db/src/projects.ts`). F30 MUST, in the same transaction as each change, move a `scheduled`/`publish_failed` post to `approval_invalidated` and create the `approval_invalidated` notification (API.md §9, DATABASE.md §7.2 rows 3–5), then add `scheduled` and `publish_failed` back to `STORYBOARD_EDIT_STATES`, with tests.
+
 ## Goal
 Approve the exact video and account, then publish; show the live post or a clear failure with Retry.
 

@@ -5,7 +5,7 @@ import { API_RATE_LIMITS, DEFAULT_TIMEZONE, isValidTimezone, USAGE_LIMITS, usage
 
 describe("USAGE_LIMITS", () => {
   it("matches API.md §10.1", () => {
-    expect(USAGE_LIMITS).toEqual({ videosPerDay: 3, projectsPerDay: 5, voiceCharactersPerMonth: 3000 });
+    expect(USAGE_LIMITS).toEqual({ videosPerDay: 3, projectsPerDay: 5, voiceCharactersPerMonth: 3000, brainstormsPerDay: 30, planRequestsPerProject: 20 });
   });
 
   it("B1 reads are limited to 300 per minute per user (API.md §10.3)", () => {

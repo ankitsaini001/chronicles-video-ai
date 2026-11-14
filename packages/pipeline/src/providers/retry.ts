@@ -14,6 +14,19 @@ export interface RetryOptions {
   /** Longest wait we are willing to honor. */
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Wall-clock time (ms since epoch) after which no new attempt starts. A retry whose wait would
+   * end at or after it is not made: the last error is thrown as it is (still transient). Used by
+   * short synchronous calls with a fixed overall timeout (C7 brainstorm: 30 s).
+   */
+  deadline?: number;
+  /**
+   * With `deadline`: the least time a retry must still have after its wait (default 0). A retry
+   * that would start with less is not made (C7: 5 s, too little for a useful answer).
+   */
+  minAttemptMs?: number;
+  /** Clock for `deadline` (tests). Default Date.now. */
+  now?: () => number;
   onRetry?: (info: { attempt: number; waitMs: number; error: ProviderError }) => void;
 }
 
@@ -26,6 +39,7 @@ export async function withRetries<T>(call: () => Promise<T>, options: RetryOptio
   const backoff = options.backoffMs ?? DEFAULT_RETRY.backoffMs;
   const maxWaitMs = options.maxWaitMs ?? DEFAULT_RETRY.maxWaitMs;
   const sleep = options.sleep ?? realSleep;
+  const now = options.now ?? Date.now;
 
   for (let attempt = 1; ; attempt++) {
     try {
@@ -43,6 +57,7 @@ export async function withRetries<T>(call: () => Promise<T>, options: RetryOptio
           message: `${error.message} (the provider asked to wait ${Math.ceil(waitMs / 1000)} s, longer than the ${maxWaitMs / 1000} s we wait automatically)`,
         });
       }
+      if (options.deadline !== undefined && now() + waitMs + (options.minAttemptMs ?? 0) >= options.deadline) throw error;
       options.onRetry?.({ attempt, waitMs, error });
       await sleep(waitMs);
     }

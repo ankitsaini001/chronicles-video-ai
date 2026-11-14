@@ -142,9 +142,10 @@ describe("request ids", () => {
 
 describe("B1 getMe", () => {
   const now = new Date("2026-11-13T10:00:00.000Z");
+  const none = async () => 0;
 
   it("matches the API.md Me shape with zero usage and documented limits", async () => {
-    expect(await getMe(user, now)).toEqual({
+    expect(await getMe(user, now, none)).toEqual({
       id: user.id,
       name: "Ananya Iyer",
       email: "ananya.iyer@example.in",
@@ -166,14 +167,24 @@ describe("B1 getMe", () => {
 
   it("never carries login-protection fields, even if the input object had them", async () => {
     const leaky = { ...user, failedLoginCount: 4, lockedUntil: new Date(), lastLoginAt: new Date(), status: "active" } as SessionUser;
-    const me = await getMe(leaky, now);
+    const me = await getMe(leaky, now, none);
     const json = JSON.stringify(me);
     for (const field of ["failedLoginCount", "lockedUntil", "lastLoginAt"]) expect(json).not.toContain(field);
     expect(Object.keys(me)).not.toContain("status");
   });
 
   it("the shell pill and B1 use the same numbers", async () => {
-    const me = await getMe(user, now);
-    expect((await getUsage(user, now)).videosToday).toEqual(me.usage.videosToday);
+    const me = await getMe(user, now, none);
+    expect((await getUsage(user, now, none)).videosToday).toEqual(me.usage.videosToday);
+  });
+
+  it("projects today is the real count for this user and today in their timezone (F12)", async () => {
+    const seen: { id: string; timezone: string; now: Date }[] = [];
+    const me = await getMe(user, now, async (u, at) => {
+      seen.push({ id: u.id, timezone: u.timezone, now: at });
+      return 2;
+    });
+    expect(me.usage.projectsToday).toEqual({ used: 2, limit: 5, resetsAt: "2026-11-13T18:30:00.000Z" });
+    expect(seen).toEqual([{ id: user.id, timezone: "Asia/Kolkata", now }]);
   });
 });

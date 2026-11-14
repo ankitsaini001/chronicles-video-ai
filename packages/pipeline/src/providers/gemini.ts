@@ -1,4 +1,4 @@
-import { ApiError, GoogleGenAI, type GenerateContentResponse, type Model } from "@google/genai";
+import { ApiError, GoogleGenAI, ThinkingLevel, type GenerateContentResponse, type Model } from "@google/genai";
 import { parseRetryAfter, ProviderError } from "./errors";
 import type { PlannerProvider, PlannerRequest, PlannerResponse, TokenUsage } from "./planner";
 import { withRetries, type RetryOptions } from "./retry";
@@ -22,19 +22,25 @@ export interface GeminiOptions {
   apiKey: string;
   model: string;
   retry?: RetryOptions;
+  /** Per-request timeout (default 180 s, the storyboard planner's). C7 brainstorm uses a shorter one. */
+  requestTimeoutMs?: number;
+  /** Output token cap (default 32,768, room for a full plan). */
+  maxOutputTokens?: number;
+  /** Ask the model to think less (C7 brainstorm: "low"). Default: the model's own setting. */
+  thinkingLevel?: "low";
   /** Injectable for tests; defaults to global fetch. */
   fetch?: typeof fetch;
 }
 
 /** Builds an SDK client whose fetch remembers the last Retry-After header (the SDK error drops headers). */
-function createClient(apiKey: string, baseFetch: typeof fetch = fetch) {
+function createClient(apiKey: string, baseFetch: typeof fetch = fetch, timeoutMs: number = REQUEST_TIMEOUT_MS) {
   const state = { lastRetryAfterMs: null as number | null };
   const recordingFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const response = await baseFetch(input, init);
     state.lastRetryAfterMs = response.ok ? null : parseRetryAfter(response.headers.get("retry-after"));
     return response;
   };
-  const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: REQUEST_TIMEOUT_MS, fetch: recordingFetch } });
+  const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs, fetch: recordingFetch } });
   return { client, state };
 }
 
@@ -44,10 +50,14 @@ export class GeminiPlanner implements PlannerProvider {
   private readonly client: GoogleGenAI;
   private readonly state: { lastRetryAfterMs: number | null };
   private readonly retry: RetryOptions;
+  private readonly maxOutputTokens: number;
+  private readonly thinkingLevel: "low" | undefined;
 
   constructor(options: GeminiOptions) {
     this.model = options.model;
-    const { client, state } = createClient(options.apiKey, options.fetch);
+    this.maxOutputTokens = options.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
+    this.thinkingLevel = options.thinkingLevel;
+    const { client, state } = createClient(options.apiKey, options.fetch, options.requestTimeoutMs);
     this.client = client;
     this.state = state;
     this.retry = options.retry ?? {};
@@ -69,7 +79,9 @@ export class GeminiPlanner implements PlannerProvider {
               systemInstruction: request.systemInstruction,
               responseMimeType: "application/json",
               responseJsonSchema: request.responseJsonSchema,
-              maxOutputTokens: MAX_OUTPUT_TOKENS,
+              maxOutputTokens: this.maxOutputTokens,
+              ...(this.thinkingLevel === "low" ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+              ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
             },
           });
           const chunks: GenerateContentResponse[] = [];

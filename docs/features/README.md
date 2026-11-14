@@ -55,16 +55,16 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | 🔨 In progress |
-| F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ⬜ Not started |
-| F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ⬜ Not started |
-| F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ⬜ Not started |
-| F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | ⬜ Not started |
-| F17 | [Edit narration + versions + undo](F17-narration-edit-undo.md) | F16 | ⬜ Not started |
-| F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | ⬜ Not started |
-| F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | ⬜ Not started |
-| F20 | [Approve storyboard (approval #1)](F20-approve-storyboard.md) | F18 | ⬜ Not started |
-| F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | ⬜ Not started |
+| F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | ✅ Done |
+| F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ✅ Done |
+| F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ✅ Done |
+| F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ✅ Done |
+| F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | ✅ Done |
+| F17 | [Edit narration + versions + undo](F17-narration-edit-undo.md) | F16 | ✅ Done |
+| F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | ✅ Done |
+| F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | ✅ Done |
+| F20 | [Approve storyboard (approval #1)](F20-approve-storyboard.md) | F18 | ✅ Done |
+| F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | ✅ Done |
 
 ### A4 · Generate and review video
 
@@ -98,11 +98,16 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F12 is in progress (Step 1 Idea: create a project). Phases A1 and A2 done (F01–F11).
+**Next up:** phase A4 (F22 Cloudflare R2 storage setup, together). Phases A1, A2 and A3 done (F01–F21); A3 merged to main 2026-11-14.
+
+## Open decisions (must be settled before the named feature)
+- **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.
 - **Waitlist instead of a closed invite list:** people who aren't invited can request access from the Access pending page; the founder approves them (command first, admin page later).
 - **Email verification + self-service "Forgot password":** needs an email sending service and the domain (decided before F28/F38). Recommended before opening sign-up to everyone.
+- **Photos (on hold, founder 2026-11-14; discuss after the V1 plan is done):** (A) a photo of notes/textbook page/whiteboard → the AI suggests the topic and script (Gemini reads the image; store nothing); (B) the creator's own image or diagram shown in a scene (needs storage F22, checks, a new scene type; diagrams/objects, not people's faces). Not planned: animating a photo with AI video generation (cost per second, unreliable, consent/deepfake and minors' data risks).
+- **Card cover preview while a project has no video (founder 2026-11-14: "we can come later on it"):** instead of the title's first letter, show a mini Reel cover: the first scene's hook headline on the brand gradient, a step tag (Idea / Storyboard / Needs attention) and "6 scenes · ≈72s"; idea text when there is no storyboard; shimmer while writing. No AI, no cost, no DB change. The real video thumbnail (F23) replaces it automatically.
 - **Public launch sign-up:** email verification + per-account limits + spend ceilings + a bot check (captcha), then drop the approval step. Also (F09 review): move the login lock to a counter keyed by hashed email so unknown emails lock too, and remove the A1 exception (API.md §3.1 Enumeration).
 - **First admin account:** a one-time command (e.g. `npm run db -- make-admin <email>`) after the founder signs up; decide before F34.

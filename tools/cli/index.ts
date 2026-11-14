@@ -7,6 +7,7 @@ import { runFixtureCommand } from "./fixture";
 import { runPlanCommand } from "./plan";
 import { runPreflight } from "./preflight";
 import { runRenderFixtureCommand } from "./render-fixture";
+import { runVoiceSamplesCommand } from "./voice-samples";
 
 /**
  * Developer CLI. Usage:
@@ -17,6 +18,7 @@ import { runRenderFixtureCommand } from "./render-fixture";
  *   npm run pipeline -- resume --run <run-id> [--max-characters N]
  *   npm run pipeline -- fixture --file fixtures/water-cycle.plan.json
  *   npm run pipeline -- render-fixture --file fixtures/water-cycle.plan.json [--force]
+ *   npm run voices:samples [-- --force]   (= npm run pipeline -- voice-samples)
  *
  * Exit codes: 0 = success, 1 = validation/check failure, 2 = usage error.
  */
@@ -29,6 +31,7 @@ const USAGE = `Usage:
   npm run pipeline -- resume --run <owner/project/version> [--max-characters N]
   npm run pipeline -- fixture --file <fixture.plan.json>
   npm run pipeline -- render-fixture --file <fixture.plan.json> [--force]
+  npm run pipeline -- voice-samples [--force]
 
 preflight --network makes read-only provider checks (no generation, no text-to-speech).
 plan calls the LIVE Gemini planner and writes plan.json + plan-review.html (awaiting approval).
@@ -36,7 +39,9 @@ generate (approved live runs): ElevenLabs speech per scene -> compile -> render 
   --scene synthesizes only the named scene(s) as a probe and stops; --max-characters caps the run's
   total text-to-speech characters (default 1.5 x the narration). Saved speech is always reused.
 resume continues a failed/needs-input run from saved artifacts (never re-synthesizes saved scenes).
-render-fixture compiles, renders and validates a fixture with SYNTHETIC SILENT timing (P1).`;
+render-fixture compiles, renders and validates a fixture with SYNTHETIC SILENT timing (P1).
+voice-samples records the 6 voice preview MP3s ONCE (LIVE ElevenLabs, about 300 characters) into
+  apps/web/public/voices/. Existing files are skipped unless --force; refuses above 600 characters.`;
 
 async function main(argv: string[]): Promise<number> {
   const projectRoot = process.cwd();
@@ -119,6 +124,12 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const { ok, lines } = await runRenderFixtureCommand({ file: values.file, force: values.force ?? false, projectRoot, runsDir, print });
+      print(lines);
+      return ok ? 0 : 1;
+    }
+    case "voice-samples": {
+      const { values } = parseArgs({ args: rest, options: { force: { type: "boolean" } }, strict: true });
+      const { ok, lines } = await runVoiceSamplesCommand({ projectRoot, force: values.force ?? false, print });
       print(lines);
       return ok ? 0 : 1;
     }

@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08";
+  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20" | "F21";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -30,6 +30,27 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "verification", name: "identifier", keys: { identifier: 1 }, options: {}, feature: "F08", why: "Find a reset link" },
   { collection: "verification", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Expired reset links delete themselves" },
   { collection: "rateLimits", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Old sign-up/login counters delete themselves" },
+  // F12's { ownerId: 1, updatedAt: -1 } was removed in the F21 review: ownerId_updatedAt_id (F21)
+  // starts with the same keys and serves the same queries. An Atlas that already has it can drop it
+  // by hand (DATABASE.md §8); keeping it does no harm.
+  { collection: "projects", name: "ownerId_state", keys: { ownerId: 1, state: 1 }, options: {}, feature: "F12", why: "The My videos tabs" },
+  { collection: "idempotencyKeys", name: "ownerId_key_unique", keys: { ownerId: 1, key: 1 }, options: { unique: true }, feature: "F12", why: "A click is processed once" },
+  { collection: "idempotencyKeys", name: "createdAt_ttl", keys: { createdAt: 1 }, options: { expireAfterSeconds: 86400 }, feature: "F12", why: "Forget clicks after a day" },
+  { collection: "usageCounters", name: "ownerId_kind_period_unique", keys: { ownerId: 1, kind: 1, period: 1 }, options: { unique: true }, feature: "F12", why: "One counter per user, kind and day/month" },
+  { collection: "usageCounters", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F12", why: "Old counters delete themselves" },
+  { collection: "providerUsage", name: "at", keys: { at: -1 }, options: {}, feature: "F14", why: "AI spend totals by time" },
+  { collection: "providerUsage", name: "ownerId_at", keys: { ownerId: 1, at: -1 }, options: {}, feature: "F14", why: "One user's AI usage" },
+  { collection: "providerUsage", name: "provider_at", keys: { provider: 1, at: -1 }, options: {}, feature: "F14", why: "AI spend per service" },
+  { collection: "jobs", name: "idempotencyKey_unique", keys: { idempotencyKey: 1 }, options: { unique: true }, feature: "F15", why: "No duplicate jobs from double-clicks" },
+  { collection: "jobs", name: "projectId_createdAt", keys: { projectId: 1, createdAt: -1 }, options: {}, feature: "F15", why: "A project's jobs, newest first" },
+  { collection: "jobs", name: "state_updatedAt", keys: { state: 1, updatedAt: 1 }, options: {}, feature: "F15", why: "Find stuck jobs" },
+  { collection: "planVersions", name: "projectId_versionNumber_unique", keys: { projectId: 1, versionNumber: -1 }, options: { unique: true }, feature: "F15", why: "No duplicate version numbers; history order" },
+  { collection: "planVersions", name: "ownerId_projectId", keys: { ownerId: 1, projectId: 1 }, options: {}, feature: "F15", why: "Owner-scoped lookups" },
+  { collection: "revisions", name: "projectId_createdAt", keys: { projectId: 1, createdAt: -1 }, options: {}, feature: "F18", why: "Revision chat history, newest first" },
+  { collection: "storyboardApprovals", name: "planVersionId_unique", keys: { planVersionId: 1 }, options: { unique: true }, feature: "F20", why: "A storyboard version is approved at most once" },
+  // C1 sorts by updatedAt AND _id (the tie-breaker, API.md §5): this index serves the whole sort, so
+  // a page never needs an in-memory sort. Tabs filter on state on the way (a user has few projects).
+  { collection: "projects", name: "ownerId_updatedAt_id", keys: { ownerId: 1, updatedAt: -1, _id: -1 }, options: {}, feature: "F21", why: "My videos pages, newest first (with the tie-breaker)" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */

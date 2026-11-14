@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Db } from "mongodb";
+import { BRAINSTORM_LIMITS } from "./idea-text";
 
 // "Too many attempts" counters (docs/DATABASE.md §4.6, Q13; docs/API.md §3.7).
 // One collection for every limit. Each attempt does one atomic "add 1, create if missing" on the
@@ -35,6 +36,20 @@ export const AUTH_RATE_LIMITS = {
 export const API_RATE_LIMITS = {
   /** "Other reads (GET)": 300 requests per minute per user, shared by all plain GET endpoints. */
   readsPerUser: { name: "v1-read-user", limit: 300, windowSeconds: 60 },
+  /** C2 create project: 10 per hour per user (plus the 5 projects/day quota). */
+  createProjectPerUser: { name: "create-project", limit: 10, windowSeconds: 60 * 60 },
+  /** C7 brainstorm: 10 per hour per user (plus 30 per day, USAGE_LIMITS.brainstormsPerDay; F14). */
+  brainstormPerUser: { name: "brainstorm", limit: BRAINSTORM_LIMITS.perHour, windowSeconds: 60 * 60 },
+  /** "Polling reads" C6 project status and E1 job status (later H4): 120 per minute, one shared counter (F15). */
+  pollPerUser: { name: "v1-poll-user", limit: 120, windowSeconds: 60 },
+  /** C4 edit idea (later rename, D3, D4, D7): 60 per minute (F15). */
+  editProjectPerUser: { name: "edit-project", limit: 60, windowSeconds: 60 },
+  /** D5 revision request: 20 per hour (F18). */
+  revisionPerUser: { name: "revision", limit: 20, windowSeconds: 60 * 60 },
+  /** D8 approve storyboard (later F4 caption overrides): 10 per hour (F20). */
+  approvePerUser: { name: "approve-storyboard", limit: 10, windowSeconds: 60 * 60 },
+  /** E2 retry (later E3 cancel): 30 per hour, one shared counter (F15). */
+  jobActionsPerUser: { name: "job-actions", limit: 30, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

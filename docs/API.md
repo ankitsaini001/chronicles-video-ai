@@ -60,7 +60,7 @@
 | Nulls | Optional response fields are **present with `null`** rather than omitted (easier for the UI). Request bodies may omit optional fields. Exception: plan objects keep the contract rule that `icon` is **omitted** when absent |
 | Unknown fields | Request bodies are **strict**: unknown keys → `400 INVALID_INPUT` (same as the Zod `strictObject` plan contracts) |
 | Body size | Max **64 KB** per JSON request → `413 PAYLOAD_TOO_LARGE` |
-| Strings | Trimmed and Unicode-NFC-normalized server side before length checks. Lengths are counted in characters (UTF-16 code units, as in Zod) |
+| Strings | Trimmed and Unicode-NFC-normalized server side before length checks. Lengths are counted in characters (UTF-16 code units, as in Zod). Idea text and the C7 subject also lose control characters (except tab/line breaks) and invisible format characters (bidi overrides, zero-width space, BOM; ZWJ/ZWNJ are kept for Devanagari) first (F12, F14) |
 | Request id | Every response carries `X-Request-Id`; error bodies repeat it as `requestId`. The client may send its own `X-Request-Id` (≤ 64 chars, `[A-Za-z0-9-]`) to trace a call |
 | Success bodies | The resource itself (no `{ ok, data }` wrapper). Lists use `{ items, nextCursor }` (§5) |
 | Status codes | `200` read/update, `201` created synchronously, `202` accepted for background work, `204` only for sign-out style calls with no body (none in `/api/v1`), `302` OAuth redirects |
@@ -398,7 +398,7 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 | `APPROVAL_STALE` **§12.4** | 409 | The approval doesn't match current data: `planVersionId` not current / `planHash` differs; or publish `renderId` not current / `mp4Sha256` differs / connection changed | D8, H2, H6 |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | Same `Idempotency-Key` with a different request body/path | idempotent endpoints |
 | `IDEMPOTENCY_IN_PROGRESS` | 409 | The first request with this key is still being processed; retry in a moment | idempotent endpoints |
-| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions). Caption fixes (F4) never return it (decision #24a) | C2, D5, D8 |
+| `QUOTA_EXCEEDED` **§12.4** | 429 | A per-user product limit (videos/day, projects/day, brainstorms/day, revisions/project); `details.resetsAt` when it resets (null if it never resets, e.g. per-project revisions). Caption fixes (F4) never return it (decision #24a) | C2, C7, D5, D8 |
 | `RATE_LIMITED` | 429 | Too many requests in a short window; `Retry-After` header + `details.retryAfterSeconds` | all |
 | `SPEND_CEILING` **§12.4** | 503 | A global provider spend ceiling was reached; new generations are paused, existing videos stay available | C2, D5, D8, F4, C7, H1 |
 | `MAINTENANCE` | 503 | Admin turned on maintenance mode; reads still work | all mutations except admin |
@@ -422,9 +422,11 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 
 | Code / situation | Message | Button |
 |---|---|---|
-| `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for C7/H1) |
+| `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for H1) |
+| `PROVIDER_BUSY` (C7 brainstorm: no project exists, so nothing is "saved") | **"Our AI is very busy right now. Please try again in a few minutes."** | **Get ideas** again (re-send C7) |
 | `PROVIDER_BUSY` (ElevenLabs) | "Voice service busy. Please try again in a few minutes." | Retry |
 | `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea (C4 with `text`, then E2) |
+| `PROVIDER_REJECTED` (C7 brainstorm) | "We can't suggest ideas for this subject. Please try a different one." | — (type another subject) |
 | `PROVIDER_UNAVAILABLE` | "Voice service unavailable right now. We've been notified." | — |
 | `PLAN_INVALID` (job) | "Couldn't build a good storyboard, try rephrasing." | Edit idea (C4 with `text`, then E2) / Try again (E2) |
 | `PLAN_INVALID` (approve) | "Some scenes need fixing before you can approve." + issues per scene | — |
@@ -477,7 +479,8 @@ Response shape: `{ "items": [ … ], "nextCursor": "eyJ1IjoiMjAyNi0xMS0xMlQwOToz
 | Fingerprint | `sha256(method + path + canonical JSON body)`. Same key + different fingerprint → `422 IDEMPOTENCY_KEY_REUSED` |
 | Replay | Same key + same fingerprint after completion → the **original status code and body** are returned again, with header `Idempotent-Replayed: true`. No second job, no second post |
 | Concurrent duplicate | While the first request is still running → `409 IDEMPOTENCY_IN_PROGRESS` (retry after ~1 s) |
-| Failures | Responses with status ≥ 500 are **not** stored (the client may retry with the same key). 4xx responses are stored and replayed |
+| Failures | Responses with status ≥ 500 are **not** stored (the client may retry with the same key). 4xx responses are stored and replayed (a replayed error body carries the new request's `requestId`). Exception (F12): requests refused **before** the key is checked in (missing/bad `Idempotency-Key`, wrong `Content-Type`, `413`, invalid body) are not stored; a repeat simply gets the same answer again |
+| Abandoned key | An `in_progress` record blocks repeats for ~60 s (`lockedUntil`); after that a repeat may run again (DATABASE.md §4.13). C2 saves its answer on the record inside the same transaction that creates the project, so a crash after the commit can't create a second project |
 | Second layer | Domain keys make duplicates impossible even without the header: job keys `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`, `posts.publishKey` (`pub:{projectId}:{renderId}:{connectionId}:{approvalId}`), unique `storyboardApprovals.planVersionId` (ARCHITECTURE §20.1) |
 
 ```http
@@ -596,6 +599,18 @@ Idempotent-Replayed: true
 - **Retry** (`POST /jobs/{jobId}/retry`, E2): only for `failed` jobs with `error.retryable = true` (and `cancelled` plan/caption jobs). Same job id, `attempt + 1`, state → `queued`, completed stages are reused (no repeated paid calls). Retrying a generate job re-checks the storyboard approval: if the plan changed meanwhile → `409 APPROVAL_REQUIRED`.
 - **Cancel** (`POST /jobs/{jobId}/cancel`, E3): for `queued`/`running` plan, revise, generate and caption jobs. Sets `cancelRequestedAt`, sends `job.cancelled`; the job stops between steps (an in-flight provider call finishes and its artifact is kept). Publish jobs are cancelled through the **post** (H5).
 
+### 8.5 Stuck jobs (as built in F15)
+Checked whenever an active job's status is read (C6, E1, the project page), so no cron is needed yet and nothing waits forever (ARCHITECTURE §20.3, DATABASE.md Q11):
+
+| Situation | What happens |
+|---|---|
+| Job `running` with no update for **10 min** (the run died: crash, deploy, Inngest timeout) | Job `failed` with `INTERNAL` (retryable), project `plan_failed`: the creator sees **Try again** |
+| Job `queued` and its start event never reached Inngest | The event is sent again after **15 s** (same event id, so Inngest drops a duplicate) |
+| Job `queued`, event sent, not started after **2 min** | The event is sent again (same id), at most every 2 min |
+| Job still `queued` after **15 min** | Job `failed` with `INTERNAL` (retryable) |
+
+Every background write is conditional on "still running this attempt", so a late write from a run that was failed by this rule changes nothing. A global `sweep-stuck-jobs` cron (for jobs nobody looks at) can come later; until then such a job is fixed the next time its project is opened.
+
 ---
 
 ## 9. Approval Semantics
@@ -618,8 +633,9 @@ Idempotent-Replayed: true
 | Quota | Default | Counted when | Resets | Error |
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
-| Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count | same | `quota: projects_per_day` |
-| Plan + revision requests per project | 20 | C2 (counts 1), each D5 accepted, and each plan retry after an Edit idea (C4 → E2); stored in `projects.planRequestCount` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count. **Counted and enforced since F12** (inside C2's transaction, so concurrent clicks can't pass 5) | same | `quota: projects_per_day` |
+| Plan + revision requests per project | 20 | Every plan job attempt that asks Gemini (C2's job and each E2 retry, with or without an Edit idea; an attempt counts 1 when it sends its **first** Gemini request (atomically, only below 20; retries and the repair inside the attempt don't add more); a job that never reached Gemini, or a Try again that reuses a saved answer, costs nothing (F15, after code review)), and each D5 revision attempt that asks Gemini (as built in F18: same rule as E2, counted at the attempt's first Gemini request, not at acceptance; D5 refuses at 20); stored in `projects.planRequestCount`. **Enforced since F15**: E2 refuses at 20; a job reaching Gemini at 20 fails with `QUOTA_EXCEEDED` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Brainstorms (C7) per user per day | 30 | C7 accepted (after the 10/hour check and the body check, before Gemini); busy or refused answers still count. Not in a transaction: one atomic "add 1 while under 30" on the counter (F14) | 00:00 in the user's timezone | `quota: brainstorms_per_day` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
 Current usage is in `GET /api/v1/me` → `usage`.
@@ -632,15 +648,15 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | Endpoints | Limit |
 |---|---|
 | Auth (A1, A2, A5, A6) | see §3.7 |
-| Polling reads (C6, E1, H4) | 120 / min |
+| Polling reads (C6, E1, H4) | 120 / min (one shared counter per user; F15) |
 | Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
-| C7 brainstorm, H1 caption suggestions | 10 / hour each |
+| C7 brainstorm, H1 caption suggestions | 10 / hour each (C7 also 30 / day, §10.1) |
 | C2 create project | 10 / hour (plus the daily quota) |
-| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea | 60 / min |
+| D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea, C5 archive | 60 / min (one shared counter per user; F15 counts C4, F21 adds C5) |
 | D5 revision | 20 / hour |
 | D8 approve, F4 caption overrides | 10 / hour |
 | H2 publish/schedule, H5, H6 | 10 / hour |
-| E2, E3 retry/cancel | 30 / hour |
+| E2, E3 retry/cancel | 30 / hour (one shared counter per user; F15 counts E2) |
 | B2, B3, B6 | 30 / min (B3: 3 / hour) |
 | G2 connect | 10 / hour |
 | Admin endpoints | 120 / min per admin |
@@ -663,7 +679,7 @@ Types use TypeScript notation; `| null` fields are always present. Full JSON Sch
 |---|---|---|
 | `Language` | `en` \| `hi` \| `hinglish` | `LANGUAGES` (common.ts) |
 | `VoiceGender` | `female` \| `male` | ARCHITECTURE §8.3 |
-| `VoicePreset` | `indian-english-male` \| `indian-english-female` \| `hindi-male` \| `hindi-female` \| `hinglish-male` \| `hinglish-female` | `VOICE_PRESETS` (common.ts). Mapping: `en`→`indian-english-*`, `hi`→`hindi-*`, `hinglish`→`hinglish-*` |
+| `VoicePreset` | `indian-english-male` \| `indian-english-female` \| `hindi-male` \| `hindi-female` \| `hinglish-male` \| `hinglish-female` | `VOICE_PRESETS` (common.ts); with labels and samples: `VOICE_PRESET_LIST` (packages/db/src/voices.ts). Mapping: `en`→`indian-english-*`, `hi`→`hindi-*`, `hinglish`→`hinglish-*` |
 | `SceneType` | `title-hook` \| `labeled-diagram` \| `process-flow` \| `comparison` \| `timeline` \| `chart` \| `step-sequence` \| `takeaway` | `SCENE_TYPES` |
 | `ObjectKind` | `headline`, `subtitle`, `icon`, `diagram`, `part`, `arrow`, `node`, `particles`, `column`, `point`, `axis`, `milestone`, `bar`, `line-point`, `pie-slice`, `counter`, `step`, `bullet` (allowed per pattern: `COMPONENT_CATALOG`) | component-catalog.ts |
 | `EventAction` | `appear`, `highlight`, `pulse`, `point-to`, `flow`, `rise`, `fall`, `speed-up`, `gather`, `check`, `cross`, `advance`, `grow`, `count-up`, `complete` (allowed per pattern: `COMPONENT_CATALOG`) | component-catalog.ts |
@@ -722,6 +738,7 @@ Usage = { used: number; limit: number; resetsAt: string | null }
 
 ProjectSummary = { id; title; language; voiceGender; state: ProjectState; currentStep: ProjectStep; thumbnailUrl: string | null;
                    latestPost: PostSummary | null; activeJobType: JobType | null; createdAt; updatedAt }
+ProjectListItem = ProjectSummary & { stateVersion: number; storyboardApproved: boolean }   // C1 items (F21, additive)
 Project = ProjectSummary & {
   input: { type: InputType; text: string; brainstormChoice: { subject: string; title: string; hook: string } | null };
   stateVersion: number; currentPlanVersionId: string | null; approvedPlanVersionId: string | null;
@@ -849,10 +866,10 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | `/reset-password?token=…` | — | A6 |
 | `/access-pending` | — | none (mailto / external form) |
 | App shell (every signed-in page) | A4, B1 | A3 logout, B5/B6 notifications bell, toasts from B5 (`unreadOnly=true`) |
-| `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new` |
+| `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new`. **As built (F21):** the page reads C1's first page and B1 on the server (same functions); "Load more" calls C1. With no project in My videos (none, or all archived) it shows the first-visit page (How it works, today / this month / Instagram cards from B1, "Create your first video") instead of the tabs |
 | `/projects/new` ① Idea | B1 (defaults), B4 (voices) | C7 brainstorm, C2 create storyboard → poll C6 |
 | ① Idea of an existing project in `plan_failed` (storyboard failed) | C3 (idea text + `lastError`) | **Edit idea** = C4 with `text` (and optional `title`), then **Try again** = E2 on the failed plan job → poll C6 |
-| `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob` |
+| `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob`. **As built (F16–F20):** the page reads C3/D2/D6 data on the server; `/projects/[id]` redirects here when `currentStep` is `storyboard`; no E3 Cancel yet; D8 approves only (video job F23) |
 | `/projects/[id]/video` ③ | C3, F2 current render, F3 `kind=video` | F3 `kind=download`, F4 caption fixes, D5 revision (`stage: video`), E2 retry, E3 cancel, F1 previous versions, poll C6 |
 | `/projects/[id]/publish` ④ | C3, F2, F3 (`thumbnail`, `video`), G1, H3 | G2 connect, H1 AI caption, H2 publish now / schedule, H5 cancel, H6 retry, F3 download, poll H4 / C6 |
 | `/settings` | B1, G1 | B2 defaults, A5 change password, G2 connect, G4 disconnect, B3 delete account |
@@ -931,8 +948,9 @@ Errors: `400 INVALID_INPUT` (wrong `confirm`) · `403 FORBIDDEN` (`details.reaso
 
 #### B4. `GET /api/v1/voices` — Voice presets and preview samples
 Purpose: the ① Idea voice chips with ▶ preview (pre-recorded static MP3s in `public/voices/`, decision D7; no ElevenLabs cost). Auth: creator. Query: `language` optional `Language` filter.
-Success `200` → `{ items: [{ preset, language, gender, label, sampleUrl, sampleText, enabled }] }`. Voice IDs are never exposed. `enabled = false` when an admin disabled the preset (I12).
-Errors: `400 INVALID_INPUT` (unknown language).
+Success `200` → `{ items: [{ preset, language, gender, label, sampleUrl, sampleText, enabled }] }`. Voice IDs are never exposed. `sampleUrl` is `string | null`: **null while the preset's MP3 isn't recorded** (the server checks `apps/web/public/voices/{preset}.mp3` exists and isn't empty, at most once a minute). Today only the two English samples exist: the Hindi/Hinglish ones wait for the voice-plan decision before F23 (the configured Hindi voices are paid library voices; the free plan refused them, 402). Once recorded they appear with no code change. `enabled = false` when an admin disabled the preset (I12).
+Errors: `400 INVALID_INPUT` (unknown language; also an empty or repeated `language`).
+**Built in F13:** the list (presets, labels, sample URLs and sentences) lives in one place, `VOICE_PRESET_LIST` in `packages/db/src/voices.ts` (the web app doesn't depend on the pipeline package; a test keeps it equal to `VOICE_PRESETS` in common.ts). Order: English, Hindi, Hinglish, female first. Labels: `Female voice` / `Male voice` (English and Hinglish), the Hindi labels below for Hindi. Hinglish uses the Hindi voices (PRD decision #18) with its own sentence, `"Hello doston! Aaj hum samjhenge ki rainbow kaise banta hai."` (sent to text-to-speech with the Hindi words in Devanagari, the pipeline's Hinglish `speech` rule). Rate: the shared 300/min read limit (§10.3). **Until I12** every preset is `enabled: true`. The ① Idea screen reads the same list and the same file check on the server (it doesn't call B4) and shows ▶ only for presets with a sample; the MP3s are recorded once with `npm run voices:samples` and committed.
 ```http
 GET /api/v1/voices?language=hi
 ```
@@ -979,8 +997,15 @@ Auth: creator. Body: exactly one of `ids` (array of 1–100 notification ids) or
 
 #### C1. `GET /api/v1/projects` — Library
 Purpose: dashboard cards. Auth: creator. Query: `tab` optional — `drafts` (`draft`, `planning`, `plan_failed`, `storyboard_ready`, `generating`, `generate_failed`) · `ready` (`video_ready`, `publish_failed`) · `scheduled` (`scheduled`, `publishing`) · `published` (`published`); omitted = all non-archived. `limit` 1–50 (20), `cursor`. Sort: `updatedAt` desc, `_id` desc. Archived projects are never listed.
-Success `200` → `{ items: ProjectSummary[], nextCursor }`. `thumbnailUrl` is a 15-minute presigned URL (or null).
+Success `200` → `{ items: ProjectListItem[], nextCursor }` (§11.3). `thumbnailUrl` is a 15-minute presigned URL (or null).
 Errors: `400 INVALID_INPUT`.
+
+**As built (F21).**
+- Only the signed-in user's projects (`ownerId` from the session, never from the request); `state = archived` is never listed. The cursor is base64url JSON `{ u: updatedAt, i: _id, t: tab | "all" }`: a cursor used with another tab, or tampered, → `400 INVALID_INPUT` (`cursor`). An unknown or repeated `tab`, a bad `limit` → `400`. Rate: the shared 300 reads/min.
+- Tab mapping as above (this table is the one source; code: `LIBRARY_TABS` in `packages/db/src/project-library.ts`). There is no Archived tab.
+- Each item is `ProjectSummary` plus two **additive** fields: `stateVersion` (sent back by the card's Rename, C4, and Archive, C5) and `storyboardApproved` (the storyboard on screen is the approved one, so the card says "Approved"). `thumbnailUrl` and `latestPost` stay `null` until F23 / F30. `activeJobType` is the type of the project's running job (one extra query for the page). The stuck-job rule (§8.5) is applied to each card's active job, as in C3 (F21 review): a dead job becomes failed and the page is read once more, so a card never says "Writing storyboard…" forever. No extra query unless a job is stuck.
+- Index: `projects { ownerId: 1, updatedAt: -1, _id: -1 }` (F21; serves the sort including the tie-breaker). It replaces F12's `{ ownerId: 1, updatedAt: -1 }`, which was removed from the index list (DATABASE.md §8).
+- The My videos page reads the first page with the same function (`listProjects`) on the server; "Load more" calls C1.
 ```http
 GET /api/v1/projects?tab=ready&limit=20
 ```
@@ -997,6 +1022,8 @@ GET /api/v1/projects?tab=ready&limit=20
       "thumbnailUrl": "https://bytereel-prod.r2.example-account.r2.cloudflarestorage.com/users/67330c1a9f1e4b2a7c0d1e01/projects/67330d5e9f1e4b2a7c0d2a10/renders/67330f109f1e4b2a7c0d6f01/thumbnail.jpg?X-Amz-Expires=900&X-Amz-Signature=3f1c",
       "latestPost": null,
       "activeJobType": null,
+      "stateVersion": 9,
+      "storyboardApproved": true,
       "createdAt": "2026-11-12T05:00:00.000Z",
       "updatedAt": "2026-11-12T05:46:12.000Z"
     }
@@ -1019,9 +1046,20 @@ Purpose: ① **Create storyboard**. Auth: creator. Rate: 10/hour + quota 5 proje
 | `voiceGender` | `VoiceGender` | ✓ | → `voicePreset` (e.g. `en` + `female` → `indian-english-female`) |
 | `brainstormChoice` | `{ subject 2–100, title 3–120, hook 3–200 }` | iff `inputType = brainstorm` | Copied from a C7 idea |
 
-Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title` = first 120 chars of the idea until the plan arrives, then `plan.topic`), `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`), `activeJobId`, `planRequestCount: 1`, `usageCounters.projects +1`; then Inngest `plan.requested`. Notes are stored as the plan's single `sources[]` entry (`id: "creator-notes"`).
+Effect (one transaction): `projects` (state `planning`, `stateVersion 1`, `title` = first 120 chars of the idea until the plan arrives, then `plan.topic`), `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`), `activeJobId`, `usageCounters.projects +1`; then Inngest `plan.requested`. `planRequestCount` starts at 0 and becomes 1 when the job sends its first Gemini request (§10.1, F15). Notes are stored as the plan's single `sources[]` entry (`id: "creator-notes"`).
 Success `202` → `{ project: Project, job: Job }`.
 Errors: `400 INVALID_INPUT` · `429 QUOTA_EXCEEDED` (`projects_per_day`) · `503 SPEND_CEILING`.
+
+**As built (F12, F15).**
+- Before anything is saved: the AI planner (`GEMINI_API_KEY`, `GEMINI_MODEL`) and Inngest must be set up, else `500 INTERNAL` (reason in the server log), nothing saved or counted.
+- Effect (one transaction): `usageCounters.projects +1` (only while within 5/day, otherwise `429 QUOTA_EXCEEDED` and nothing is saved), `projects` in state `planning` with `stateVersion 1`, `activeJobId` = the job, `planRequestCount: 0` (the storyboard request is counted when the job really asks Gemini, §10.1), `title` = the picked idea's own title for `brainstorm`, otherwise the idea text (spaces and line breaks collapsed; over 120 characters it is cut at the last word break and ends with "…"); `jobs` (`plan`, `queued`, key `plan:{projectId}:{inputHash}`, `inputHash` = sha256 of the idea type, text, picked brainstorm choice, language and voice); and the answer saved on the `Idempotency-Key` record. **After** the commit, Inngest `plan.requested` (event id = the job key, data = ids only). If that send fails the answer is still `202`: the job stays `queued` and the stuck-job rule (§8.5) sends it again.
+- When the job succeeds, `title` becomes the plan's `topic` (same 120-character rule).
+- `allowedActions` is `[]` while the job runs (`cancel_job` arrives with E3).
+- The UI sends `inputType: "topic"` when the trimmed text is ≤ 300 characters and `"notes"` above that (one box for both, PRD §6.1). **Since F14**, after the creator picks a C7 idea, the box holds "Title. Hook" (only the title if both together are over 300 characters) and the UI sends `inputType: "brainstorm"` with `brainstormChoice { subject, title, hook }` copied from the idea. The creator may still edit the text: it stays `brainstorm` while it is 3–300 characters; emptied or over 300, the choice is dropped and the text is sent as `topic`/`notes`.
+- No `503 SPEND_CEILING` / `MAINTENANCE` yet (they arrive with the `settings` document, F27/F36).
+- After success the UI goes to the temporary project page **`/projects/[id]`** (owner only; another user's project, a missing one or a malformed id → the same 404 page): "Writing storyboard…" with progress while the job runs, the failure message with **Try again** / **Edit idea**, or the saved storyboard as a simple read-only list. F16 builds the storyboard screen and turns this page into a redirect to the project's current step.
+- Projects saved by F12 before F15 stay in state `draft` with no job; their page says to start a new project.
+
 ```http
 POST /api/v1/projects
 Origin: https://bytereel.app
@@ -1037,7 +1075,7 @@ Idempotency-Key: 9b2f4c1e-7d3a-4e8b-a1c5-2f6d8e0b4a71
     "language": "en", "voiceGender": "female", "state": "planning", "currentStep": "idea", "thumbnailUrl": null, "latestPost": null, "activeJobType": "plan",
     "input": { "type": "topic", "text": "How UPI payments work — from scanning the QR code to money reaching the shop", "brainstormChoice": null },
     "stateVersion": 1, "currentPlanVersionId": null, "approvedPlanVersionId": null, "currentRenderId": null,
-    "activeJobId": "67330d5f9f1e4b2a7c0d3c01", "activeJob": null, "lastError": null, "allowedActions": ["cancel_job"],
+    "activeJobId": "67330d5f9f1e4b2a7c0d3c01", "activeJob": null, "lastError": null, "allowedActions": [],
     "archivedAt": null, "createdAt": "2026-11-12T05:00:00.000Z", "updatedAt": "2026-11-12T05:00:00.000Z"
   },
   "job": {
@@ -1067,7 +1105,7 @@ Errors: `404 NOT_FOUND`.
   "input": { "type": "topic", "text": "How UPI payments work — from scanning the QR code to money reaching the shop", "brainstormChoice": null },
   "stateVersion": 4, "currentPlanVersionId": "67330e019f1e4b2a7c0d2b02", "approvedPlanVersionId": null, "currentRenderId": null,
   "activeJobId": null, "activeJob": null, "lastError": null,
-  "allowedActions": ["rename", "archive", "edit_storyboard", "request_revision", "approve_storyboard"],
+  "allowedActions": ["rename", "edit_storyboard", "request_revision", "approve_storyboard", "archive"],
   "archivedAt": null, "createdAt": "2026-11-12T05:00:00.000Z", "updatedAt": "2026-11-12T05:12:40.000Z"
 }
 ```
@@ -1075,11 +1113,18 @@ Errors: `404 NOT_FOUND`.
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM1G6H7J" } }
 ```
 
+**As built (F16).** Owner only (another user's project, a missing one or a malformed id → the same 404). The stuck-job rule (§8.5) is applied first, like C6. `activeJob` is filled while a job runs. `allowedActions` on a storyboard: `edit_storyboard` (D3, D4, D7), `request_revision` (D5, while under the 20 AI requests), `approve_storyboard` (D8, in `storyboard_ready`/`generate_failed` until the current version is the approved one), `retry_job` (E2, when the newest change request failed with a retryable error and the storyboard is still the version it was made on). Nothing while a job runs. Rate: the shared 300 reads/min.
+**F21:** `rename` (first) and `archive` (last) whenever no job runs (`archive` not while `publishing`). An archived project answers with `state: "archived"`, `currentStep` = the step it was on (`stateBeforeArchive`) and `allowedActions: []` (read-only).
+
 #### C4. `PATCH /api/v1/projects/{projectId}` — Rename, or edit the idea after the storyboard failed
 Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `text` string (the idea; same length rules as C2 for the project's `inputType`) · plus `expectedStateVersion` int (required).
 - **Rename** (`title` only): allowed in every state except `archived`. Doesn't touch plans or approvals.
 - **Edit idea** (`text`, optionally with `title`): allowed **only in `plan_failed`** with no active job (the "Edit idea" button after a failed storyboard, §4.3). Effect (transaction): `project.input.text` replaced (`inputType` and `brainstormChoice` unchanged), `title` = the sent `title`, else the first 120 chars of the new text (as in C2), `stateVersion + 1`; the project stays `plan_failed` with its `lastError`, and `allowedActions` includes `retry_job`. The creator then presses **Try again** (E2 on the failed `plan` job), which plans from the edited idea. Editing the idea and trying again **does not count toward the 5 projects/day quota** (no new project is created), but each retry that plans from an edited idea **counts 1 toward the 20 plan + revision requests per project** (it is a paid AI call; founder, 2026-11-13). At the limit, E2 returns `429 QUOTA_EXCEEDED` (`plan_requests_per_project`). Language and voice are not editable here (language: create a new project, PRD decision #25; voice: D4 once a storyboard exists).
 Success `200` → `Project`. Errors: `400 INVALID_INPUT` (no field, text length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (archived; `text` sent outside `plan_failed`) · `409 JOB_ALREADY_RUNNING`.
+
+**As built (F15 edit idea, F21 rename).** A body with `title` only renames; with `text` it edits the idea (and `title` if sent); neither → `400`. `expectedStateVersion` goes in the body (the `If-Match` header isn't read on C4).
+- **Rename (F21):** the title is cleaned like the idea (control and invisible format characters removed, NFC), spaces and line breaks collapsed to one space, trimmed, then 1–120 characters. One conditional update (owner, `stateVersion`, no active job): `title`, `updatedAt` (the card moves to the top of My videos), `stateVersion + 1`. Plans, approvals and the idea are untouched; no limit is counted. **Also refused while a job runs** (`409 JOB_ALREADY_RUNNING`): a storyboard job sets the title to the plan's topic when it finishes and would overwrite the new name. Archived → `409 INVALID_STATE`.
+- **A chosen title is kept (F21 review):** rename, and Edit idea **with** a `title`, set `titleSetByUser` on the project; a storyboard job that succeeds later (e.g. Try again after a failure) then keeps that title instead of the plan's topic. Edit idea **without** a title sets the title from the text and clears the flag. Revise jobs never change the title. One conditional update (single document). The text is cleaned like C2 (control and invisible format characters removed, NFC, trimmed) and checked against the project's own `inputType` limits. `allowedActions` after a failure: `edit_idea`, plus `retry_job` while E2 would accept the job (retryable error, or the idea was edited since) and the project is under its 20 storyboard requests.
 ```json
 { "title": "UPI in 2 seconds", "expectedStateVersion": 4 }
 ```
@@ -1097,6 +1142,13 @@ Response: the `Project` with `"state": "plan_failed"`, the new `input.text` and 
 #### C5. `DELETE /api/v1/projects/{projectId}` — Archive (soft delete)
 Auth: creator. Header `If-Match: "<stateVersion>"` (required). Allowed in any state **except `publishing`/`outcome_unknown` post in flight** (ARCHITECTURE §7.2). Effect (transaction): active pipeline job gets `cancelRequestedAt`; a `scheduled` or `publish_failed` post → `cancelled` (so it can never be published or retried); project `state = archived`, `archivedAt = now`, `stateBeforeArchive` kept. Nothing is deleted from R2 (DATABASE.md §6.6).
 Success `200` → `Project` (`state: archived`). Errors: `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` (publishing; already archived).
+**As built (F21).**
+- `If-Match: "<stateVersion>"` is required (a quoted whole number); missing or malformed → `400 INVALID_INPUT` (`headers.If-Match`).
+- One conditional update (owner, `stateVersion`, no active job): `state = archived`, `stateBeforeArchive`, `archivedAt`, `updatedAt`, `stateVersion + 1`. Nothing else changes or is deleted (plans, approvals, the idea; nothing in R2).
+- **Spec change: refused while a job runs** (`409 JOB_ALREADY_RUNNING`, "We're still working on this video. Please try again when this step finishes.") instead of setting the job's `cancelRequestedAt`: no job honours a cancel yet (E3 is not built), so a running storyboard job would finish and move the archived project back to `storyboard_ready`. The card hides the ⋯ menu while a job runs. When E3 exists, this can go back to cancelling.
+- No posts exist yet, so there is nothing to cancel. **F30 MUST** cancel a `scheduled` / `publish_failed` post in the same transaction (DATABASE.md §7.2 #12) and refuse while a post is `publishing` / `outcome_unknown`.
+- Rate: 60/min, shared with C4, D3, D4, D7 (`edit-project`). Not idempotent by key: a repeat gets `409 INVALID_STATE` (already archived) or `409 STALE_VERSION`.
+- After archiving, the project disappears from C1 and My videos, but its pages (`/projects/[id]`, `/projects/[id]/storyboard`) and C3 still open for the owner by direct link, read-only ("Archived" note; no edit, change, approve, Try again or Edit idea; D-endpoints answer `409`). Other users still get `404`.
 ```http
 DELETE /api/v1/projects/67330d5e9f1e4b2a7c0d2a10
 Origin: https://bytereel.app
@@ -1108,6 +1160,7 @@ If-Match: "9"
 
 #### C6. `GET /api/v1/projects/{projectId}/status` — Polling
 Purpose: the one call the project pages poll **every 2 s** while `pollAfterMs` is not null (decision D2). Auth: creator. Rate: 120/min. Header `ETag`. Supports `If-None-Match` → `304` with no body when nothing changed (saves bandwidth).
+**As built (F15):** the 120/min counter is shared with E1; the stuck-job rule (§8.5) is applied on every poll; `ETag: "<stateVersion>"` is sent but `If-None-Match`/`304` is not supported yet (the job's progress changes without a new `stateVersion`); every poll gets `200`. `latestPost` is `null` until F30.
 Success `200` → `ProjectStatus`. Errors: `404 NOT_FOUND`.
 ```json
 {
@@ -1142,10 +1195,17 @@ Success `200` → `ProjectStatus`. Errors: `404 NOT_FOUND`.
 ```
 
 #### C7. `POST /api/v1/brainstorm` — Brainstorm with AI
-Purpose: ① *✨ Brainstorm with AI*: a broad subject → 5–8 focused video ideas with hooks (synchronous Gemini call, 30 s timeout, ARCHITECTURE §14). Doesn't create a project or count toward quotas; logged in `providerUsage`. Auth: creator. Rate: 10/hour.
-Body: `subject` string 2–100 (required) · `language` `Language` (required; ideas are written in that language).
-Success `200` → `{ subject, language, ideas: [{ id: "idea-1"…, title (≤120), hook (≤200), angle (≤200) }] }` (5–8 ideas). Not stored: the UI keeps them until the user picks one and calls C2 with `inputType: "brainstorm"`.
-Errors: `400 INVALID_INPUT` · `422 PROVIDER_REJECTED` (unsafe subject) · `503 PROVIDER_BUSY` · `503 SPEND_CEILING`.
+Purpose: ① *✨ Brainstorm with AI*: a broad subject → **exactly 5** focused video ideas with hooks (founder, 2026-11-13; synchronous Gemini call, ARCHITECTURE §14). Doesn't create a project and doesn't count toward the projects quota. Auth: creator. **Limits per user: 10 per hour and 30 per day** (§10.1, §10.3; founder, 2026-11-13). **No Idempotency-Key** (C7 starts no job and saves nothing, §6); a header that is sent is ignored. **Built in F14.**
+Body (strict, unknown fields → 400): `subject` string 2–100, counted after the idea-text cleaning (control and invisible format characters removed, NFC, trim; §2) · `language` `Language` (required; ideas are written in that language: `hi` in Devanagari, `hinglish` in Roman script).
+Success `200` → `{ subject, language, ideas: [{ id: "idea-1"…"idea-5", title (3–120), hook (3–200), angle (3–200) }] }` (exactly 5; `subject` is the cleaned subject). Not stored: the UI keeps them until the user picks one and calls C2 with `inputType: "brainstorm"`.
+Errors: `400 INVALID_INPUT` · `429 RATE_LIMITED` (11th in the hour) · `429 QUOTA_EXCEEDED` (`quota: brainstorms_per_day`, `limit`, `used`, `resetsAt` = next midnight in the user's timezone) · `422 PROVIDER_REJECTED` · `503 PROVIDER_BUSY` (header `Retry-After: 60`) · `500 INTERNAL` (Gemini not set up, key/model refused: details only in the server log) · `503 SPEND_CEILING` / `MAINTENANCE` (not yet: F27/F36, see "How it works").
+
+**How it works (F14)**
+- Order: Origin → session → 10/hour (`rateLimits`, counted for every request, also refused ones) → body → 30/day (`usageCounters` kind `brainstorms`, the user's day; counted once the request is accepted, before Gemini; a busy or refused answer still counts) → Gemini. **A request refused by any of these never reaches Gemini.** TODO F27/F36: `SPEND_CEILING` / `MAINTENANCE` checked before the daily count.
+- Gemini (its own model `GEMINI_BRAINSTORM_MODEL`, default `gemini-3.1-flash-lite`, low thinking, PRD decision #26; prompt `brainstorm-v1` in `packages/pipeline/src/brainstorm/prompts.ts`, the subject passed as delimited data, §16.3 of ARCHITECTURE): **30 s for the whole brainstorm**; busy/network errors (429, 5xx, timeouts) get at most 2 quick retries (1 s, 2.5 s; a Retry-After over 5 s is not waited for), never past the 30 s: a retry or the repair starts only with at least 5 s left.
+- The answer is checked by our code: exactly 5 ideas, each title 3–120 and hook/angle 3–200 characters after cleaning (control characters and line breaks removed, invisible format characters removed except ZWJ/ZWNJ, NFC, spaces collapsed, trimmed), the right script for the language (`hi`: Devanagari; `en`/`hinglish`: at least 80% Latin letters), no repeated titles. An invalid answer gets **one repair** request; still invalid → `503 PROVIDER_BUSY` (the creator just tries again).
+- `422 PROVIDER_REJECTED`: Gemini blocked the subject for safety, or the model answered that no safe educational video can be made about it. Never retried.
+- Every Gemini request (retries and the repair included) is logged in `providerUsage` (DATABASE.md §4.15): written `reserved` before it is sent, then `final`/`failed` with tokens, latency and outcome. The subject is never logged or stored.
 ```json
 { "subject": "Indian monsoon", "language": "en" }
 ```
@@ -1183,6 +1243,8 @@ Success `200` → `{ items: PlanVersionSummary[], nextCursor }`. Errors: `404 NO
 ```json
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM2A1B2C" } }
 ```
+
+**As built (F17).** `limit` 1–50 (20); `cursor` is opaque (base64url of the last `versionNumber`); a bad `limit`, a repeated parameter or a tampered cursor → `400`. `isApproved` = this exact version has a `storyboardApprovals` row (whether the project is approved now: `project.approvedPlanVersionId === project.currentPlanVersionId`). The "Version N ▾" menu loads this when it opens.
 
 #### D2. `GET /api/v1/projects/{projectId}/plan-versions/{planVersionId}` — Full plan
 Purpose: the storyboard screen (scene cards, narration, visual plan, pattern badge, warnings, estimated duration). `planVersionId` may be the literal **`current`**. Auth: creator.
@@ -1283,6 +1345,8 @@ Example (plan abbreviated to 3 scenes for readability; real plans have 3–10 sc
 { "error": { "code": "NOT_FOUND", "message": "The storyboard isn't ready yet.", "details": { "reason": "no_plan_yet" }, "requestId": "req_01JCXM2D3E4F" } }
 ```
 
+**As built (F16).** `current` or a version id of this project (another project's version → 404). `changedSceneIds` = scenes changed or added compared to the parent version (`[]` for version 1 and for a restored version 1). The storyboard page (`/projects/[id]/storyboard`) reads the same data on the server: scene cards with the pattern badge, the narration, a "Visual:" line built from the scene's objects (pattern + object labels, e.g. "Process: Sunlight → Atmosphere → Your eyes"; no AI call), `plan.warnings` and `validation.warnings` on their scene (scene-less ones once at the top), and for an invalid version the `validation.issues` in plain words. Hindi text is marked `lang="hi"` (Noto Sans Devanagari is in every font stack).
+
 #### D3. `POST /api/v1/projects/{projectId}/narration-edits` — Edit narration (inline)
 Purpose: save one inline narration edit as a new **`user_edit`** plan version (ARCHITECTURE §11 UI rules). Auth: creator. Rate: 60/min.
 
@@ -1290,17 +1354,14 @@ Purpose: save one inline narration edit as a new **`user_edit`** plan version (A
 |---|---|---|---|
 | `basePlanVersionId` | id | ✓ | Must be the current version, else `409 STALE_VERSION` |
 | `sceneId` | SafeId | ✓ | Scene in the base plan |
-| `narrationId` | SafeId | ✓ | Narration block in that scene |
-| `text` | string | ✓ | 1–300 chars (`SCENE_LIMITS.maxNarrationBlockLength`) |
-| `speech` | string \| null | | Optional pronunciation form (1–300); omitted = keep current value; null = clear |
-| `display` | string \| null | | Optional caption form (1–300); same rules |
+| `blocks` | `{ narrationId, text, speech?, display? }[]` | ✓ | 1–4 narration blocks of that scene, each at most once (F17 review: one Save of a scene = ONE new version = one Undo step; all or nothing). `text` 1–300 chars (`SCENE_LIMITS.maxNarrationBlockLength`); `speech`/`display` optional (1–300): omitted = keep current value, null = clear |
 | `expectedStateVersion` | int | ✓ | |
 
 Allowed states: `storyboard_ready`, `generate_failed`, `video_ready`, `scheduled`, `publish_failed` (editing after a video exists makes a new version that must be approved again), no active job. One rule for every change (founder, 2026-11-13): anything can be changed unless a job is running, and any change cancels the publish approval. Effect (transaction): insert `planVersions` (version n+1, `parentVersionId` = base, re-validated, re-hashed), `project.currentPlanVersionId`, `approvedPlanVersionId = null`, state → `storyboard_ready`, `stateVersion + 1`; a `scheduled` or `publish_failed` post → `approval_invalidated` **immediately, in the same transaction** (back to "needs approval"), plus an `approval_invalidated` notification (§9).
 **The version is saved even if validation fails** (e.g. an event anchor phrase no longer exists in the new text): `validation.valid = false` with issues; approval stays blocked until fixed.
 Success `201` → `PlanVersion` (+ `Location` header). Errors: `400 INVALID_INPUT` (unknown scene/narration id, length) · `404 NOT_FOUND` · `409 STALE_VERSION` · `409 INVALID_STATE` · `409 JOB_ALREADY_RUNNING`.
 ```json
-{ "basePlanVersionId": "67330e019f1e4b2a7c0d2b02", "sceneId": "scene-takeaway", "narrationId": "line-take", "text": "So remember: UPI is a fast switch between banks, and only you should ever know your PIN.", "expectedStateVersion": 4 }
+{ "basePlanVersionId": "67330e019f1e4b2a7c0d2b02", "sceneId": "scene-takeaway", "blocks": [ { "narrationId": "line-take", "text": "So remember: UPI is a fast switch between banks, and only you should ever know your PIN." } ], "expectedStateVersion": 4 }
 ```
 Response `201`: a `PlanVersion` with `"versionNumber": 3`, `"source": "user_edit"`, `"isApproved": false`, `"valid": false`, `"changedSceneIds": ["scene-takeaway"]`, and this `validation` (the edit removed the words "your own bank" that event `ev-take-pin` was anchored to):
 ```json
@@ -1309,6 +1370,8 @@ Response `201`: a `PlanVersion` with `"versionNumber": 3`, `"source": "user_edit
 ```json
 { "error": { "code": "JOB_ALREADY_RUNNING", "message": "We're still working on the previous step.", "details": { "activeJobId": "67330e009f1e4b2a7c0d3c02", "activeJobType": "revise" }, "requestId": "req_01JCXM2G5H6J" } }
 ```
+
+**As built (F17).** Body strict; `text`/`speech`/`display` cleaned (control and format characters removed, NFC, line breaks and runs of spaces → one space), 1–300. Unknown scene or narration id → `400` (`details.issues[0].path` `sceneId` / `blocks[i].narrationId`) and nothing is saved. `basePlanVersionId` not current → `409 STALE_VERSION`. The new plan gets the new version's `versionId`/`parentVersionId`, then goes through the same validator as the AI's plans (`validatePlan`); saved even when invalid (`valid: false`, `issues`, `warnings: []`). No AI call; not counted toward the 20. ONE transaction (`packages/db/src/storyboard-edits.ts`). The UI clears `speech`/`display` of a block whose text it changes (so the new words are spoken and shown) and sends all changed blocks of the scene in ONE call (one version). **Until F30, D3/D4/D5/D7 are refused in `scheduled` and `publish_failed` (`409 INVALID_STATE`)**: a change there must also invalidate the post's approval in the same transaction, which F30 builds (then these states are allowed again, as documented above). Rate: 60/min, shared with D4, D7 and C4.
 
 #### D4. `POST /api/v1/projects/{projectId}/voice` — Switch narrator voice
 Purpose: Male ↔ Female on the storyboard (PRD §9). Creates a `user_edit` version whose only change is `voicePreset`; after a video exists the next generation re-records **all** scenes (PIPELINE_DESIGN §9). Auth: creator. Rate: 60/min.
@@ -1321,6 +1384,8 @@ Response `201`: `PlanVersion` with `"versionNumber": 3`, `"source": "user_edit"`
 ```json
 { "error": { "code": "INVALID_INPUT", "message": "This project already uses the male voice.", "details": { "issues": [ { "path": "voiceGender", "message": "unchanged" } ] }, "requestId": "req_01JCXM2K7L8M" } }
 ```
+
+**As built (F19).** Only the voice preset of the project's own language changes (`voicePresetFor(language, gender)`); the same voice → `400 INVALID_INPUT` (`issues[0].message: "unchanged"`). `project.voiceGender` is updated in the same transaction. No AI call; not counted. The chip offers only the two voices of the project's language; ▶ only where a sample file exists (F13).
 
 #### D5. `POST /api/v1/projects/{projectId}/revisions` — Revision chat
 Purpose: plain-language change to the whole storyboard/video or one scene (PRD §6.2, §6.3). Auth: creator. Rate: 20/hour; quota 20 plan+revision requests per project. **Idempotency-Key required.**
@@ -1350,6 +1415,13 @@ Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 INVALID_STAT
 { "error": { "code": "QUOTA_EXCEEDED", "message": "This project has reached 20 changes. Start a new project to keep going.", "details": { "quota": "plan_requests_per_project", "limit": 20, "used": 20, "resetsAt": null }, "requestId": "req_01JCXM2N9P0Q" } }
 ```
 
+**As built (F18).**
+- Order: Origin → session → 20/hour → strict body (`message` 3–500 after the idea-text cleaning; `sceneId` exactly when `scope = scene`) → Idempotency-Key → the AI planner and Inngest must be set up (else `500`, nothing saved) → ONE transaction (`packages/db/src/revisions.ts requestRevision`): no job running, `expectedStateVersion`, `basePlanVersionId` = current, the scene exists (`400`), under 20 (`429`), insert the revision (`pending`) and its queued `revise` job (key `rev:{revisionId}`), `activeJobId`, +1 `stateVersion`, the answer saved on the Idempotency-Key record. After the commit: Inngest `revision.requested` (lost → re-sent by the stuck-job rule).
+- **Counting (same rule as F15's Try again):** the request is not counted at acceptance; the job's attempt counts 1 of the 20 when it sends its FIRST Gemini request (atomically, only below 20). D5 itself refuses at 20.
+- The job `revise-plan` runs the same durable steps as `plan-video` (each request counted on the job before it is sent, each answer saved at once, ONE repair, 2 retries, `providerUsage` operation `revise`). The prompt (`packages/pipeline/src/planning/revision.ts`, new: the prototype had none) passes the current storyboard and the change request as delimited data. Progress: "Updating your storyboard…" / "Updating scene N…".
+- Success: a new `ai_revision` version (parent = base) becomes current, no approval, `storyboard_ready`; the revision gets `diff` and a short reply ("Done. I changed scene 3. Now 6 scenes, about 70 seconds."). An answer that changes no scene: revision `rejected` with a reply asking what to change, job `needs_input` (`clarification_needed`), no new version (this is how "ambiguous" ends in V1: no separate clarification schema). Failure: job `failed` (`PROVIDER_BUSY`/`PLAN_INVALID` retryable, `PROVIDER_REJECTED` not), revision `failed`, the storyboard and state unchanged (`project.lastError` is not set; the page shows the job's message). Try again = E2.
+- `stage: video` needs `currentRenderId` (`409 INVALID_STATE` until F23). No `SPEND_CEILING` yet (F27). E3 cancel is not built (the screen has no Cancel button).
+
 #### D6. `GET /api/v1/projects/{projectId}/revisions` — Revision chat history
 Auth: creator. Query: `stage` optional filter, `limit` (20), `cursor`. Sort: `createdAt` desc.
 Success `200` → `{ items: Revision[], nextCursor }`. Errors: `404` · `400 INVALID_INPUT`.
@@ -1365,6 +1437,8 @@ Success `200` → `{ items: Revision[], nextCursor }`. Errors: `404` · `400 INV
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM2R1S2T" } }
 ```
 
+**As built (F18).** Query `stage` (`storyboard`|`video`), `limit`, `cursor` (opaque; bound to the `stage` filter). The storyboard page shows the newest 20 (stage `storyboard`) as chat bubbles, oldest first.
+
 #### D7. `POST /api/v1/projects/{projectId}/plan-versions/{planVersionId}/restore` — Undo / restore
 Purpose: **Undo** returns to the previous version (the UI passes `parentVersionId` of the current one) or any older version from history. No data is deleted; the restored version keeps its id and hash, so an **existing approval of that exact version stays valid** (it's the same plan). Auth: creator.
 Body: `expectedStateVersion` ✓. Same allowed states as D3. Effect: `currentPlanVersionId = planVersionId`; `approvedPlanVersionId` = that id if it has an approval, else null; state `storyboard_ready` (approving it again with D8 reuses its existing video if one was already made, see D8 "Re-approval"); a `scheduled` or `publish_failed` post → `approval_invalidated` (+ notification), in the same transaction.
@@ -1375,6 +1449,8 @@ Success `200` → `Project`. Errors: `404` · `409 STALE_VERSION` · `409 INVALI
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This version is already the current one.", "details": { "reason": "already_current" }, "requestId": "req_01JCXM2V3W4X" } }
 ```
+
+**As built (F17).** The project's `voiceGender` follows the restored plan's voice preset (undoing a voice switch switches the chip back). Answer: the `Project` exactly as C3 (with its jobs, so `allowedActions` match). A version of another project → 404. The UI's **↶ Undo** restores `parentVersionId` of the current version (disabled for version 1); the version menu restores any other version.
 
 #### D8. `POST /api/v1/projects/{projectId}/storyboard-approval` — Approve & generate video (approval #1)
 Purpose: the creator approves the **exact** plan version and starts generation. Auth: creator. Rate: 10/hour. **Idempotency-Key required.**
@@ -1407,6 +1483,8 @@ Idempotency-Key: 4e1d7a20-3c9b-4f5e-8a6d-1b2c3d4e5f60
 { "error": { "code": "QUOTA_EXCEEDED", "message": "You've reached today's limit of 3 videos. Try again tomorrow.", "details": { "quota": "videos_per_day", "limit": 3, "used": 3, "resetsAt": "2026-11-12T18:30:00.000Z" }, "requestId": "req_01JCXM3A7B8C" } }
 ```
 
+**As built in F20 (until F23): the approval only.** Same checks, in this order: archived → `409 INVALID_STATE`; a job running → `409 JOB_ALREADY_RUNNING`; `expectedStateVersion` → `409 STALE_VERSION`; state not `storyboard_ready`/`generate_failed` → `409 INVALID_STATE`; not the current version → `409 APPROVAL_STALE` (`reason: not_current`); hash differs → `409 APPROVAL_STALE` (`reason: plan_hash_mismatch`); invalid → `422 PLAN_INVALID` (`details.issues`). Then ONE transaction: `storyboardApprovals` (or the existing row of this exact version, e.g. after an undo: unique per version), an `auditLogs` entry `storyboard.approved`, `approvedPlanVersionId` = the version, +1 `stateVersion`, the answer saved on the Idempotency-Key record. **No generate job, no videos/day count, no Inngest event yet**: the answer is `200 { approval, job: null, project }` (the `Project` as C3, with its jobs) with the project still `storyboard_ready`. That state (approved current version, no generate job) is exactly what F23 picks up: approving again (or F23's D8) then queues the `generate` job without a second approval row. Approving an already-approved current version returns the same approval (no change). Until F23 the button reads **Approve storyboard** and the page then shows a plain "✓ Approved · Version N" (no coming-soon note); F23 renames the button "Approve & generate video". Any later D3/D4/D5/D7 leaves the current version without an approval (D7 back to the approved version restores it).
+
 ### 14.5 Jobs
 
 #### E1. `GET /api/v1/jobs/{jobId}` — Job status
@@ -1431,15 +1509,18 @@ Example: see §8.2 (running) and §8.3 (`needs_input`). Failed example:
 
 #### E2. `POST /api/v1/jobs/{jobId}/retry` — Retry / resume
 Purpose: **Retry** / **Try again** buttons. Resumes from the last good checkpoint; finished stages and paid artifacts are reused (ARCHITECTURE §13.2). Auth: creator. Rate: 30/hour. **Idempotency-Key required.** Body: `{}`.
-Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; a retry that plans from an edited idea counts 1 toward the per-project plan + revision limit (§10.1). Effect (one transaction): state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared, `project.planRequestCount + 1` when it counts; Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
+Allowed: job `failed` with `error.retryable = true`, or a `cancelled` `plan`/`caption` job, or a `failed` `plan` job whose project idea was edited with C4 after the failure (even when `retryable = false`, e.g. `PROVIDER_REJECTED`/`PLAN_INVALID`); no other active job on the project. A `plan` retry always plans from the **current** `project.input` (the job's `inputHash`/key are updated to the edited idea) and never counts toward the projects/day quota; **every plan retry that makes a new AI request counts 1 toward the per-project plan + revision limit (§10.1)**, edited idea or not: an attempt counts 1 when it sends its **first** Gemini request (atomically, only below 20; retries and the repair inside the attempt don't add more); a job that never reached Gemini, or a Try again that reuses a saved answer, costs nothing (F15, after code review). E2 itself only refuses when the project is already at 20 (`429 QUOTA_EXCEEDED`, `plan_requests_per_project`, `resetsAt: null`). A valid AI answer that an earlier attempt already received for the same idea (e.g. the save failed) is reused, not asked for again. Effect (one transaction): state `queued`, `attempt + 1`, project back to `planning`/`generating`, `activeJobId` set, `lastError` cleared, no count at click time (the job counts its first Gemini request); Inngest event id `{jobId}:retry:{attempt}`. Generate retries re-check the storyboard approval; retries never count toward the daily video quota again. Publish jobs are retried with H6.
 Success `202` → `Job`. Errors: `400 INVALID_INPUT` (missing `Idempotency-Key`) · `404` · `409 INVALID_STATE` (not failed / not retryable / publish job) · `409 JOB_ALREADY_RUNNING` · `409 APPROVAL_REQUIRED` (the plan changed since approval) · `503 SPEND_CEILING`.
 ```json
 {}
 ```
+**F21 review:** a job of an **archived** project is refused first with `409 INVALID_STATE` "This project is archived." (plan and revise jobs), like the storyboard edits.
 Response `202`: the job with `"state": "queued"`, `"attempt": 2`, `"error": null`, `"pollAfterMs": 2000`.
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This step can't be retried. Please edit your idea or storyboard instead.", "details": { "jobState": "failed", "retryable": false }, "requestId": "req_01JCXM3G1H2J" } }
 ```
+
+**As built (F18):** also retries a failed `revise` job (a storyboard change request): only while the storyboard is still the version the request was made on (else `409 INVALID_STATE`, `reason: storyboard_changed`, ask again) and under the 20 AI requests (`429`); the project keeps its state, only `activeJobId` is set; the revision goes back to `pending`.
 
 #### E3. `POST /api/v1/jobs/{jobId}/cancel` — Cancel
 Purpose: cancel a queued/running `plan`, `revise`, `generate` or `caption` job (e.g. "cancel the current render" before a revision, PRD §12). Auth: creator. Rate: 30/hour. Body: `{}`.
