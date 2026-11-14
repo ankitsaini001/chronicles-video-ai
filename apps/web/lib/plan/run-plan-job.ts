@@ -45,7 +45,11 @@ export interface PlanJobStore {
   start(input: { jobId: string; attempt: number; runId: string | null }): Promise<PlanJobContext | null>;
   /** Read-only: the job and project while the job is running this attempt, else null. */
   load(input: { jobId: string; attempt: number }): Promise<PlanJobContext | null>;
-  reserveRequest(input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number }): Promise<"ok" | "limit" | "stale">;
+  /**
+   * Count one Gemini request before it is sent. The attempt's FIRST request also counts 1 toward
+   * the project's 20 (atomically, only below 20): "quota" when the project is already at 20.
+   */
+  reserveRequest(input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number }): Promise<"ok" | "limit" | "quota" | "stale">;
   saveAnswer(input: { jobId: ObjectId; attempt: number; answer: PlannerAnswer }): Promise<boolean>;
   setProgress(input: { jobId: ObjectId; attempt: number; stage: string; percent: number; message: string }): Promise<void>;
   complete(input: { jobId: ObjectId; attempt: number; result: ValidPlanToSave }): Promise<boolean>;
@@ -61,13 +65,19 @@ export interface PlanJobDeps {
   retryLater: RetryLater;
   log?: (level: "info" | "warn" | "error", message: string) => void;
   now?: () => number;
+  /** Tests: no real waiting between save retries. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export type PlanJobEvent = { jobId: string; attempt: number };
 export type PlanJobOutcome = "saved" | "failed" | "skipped";
 
 /** What one ask step reports back (small and JSON-safe: Inngest stores it as the step's result). */
-type AskResult = { status: "valid" | "invalid" } | { status: "stale" | "limit" | "rejected" | "setup" | "busy" };
+type AskResult = { status: "valid" | "invalid" } | { status: "stale" | "limit" | "quota" | "rejected" | "setup" | "busy" };
+
+/** Saving a paid answer is retried in-process this many times (short waits) before the step fails. */
+const SAVE_TRIES = 3;
+const SAVE_RETRY_WAIT_MS = 500;
 
 const LANGUAGE_PRESET = (language: string, gender: string): VoicePreset => voicePresetFor(language as Language, gender as "female" | "male").preset as VoicePreset;
 
@@ -93,6 +103,7 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
   const { store } = deps;
   const log = deps.log ?? ((level, message) => console[level](message));
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   // 1. The job becomes running for this attempt (or there is nothing to do).
   const started = await step.run("start", async () => {
@@ -147,21 +158,11 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
 
     const usage = await store.reserveUsage({ ownerId: job.ownerId.toHexString(), projectId: job.projectId.toHexString(), jobId: job._id.toHexString(), model: provider.model });
     const sentAt = now();
-    let evaluation: PlannerEvaluation;
-    let answer: PlannerAnswer;
+    // Only the request itself is inside this try: anything after it is our own work on a PAID answer
+    // and must never be mistaken for "Gemini is busy" (which would ask, and pay, again).
+    let response: Awaited<ReturnType<PlannerProvider["generate"]>>;
     try {
-      const response = await provider.generate({ ...plannerRequestBase(language), turns });
-      evaluation = evaluatePlannerResponse(response, owned);
-      answer = {
-        n,
-        text: response.text,
-        model: response.model,
-        finishReason: response.finishReason,
-        usage: response.usage ? { promptTokens: response.usage.promptTokens, outputTokens: response.usage.outputTokens, thinkingTokens: response.usage.thinkingTokens } : null,
-        valid: evaluation.ok,
-        issueCount: evaluation.ok ? 0 : evaluation.issues.length,
-      };
-      await finishUsageSafely(usage, { status: "final", outcome: evaluation.ok ? "ok" : "invalid_output", model: response.model, units: unitsOf(response.usage), latencyMs: now() - sentAt });
+      response = await provider.generate({ ...plannerRequestBase(language), turns });
     } catch (error) {
       const failure = classifyPlanRequestError(error);
       const message = error instanceof Error ? error.message : String(error);
@@ -180,10 +181,46 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
       await store.setProgress({ jobId: job._id, attempt: event.attempt, stage: "plan", percent: n === 2 ? 60 : 10, message: "Our AI is busy, trying again…" });
       throw deps.retryLater(`Gemini busy (answer ${n}, retry ${retry + 1}): ${message}`, wait);
     }
-    // Saved before the step ends: a re-run of this step (or a later retry of the job) reuses it.
-    await store.saveAnswer({ jobId: job._id, attempt: event.attempt, answer });
+    const latencyMs = now() - sentAt;
+
+    let evaluation: PlannerEvaluation | null = null;
+    try {
+      evaluation = evaluatePlannerResponse(response, owned);
+    } catch (error) {
+      // A bug in our checking, not a busy AI: the answer is still kept (as not valid).
+      log("error", `Storyboard job ${event.jobId}: checking answer ${n} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const answer: PlannerAnswer = {
+      n,
+      text: response.text,
+      model: response.model,
+      finishReason: response.finishReason,
+      usage: response.usage ? { promptTokens: response.usage.promptTokens, outputTokens: response.usage.outputTokens, thinkingTokens: response.usage.thinkingTokens } : null,
+      valid: evaluation?.ok === true,
+      issueCount: evaluation && !evaluation.ok ? evaluation.issues.length : 0,
+    };
+    // Save the paid answer FIRST (a re-run of this step, or a later Try again, reuses it), with a
+    // few quick in-process retries, then finish the usage row.
+    try {
+      await saveAnswerWithRetries(job._id, answer);
+    } finally {
+      await finishUsageSafely(usage, { status: "final", outcome: answer.valid ? "ok" : "invalid_output", model: response.model, units: unitsOf(response.usage), latencyMs });
+    }
     return { status: answer.valid ? "valid" : "invalid" };
   };
+
+  async function saveAnswerWithRetries(jobId: ObjectId, answer: PlannerAnswer): Promise<void> {
+    for (let tryNumber = 1; ; tryNumber++) {
+      try {
+        await store.saveAnswer({ jobId, attempt: event.attempt, answer });
+        return;
+      } catch (error) {
+        if (tryNumber >= SAVE_TRIES) throw error;
+        log("warn", `Storyboard job ${event.jobId}: saving answer ${answer.n} failed (try ${tryNumber} of ${SAVE_TRIES}), trying again`);
+        await sleep(SAVE_RETRY_WAIT_MS * tryNumber);
+      }
+    }
+  }
 
   async function finishUsageSafely(handle: unknown, report: Parameters<PlanJobStore["finishUsage"]>[1]): Promise<void> {
     try {
@@ -235,6 +272,8 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
       case "limit":
       case "busy":
         return fail("PROVIDER_BUSY", "plan", result.status === "limit" ? "Request limit for this attempt reached" : "Gemini stayed busy after the allowed retries");
+      case "quota":
+        return fail("QUOTA_EXCEEDED", "plan", "The project already used its 20 storyboard requests");
       case "rejected":
         return fail("PROVIDER_REJECTED", "plan", "Gemini refused the content (safety)");
       case "setup":
