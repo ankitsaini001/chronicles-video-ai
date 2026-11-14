@@ -243,14 +243,9 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
       <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
         {(notes.general.problems.length > 0 || notes.general.warnings.length > 0) && (
           <div className="flex flex-col gap-2">
-            {notes.general.problems.map((text) => (
-              <Note key={`p:${text}`} tone="problem">
-                <span lang={textLang}>{text}</span>
-              </Note>
-            ))}
-            {notes.general.warnings.map((text) => (
-              <Note key={`w:${text}`} tone="warning">
-                <span lang={textLang}>{text}</span>
+            {[...notes.general.problems.map((n) => ["problem", n] as const), ...notes.general.warnings.map((n) => ["warning", n] as const)].map(([tone, n]) => (
+              <Note key={`${tone}:${n.text}`} tone={tone}>
+                <span lang={n.fromPlan ? textLang : undefined}>{n.text}</span>
               </Note>
             ))}
           </div>

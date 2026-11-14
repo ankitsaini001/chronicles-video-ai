@@ -113,32 +113,36 @@ export function friendlyIssue(issue: Issue): string {
   return issue.message;
 }
 
+/** One note. `fromPlan`: the AI's own warning, written in the plan's language (gets the plan's `lang`); else our English text. */
+export type NoteItem = { text: string; fromPlan: boolean };
+
 export type SceneNotes = {
   /** Notes about the whole storyboard (no scene). */
-  general: { warnings: string[]; problems: string[] };
+  general: { warnings: NoteItem[]; problems: NoteItem[] };
   /** Notes per scene id. */
-  byScene: Map<string, { warnings: string[]; problems: string[] }>;
+  byScene: Map<string, { warnings: NoteItem[]; problems: NoteItem[] }>;
 };
 
 /**
- * Where each note goes: the AI's own warnings (plan.warnings) and the checker's warnings
- * (validation.warnings) as amber notes; the problems that block approval (validation.issues) as
- * red notes. A note with a scene goes on that scene's card; one without a scene (or with a scene
- * that no longer exists) is shown once, above the scenes. Duplicates are shown once.
+ * Where each note goes: the AI's own warnings (plan.warnings, in the plan's language) and the
+ * checker's warnings (validation.warnings, English) as amber notes; the problems that block
+ * approval (validation.issues) as red notes in plain English. A note with a scene goes on that
+ * scene's card; one without a scene (or with a scene that no longer exists) is shown once, above
+ * the scenes. Duplicates are shown once.
  */
 export function sceneNotes(
   plan: { scenes: { id: string }[]; warnings?: { sceneId: string | null; message: string }[] },
   validation: { issues: Issue[]; warnings: Issue[] },
 ): SceneNotes {
   const sceneIds = new Set(plan.scenes.map((s) => s.id));
-  const general = { warnings: [] as string[], problems: [] as string[] };
-  const byScene = new Map<string, { warnings: string[]; problems: string[] }>();
-  const add = (sceneId: string | null, kind: "warnings" | "problems", text: string) => {
+  const general = { warnings: [] as NoteItem[], problems: [] as NoteItem[] };
+  const byScene = new Map<string, { warnings: NoteItem[]; problems: NoteItem[] }>();
+  const add = (sceneId: string | null, kind: "warnings" | "problems", text: string, fromPlan: boolean) => {
     const target = sceneId && sceneIds.has(sceneId) ? (byScene.get(sceneId) ?? byScene.set(sceneId, { warnings: [], problems: [] }).get(sceneId)!) : general;
-    if (!target[kind].includes(text)) target[kind].push(text);
+    if (!target[kind].some((n) => n.text === text)) target[kind].push({ text, fromPlan });
   };
-  for (const w of plan.warnings ?? []) add(w.sceneId, "warnings", w.message);
-  for (const w of validation.warnings) add(w.sceneId, "warnings", w.message);
-  for (const issue of validation.issues) add(issue.sceneId, "problems", friendlyIssue(issue));
+  for (const w of plan.warnings ?? []) add(w.sceneId, "warnings", w.message, true);
+  for (const w of validation.warnings) add(w.sceneId, "warnings", w.message, false);
+  for (const issue of validation.issues) add(issue.sceneId, "problems", friendlyIssue(issue), false);
   return { general, byScene };
 }

@@ -116,9 +116,10 @@ describe("F16 storyboard screen pieces", () => {
         warnings: [{ sceneId: "scene-evaporation", path: "scenes[1].objects[0].label", message: "Simplified." }, { sceneId: "gone", path: "", message: "Old scene." }],
       },
     );
-    expect(notes.byScene.get("scene-evaporation")).toEqual({ warnings: ["Simplified."], problems: [] });
-    expect(notes.general.warnings).toEqual(["General note.", "Old scene."]);
-    expect(notes.byScene.get("scene-takeaway")!.problems[0]).toContain("“remember the loop”");
+    expect(notes.byScene.get("scene-evaporation")).toEqual({ warnings: [{ text: "Simplified.", fromPlan: true }], problems: [] });
+    expect(notes.general.warnings).toEqual([{ text: "General note.", fromPlan: true }, { text: "Old scene.", fromPlan: false }]);
+    expect(notes.byScene.get("scene-takeaway")!.problems[0]).toMatchObject({ fromPlan: false });
+    expect(notes.byScene.get("scene-takeaway")!.problems[0]!.text).toContain("“remember the loop”");
     expect(friendlyIssue({ sceneId: null, path: "scenes", message: "estimated narration length is 98.4 s (246 words at 150 words/min); …" })).toMatch(/about 98 seconds.*make it shorter/);
   });
 

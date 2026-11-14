@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { patternLabel, sceneNumber, visualParts, type SceneLike } from "@/lib/storyboard/view";
+import { patternLabel, sceneNumber, visualParts, type NoteItem, type SceneLike } from "@/lib/storyboard/view";
 import { Note } from "./Note";
 
 // One scene on the storyboard (Stitch "Step 2 Storyboard"): "SCENE 01", the motion pattern badge,
@@ -13,7 +13,7 @@ type SceneCardProps = {
   /** The `lang` of the plan's text (Hindi narration must be marked lang="hi"). */
   lang: string;
   changed: boolean;
-  notes: { warnings: string[]; problems: string[] } | undefined;
+  notes: { warnings: NoteItem[]; problems: NoteItem[] } | undefined;
   action?: ReactNode;
   editor?: ReactNode;
 };
@@ -55,14 +55,10 @@ export function SceneCard({ index, scene, lang, changed, notes, action, editor }
       </p>
       {notes && (notes.problems.length > 0 || notes.warnings.length > 0) && (
         <div className="mt-3 flex flex-col gap-2">
-          {notes.problems.map((text) => (
-            <Note key={`p:${text}`} tone="problem">
-              <span lang={lang}>{text}</span>
-            </Note>
-          ))}
-          {notes.warnings.map((text) => (
-            <Note key={`w:${text}`} tone="warning">
-              <span lang={lang}>{text}</span>
+          {[...notes.problems.map((n) => ["problem", n] as const), ...notes.warnings.map((n) => ["warning", n] as const)].map(([tone, n]) => (
+            <Note key={`${tone}:${n.text}`} tone={tone}>
+              {/* Only the plan's own text is in the plan's language; our notes are English. */}
+              <span lang={n.fromPlan ? lang : undefined}>{n.text}</span>
             </Note>
           ))}
         </div>

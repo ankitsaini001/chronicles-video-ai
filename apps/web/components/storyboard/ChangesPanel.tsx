@@ -47,9 +47,13 @@ export function ChangesPanel(props: ChangesPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(activeJob?.progress.message ?? null);
+  // One key per click kind (F16–F20 review): a Send and a Try again are different requests.
   const sendKey = useRef<string | null>(null);
+  const retryKey = useRef<string | null>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const running = activeJob !== null && activeJob.type === "revise";
+  const runningJobId = running ? activeJob.id : null;
+  const { announce } = props;
   const count = cleanIdeaText(text).length;
   const sceneIndex = new Map(scenes.map((s, i) => [s.id, i]));
 
@@ -80,6 +84,17 @@ export function ChangesPanel(props: ChangesPanelProps) {
       failures = 0;
       if (answer.json.pollAfterMs == null || !answer.json.activeJob) {
         stopped = true;
+        // Say how it ended (the status line lives outside the part that reloads), then reload.
+        const job = runningJobId ? await apiSend<{ state: string; error: { message: string } | null; needsInput: { message: string } | null }>("GET", `/api/v1/jobs/${runningJobId}`) : null;
+        if (job?.ok) {
+          announce(
+            job.json.state === "succeeded"
+              ? "Your storyboard is updated."
+              : job.json.state === "needs_input"
+                ? (job.json.needsInput?.message ?? "Nothing was changed.")
+                : (job.json.error?.message ?? "The change couldn't be made."),
+          );
+        }
         return router.refresh();
       }
       setProgress(answer.json.activeJob.progress.message);
@@ -95,7 +110,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [running, projectId, router]);
+  }, [running, runningJobId, projectId, router, announce]);
 
   async function send() {
     const message = cleanIdeaText(text);
@@ -116,7 +131,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
       setBusy(false);
       return setError(answer.code === "STALE_VERSION" ? CLIENT_MESSAGES.STALE : answer.message);
     }
-    props.announce("Working on your change.");
+    announce("Working on your change.");
     router.refresh();
   }
 
@@ -124,14 +139,14 @@ export function ChangesPanel(props: ChangesPanelProps) {
     if (!failedJob) return;
     setBusy(true);
     setError(null);
-    sendKey.current ??= newIdempotencyKey();
-    const answer = await apiSend("POST", `/api/v1/jobs/${failedJob.id}/retry`, {}, { "Idempotency-Key": sendKey.current });
+    retryKey.current ??= newIdempotencyKey();
+    const answer = await apiSend("POST", `/api/v1/jobs/${failedJob.id}/retry`, {}, { "Idempotency-Key": retryKey.current });
     if (!answer.ok) {
-      if (answer.status >= 400 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") sendKey.current = null;
+      if (answer.status >= 400 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") retryKey.current = null;
       setBusy(false);
       return setError(answer.message);
     }
-    props.announce("Trying your change again.");
+    announce("Trying your change again.");
     router.refresh();
   }
 
@@ -150,7 +165,10 @@ export function ChangesPanel(props: ChangesPanelProps) {
         <select
           id={`${id}-scope`}
           value={scope}
-          onChange={(e) => setScope(e.target.value)}
+          onChange={(e) => {
+            sendKey.current = null; // a different request: a new key
+            setScope(e.target.value);
+          }}
           disabled={locked}
           className="min-h-9 max-w-full cursor-pointer rounded-full border border-line bg-surface-2 px-3 py-1 text-xs font-medium text-text hover:border-amber/40 disabled:opacity-50"
         >
@@ -236,7 +254,10 @@ export function ChangesPanel(props: ChangesPanelProps) {
               value={text}
               maxLength={MAX * 2}
               disabled={locked}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                sendKey.current = null; // a different request: a new key
+                setText(e.target.value);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
