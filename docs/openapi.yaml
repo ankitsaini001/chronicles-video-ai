@@ -972,14 +972,14 @@ paths:
       - $ref: '#/components/parameters/ProjectId'
     post:
       operationId: editNarration
-      summary: Edit one narration block (new user_edit version)
+      summary: Edit a scene's narration (one new user_edit version)
       description: |
         D3. Inline narration edit → new `user_edit` plan version (re-validated, re-hashed); the approval is
         reset. Saved even if validation fails (validation.valid = false). **expectedStateVersion required.**
         Allowed in storyboard_ready, generate_failed, video_ready, scheduled, publish_failed with no active job. A scheduled
         or publish_failed post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
-        As built (F17): text cleaned (control/format characters removed, NFC, line breaks and space runs → one space), 1-300; unknown scene/narration id → 400; the new version goes through the same plan validator as AI plans and is saved even when invalid (valid false, issues). No AI call, not counted toward the 20. Posts (F30) don't exist yet, so nothing to invalidate there.
+        As built (F17, after review): body = one scene's edited blocks (1-4, each once), saved as ONE new version, all or nothing (one Save = one Undo step); text cleaned (control/format characters removed, NFC, line breaks and space runs → one space), 1-300; unknown scene/narration id → 400 and nothing saved; refused in scheduled/publish_failed (409 INVALID_STATE) until F30; the new version goes through the same plan validator as AI plans and is saved even when invalid (valid false, issues). No AI call, not counted toward the 20. Posts (F30) don't exist yet, so nothing to invalidate there.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -989,7 +989,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/NarrationEditRequest'
-            example: { basePlanVersionId: 67330e019f1e4b2a7c0d2b02, sceneId: scene-takeaway, narrationId: line-take, text: 'So remember: UPI is a fast switch between banks, and only you should ever know your PIN.', expectedStateVersion: 4 }
+            example: { basePlanVersionId: 67330e019f1e4b2a7c0d2b02, sceneId: scene-takeaway, blocks: [ { narrationId: line-take, text: 'So remember: UPI is a fast switch between banks, and only you should ever know your PIN.' } ], expectedStateVersion: 4 }
       responses:
         '201':
           description: The new plan version.
@@ -1189,7 +1189,7 @@ paths:
       summary: Undo / restore an earlier plan version
       description: |
         D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
-        As built (F17): the project's voiceGender follows the restored plan's voice preset; approvedPlanVersionId = the version when it has a storyboard approval.
+        As built (F17): answers the Project as C3 (with its jobs); the project's voiceGender follows the restored plan's voice preset; approvedPlanVersionId = the version when it has a storyboard approval.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1243,7 +1243,7 @@ paths:
         Re-approval: if a generate job for this exact plan version already succeeded (e.g. after undo), no new
         job is started and no quota is used; the answer is 200 with that job, and the project moves to
         video_ready with currentRenderId = the newest ready render of that version.
-        AS BUILT IN F20 (until F23): only the approval part. No generate job, no videos/day count, no Inngest event; the answer is **200** `{ approval, job: null, project }` and the project stays storyboard_ready with approvedPlanVersionId = currentPlanVersionId (F23 starts the job from exactly that state). An existing approval of the same version (e.g. after undo) is reused. Each new approval writes an auditLogs entry `storyboard.approved`.
+        AS BUILT IN F20 (until F23): only the approval part. No generate job, no videos/day count, no Inngest event; the answer is **200** `{ approval, job: null, project }` (project as C3, with its jobs; the button reads "Approve storyboard" until F23) and the project stays storyboard_ready with approvedPlanVersionId = currentPlanVersionId (F23 starts the job from exactly that state). An existing approval of the same version (e.g. after undo) is reused. Each new approval writes an auditLogs entry `storyboard.approved`.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -4336,26 +4336,39 @@ components:
     NarrationEditRequest:
       type: object
       additionalProperties: false
-      required: [basePlanVersionId, sceneId, narrationId, text, expectedStateVersion]
+      description: The edited narration blocks of ONE scene, saved together as one new version (all or nothing; F17 review).
+      required: [basePlanVersionId, sceneId, blocks, expectedStateVersion]
       properties:
         basePlanVersionId:
           $ref: '#/components/schemas/ObjectId'
         sceneId:
           $ref: '#/components/schemas/SafeId'
-        narrationId:
-          $ref: '#/components/schemas/SafeId'
-        text:
-          type: string
-          minLength: 1
-          maxLength: 300
-        speech:
-          type: [string, 'null']
-          minLength: 1
-          maxLength: 300
-        display:
-          type: [string, 'null']
-          minLength: 1
-          maxLength: 300
+        blocks:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: Each narration block of the scene at most once.
+          items:
+            type: object
+            additionalProperties: false
+            required: [narrationId, text]
+            properties:
+              narrationId:
+                $ref: '#/components/schemas/SafeId'
+              text:
+                type: string
+                minLength: 1
+                maxLength: 300
+              speech:
+                type: [string, 'null']
+                minLength: 1
+                maxLength: 300
+                description: Omitted = keep, null = clear.
+              display:
+                type: [string, 'null']
+                minLength: 1
+                maxLength: 300
+                description: Omitted = keep, null = clear.
         expectedStateVersion:
           type: integer
           minimum: 1
