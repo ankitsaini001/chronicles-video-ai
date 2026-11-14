@@ -1,4 +1,4 @@
-import { allowedActionsFor, currentStepOf, getCurrentPlanVersion, getDb, IDEA_LIMITS, readDbConfig } from "@bytereel/db";
+import { allowedActionsFor, currentStepOf, getCurrentPlanVersion, getDb, IDEA_LIMITS, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -64,7 +64,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         {jobState && (
           <div className="mb-8">
             <PlanJobPanel
-              key={`${project.state}-${project.stateVersion}`}
+              // Keyed by state only: saving an edited idea (new stateVersion) must not reset the panel
+              // and wipe an error shown after a refused Try again.
+              key={project.state}
               projectId={project._id.toHexString()}
               state={jobState}
               stateVersion={project.stateVersion}
@@ -72,6 +74,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
               progress={activeJob ? { percent: activeJob.progress.percent, message: activeJob.progress.message } : null}
               lastError={project.lastError ? { code: project.lastError.code, message: project.lastError.message } : null}
               allowedActions={allowedActionsFor(project, latestPlanJob)}
+              requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
+              queuedAt={activeJob ? activeJob.queuedAt.toISOString() : null}
               idea={{ text: project.input.text, ...IDEA_LIMITS[project.input.type] }}
             />
           </div>

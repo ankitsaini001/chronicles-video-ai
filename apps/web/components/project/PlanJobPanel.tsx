@@ -21,12 +21,18 @@ export type PlanJobPanelProps = {
   progress: { percent: number; message: string } | null;
   lastError: { code: string; message: string } | null;
   allowedActions: string[];
+  /** True when the project has used all its storyboard requests (20; decided on the server). */
+  requestsUsedUp: boolean;
+  /** When the current job was started or retried (ISO), for the "taking longer" line. */
+  queuedAt: string | null;
   idea: { text: string; min: number; max: number };
 };
 
 const POLL_MS = 2000;
 const HIDDEN_POLL_MS = 15000;
 const MAX_ERROR_BACKOFF_MS = 10000;
+/** After this long, the page says the storyboard is taking longer than usual (one line, nothing else changes). */
+const SLOW_AFTER_MS = 3 * 60_000;
 
 const MESSAGES = {
   OFFLINE: "Couldn't reach the server. Check your internet connection and try again.",
@@ -58,9 +64,11 @@ export function PlanJobPanel(props: PlanJobPanelProps) {
   return props.state === "planning" ? <Progress {...props} /> : <Failed {...props} />;
 }
 
-function Progress({ projectId, progress }: PlanJobPanelProps) {
+function Progress({ projectId, progress, queuedAt }: PlanJobPanelProps) {
   const router = useRouter();
   const [current, setCurrent] = useState(progress ?? { percent: 0, message: "Writing your storyboard…" });
+  const startedMs = queuedAt ? Date.parse(queuedAt) : NaN;
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     let stopped = false;
@@ -89,6 +97,7 @@ function Progress({ projectId, progress }: PlanJobPanelProps) {
         return schedule(Math.min(POLL_MS * 2 ** failures, MAX_ERROR_BACKOFF_MS));
       }
       failures = 0;
+      if (Number.isFinite(startedMs) && Date.now() - startedMs > SLOW_AFTER_MS) setSlow(true);
       const status = (await response.json().catch(() => ({}))) as Status;
       if (status.state !== "planning" || status.pollAfterMs == null) {
         stopped = true;
@@ -108,7 +117,7 @@ function Progress({ projectId, progress }: PlanJobPanelProps) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [projectId, router]);
+  }, [projectId, router, startedMs]);
 
   const percent = Math.max(5, Math.min(100, current.percent));
   return (
@@ -127,11 +136,12 @@ function Progress({ projectId, progress }: PlanJobPanelProps) {
         <div className="h-full rounded-full bg-progress transition-[width] duration-700 motion-safe:animate-pulse" style={{ width: `${percent}%` }} />
       </div>
       <p className="text-sm text-muted">This usually takes 1–2 minutes. You can leave this page; we'll keep working and your storyboard will be here when you come back.</p>
+      {slow && <p className="text-sm text-text">This is taking longer than usual. Our AI may be busy; we're still working on it.</p>}
     </div>
   );
 }
 
-function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, idea }: PlanJobPanelProps) {
+function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, requestsUsedUp, idea }: PlanJobPanelProps) {
   const router = useRouter();
   const textId = useId();
   const [editing, setEditing] = useState(false);
@@ -222,9 +232,7 @@ function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, ide
       <p role="alert" className="rounded-2xl border border-danger/40 bg-danger-bg px-4 py-3 text-base text-text">
         {failureText(lastError?.code, lastError?.message)}
       </p>
-      {!canRetry && !editing && lastError?.code !== "PROVIDER_REJECTED" && (
-        <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>
-      )}
+      {requestsUsedUp && <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>}
 
       {editing ? (
         <div className="flex flex-col gap-3">
@@ -263,13 +271,13 @@ function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, ide
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
-          {canRetry && lastError?.code !== "PROVIDER_REJECTED" && (
+          {canRetry && (
             <Button type="button" onClick={onTryAgain} disabled={busy}>
               {busy ? "Starting…" : "Try again"}
             </Button>
           )}
           {canEdit && (
-            <Button type="button" variant={canRetry && lastError?.code !== "PROVIDER_REJECTED" ? "secondary" : "primary"} onClick={() => setEditing(true)} disabled={busy}>
+            <Button type="button" variant={canRetry ? "secondary" : "primary"} onClick={() => setEditing(true)} disabled={busy}>
               Edit idea
             </Button>
           )}
