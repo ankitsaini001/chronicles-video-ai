@@ -40,12 +40,12 @@ The 'IDEAS FROM AI' panel on the Idea screen.
 
 ## How we test it (done when all are ticked)
 - [x] Ideas are relevant (live smoke call, below; please judge them too)
-- [ ] Choosing one fills the form
+- [x] Choosing one fills the form
 - [x] Busy state shows 'Our AI is very busy right now…' (unit tests + e2e with the stand-in: "Our AI is very busy right now. Please try again in a few minutes.")
 - [x] Limits: 11th in an hour and 31st in a day are refused without calling Gemini (unit tests + e2e, also 5 clicks at once)
 - [x] Every Gemini request is in `providerUsage` (e2e on `bytereel_test`)
 - [x] Code review passed (code-reviewer agent; no must-fix, all suggestions applied)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK
 
 ### Live smoke calls (2026-11-13)
 **First try, `gemini-3.6-flash`: timed out.** No answer after 25.1 s; the one allowed retry was cut at the 30 s limit. Nothing billed. The main session then measured: 3.6 Flash takes 55–57 s on the free tier even with low thinking; `gemini-3.5-flash-lite` 503 (high demand); `gemini-2.5-flash-lite` 404 (not for new users); `gemini-3.1-flash-lite` with low thinking 7.7 s with 5 good ideas; `gemini-flash-lite-latest` is a moving alias (not used). So brainstorm got its own model (step 8).
@@ -92,3 +92,4 @@ npm run db -- indexes --feature F14 --apply
 | 2026-11-13 | Main session measured the models (3.6 Flash 55–57 s even with low thinking; 3.1 Flash-Lite ~8 s). Brainstorm now has its own model `GEMINI_BRAINSTORM_MODEL` (default `gemini-3.1-flash-lite`, low thinking), the planner keeps `GEMINI_MODEL`; PRD decision #26, ARCHITECTURE §16.1, API.md C7, `.env.example` updated. Live smoke call through C7 on `bytereel_test`: 200 in 3.5 s, 5 good ideas, one Gemini request (559 + 537 tokens); test database dropped. 592 unit tests, typecheck and `next build` pass. |
 | 2026-11-14 | Code review: no must-fix. Applied all suggestions: (1) a retry or the repair starts only with at least 5 s of the 30 s left (`150d1d2`); (2) a picked idea is sent as a brainstorm only while the Language chip matches its language, otherwise as a plain topic with a hint under the box (`4bfbbec`, pure helper `apps/web/lib/project/idea-payload.ts` + tests); (3) `-latest` brainstorm models refused, `.env.example` says the model must accept thinkingLevel (`45118df`); (4) invisible format characters (bidi, zero-width space, BOM) removed from AI output and from idea text/subject, ZWJ/ZWNJ kept for Devanagari; English/Hinglish ideas must be at least 80% Latin letters (`70f7e3c`); (5) one shared constant for 10/hour and 30/day (`3297701`); (6) the e2e check reads the server's environment and stops before any request unless the Gemini stand-in and `bytereel_test` are on (`3a761c8`); (7) docs: F27 TODO to clean old `reserved` usage rows, warning that the daily limits need the `usageCounters` unique index, F15 note to treat brainstorm text as delimited untrusted data (`c9c77f3`). Not done: `import "server-only"` (the `server-only` package isn't installed; Next only aliases it internally and the unit tests couldn't load it; no new dependency). No real Gemini calls. Unit tests, typecheck and `next build` pass; e2e F14 37/37 and F12 pass on `bytereel_test` (dropped afterwards). Code review ticked; waiting for the founder's test. |
 | 2026-11-14 | Founder test: brainstorm gave 5 good ideas and picking one saved a `brainstorm` project, but the title was the first 120 characters of "Title. Hook", cut mid-word. Fixed (main session): a brainstorm project takes the idea's own title; long typed ideas are cut at a word break and end with "…" (`projectTitle`, `titleFromIdea`). API.md C2 and DATABASE.md §4.8 updated. |
+| 2026-11-14 | Founder: "looking good" → ✅. |
