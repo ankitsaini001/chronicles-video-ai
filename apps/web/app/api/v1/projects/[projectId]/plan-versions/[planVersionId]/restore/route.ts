@@ -1,6 +1,7 @@
 import { API_RATE_LIMITS, restorePlanVersion, RestoreBodySchema, toProjectResource } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
-import { toApiProblem } from "@/lib/plan/api";
+import { toApiProblem, toProjectResourceOf } from "@/lib/plan/api";
+import { loadProjectWithJobs } from "@/lib/plan/jobs";
 
 // D7 POST /api/v1/projects/{projectId}/plan-versions/{planVersionId}/restore (docs/API.md D7, F17):
 // Undo (the UI passes the current version's parent) or restore any older version. No new version,
@@ -8,7 +9,7 @@ import { toApiProblem } from "@/lib/plan/api";
 // becomes current; if that exact version was approved before, its approval counts again, else the
 // project needs a new approval; the project's voice follows the restored plan; +1 stateVersion.
 // Body (strict): expectedStateVersion. Errors: 404 · 409 STALE_VERSION · 409 INVALID_STATE
-// (already current) · 409 JOB_ALREADY_RUNNING. Answer: 200 Project. Rate: 60 per minute (shared).
+// (already current) · 409 JOB_ALREADY_RUNNING. Answer: 200 Project (as C3, with its jobs). Rate: 60 per minute (shared).
 
 export async function POST(request: Request, { params }: { params: Promise<{ projectId: string; planVersionId: string }> }): Promise<Response> {
   const { projectId, planVersionId } = await params;
@@ -18,7 +19,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     handle: async ({ db, user, body }) => {
       try {
         const project = await restorePlanVersion(db, { ownerId: user.id, projectId, planVersionId, expectedStateVersion: body.expectedStateVersion });
-        return toProjectResource(project);
+        // The same Project as C3 (with its jobs), so `allowedActions` match (e.g. retry_job).
+        const loaded = await loadProjectWithJobs(db, user.id, projectId);
+        return loaded ? toProjectResourceOf(loaded) : toProjectResource(project);
       } catch (error) {
         return toApiProblem(error);
       }

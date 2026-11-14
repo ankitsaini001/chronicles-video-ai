@@ -1,4 +1,14 @@
-import { API_RATE_LIMITS, approveStoryboard, IdempotencyLockLostError, StoryboardApprovalBodySchema, toProjectResource, toStoryboardApprovalResource } from "@bytereel/db";
+import {
+  API_RATE_LIMITS,
+  approveStoryboard,
+  getLatestPlanJob,
+  getLatestReviseJob,
+  getOwnedProject,
+  IdempotencyLockLostError,
+  StoryboardApprovalBodySchema,
+  toProjectResource,
+  toStoryboardApprovalResource,
+} from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
 import { toApiProblem } from "@/lib/plan/api";
@@ -23,10 +33,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     body: StoryboardApprovalBodySchema,
     idempotent: true,
     handle: async ({ db, user, body, idempotencyLock }) => {
+      // The project's newest jobs (read first; approving never starts or changes a job), so the
+      // answer's `allowedActions` match C3's.
+      const owned = await getOwnedProject(db, user.id, projectId);
+      const related = owned ? { latestPlanJob: await getLatestPlanJob(db, owned._id), latestReviseJob: await getLatestReviseJob(db, owned._id) } : {};
       const answer = (out: Awaited<ReturnType<typeof approveStoryboard>>) => ({
         approval: toStoryboardApprovalResource(out.approval),
         job: null,
-        project: toProjectResource(out.project),
+        project: toProjectResource(out.project, related),
       });
       try {
         const out = await approveStoryboard(db, { ownerId: user.id, projectId, body, idempotencyLock, respond: (o) => ({ status: 200, body: answer(o) }) });
