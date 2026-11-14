@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done (code review fixed; e2e passed; founder tested F16–F20 together on 2026-11-14) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F16 |
 | **Design** | — |
