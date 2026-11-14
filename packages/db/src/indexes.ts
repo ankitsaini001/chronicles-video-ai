@@ -30,7 +30,9 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "verification", name: "identifier", keys: { identifier: 1 }, options: {}, feature: "F08", why: "Find a reset link" },
   { collection: "verification", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Expired reset links delete themselves" },
   { collection: "rateLimits", name: "expiresAt_ttl", keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 }, feature: "F08", why: "Old sign-up/login counters delete themselves" },
-  { collection: "projects", name: "ownerId_updatedAt", keys: { ownerId: 1, updatedAt: -1 }, options: {}, feature: "F12", why: "My videos list, newest first" },
+  // F12's { ownerId: 1, updatedAt: -1 } was removed in the F21 review: ownerId_updatedAt_id (F21)
+  // starts with the same keys and serves the same queries. An Atlas that already has it can drop it
+  // by hand (DATABASE.md §8); keeping it does no harm.
   { collection: "projects", name: "ownerId_state", keys: { ownerId: 1, state: 1 }, options: {}, feature: "F12", why: "The My videos tabs" },
   { collection: "idempotencyKeys", name: "ownerId_key_unique", keys: { ownerId: 1, key: 1 }, options: { unique: true }, feature: "F12", why: "A click is processed once" },
   { collection: "idempotencyKeys", name: "createdAt_ttl", keys: { createdAt: 1 }, options: { expireAfterSeconds: 86400 }, feature: "F12", why: "Forget clicks after a day" },

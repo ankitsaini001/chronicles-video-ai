@@ -165,7 +165,6 @@ describe("index list", () => {
   it("has the F12 indexes (DATABASE.md §8: projects, idempotencyKeys, usageCounters)", () => {
     const f12 = indexesForFeatures(["F12"]).map((i) => `${i.collection}.${i.name} ${JSON.stringify(i.keys)} ${JSON.stringify(i.options)}`);
     expect(f12).toEqual([
-      'projects.ownerId_updatedAt {"ownerId":1,"updatedAt":-1} {}',
       'projects.ownerId_state {"ownerId":1,"state":1} {}',
       'idempotencyKeys.ownerId_key_unique {"ownerId":1,"key":1} {"unique":true}',
       'idempotencyKeys.createdAt_ttl {"createdAt":1} {"expireAfterSeconds":86400}',

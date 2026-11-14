@@ -445,7 +445,6 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - Every change needs the caller's `stateVersion`; a mismatch changes nothing.
 
 **Indexes**
-- `{ ownerId: 1, updatedAt: -1 }`: the "My videos" list, newest first.
 - `{ ownerId: 1, state: 1 }`: the tabs (Drafts, Ready, Scheduled, Published).
 - `{ ownerId: 1, updatedAt: -1, _id: -1 }` (**F21**): the My videos pages (API.md C1) sort by `updatedAt` and then `_id` (the tie-breaker, so pages never skip or repeat a card). This index serves that whole sort; the tabs filter on `state` on the way. Create it with `npm run db -- indexes --feature F21 --apply`.
 - No index on `activeJobId`: an earlier version of ARCHITECTURE §8.3 listed a sparse one, but it isn't needed. A job already stores its `projectId`, so "which project does this job belong to?" is a lookup by `_id`.
@@ -1363,9 +1362,8 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `verification` | `expiresAt` TTL (`expireAfterSeconds: 0`) | No | Expired reset links delete themselves | Required (BA) |
 | `allowlist` | `email` | Yes | An email is invited once | ARCH §8.2 |
 | `rateLimits` | `expiresAt` TTL (`expireAfterSeconds: 0`); lookups use `_id` | No | Old counters delete themselves | API §3.7 + Q2/Q13 |
-| `projects` | `{ ownerId, updatedAt: -1 }` | No | My videos list, newest first | ARCH §8.3 |
 | `projects` | `{ ownerId, state }` | No | The tabs | ARCH §8.3 |
-| `projects` | `{ ownerId, updatedAt: -1, _id: -1 }` | No | My videos pages, newest first, with the tie-breaker | API C1 (F21) |
+| `projects` | `{ ownerId, updatedAt: -1, _id: -1 }` | No | My videos pages, newest first, with the tie-breaker. **Replaces** F12's `{ ownerId, updatedAt: -1 }` (`ownerId_updatedAt`), which starts with the same keys. The setup script only creates indexes, so drop the old one by hand once F21's is in place: Atlas → Data Explorer → `bytereel` → `projects` → Indexes → `ownerId_updatedAt` → Drop (optional: it does no harm, it only costs a little space and write time) | API C1 (F21) |
 | `planVersions` | `{ projectId, versionNumber: -1 }` | Yes | No duplicate version numbers; history order | ARCH §8.4 |
 | `planVersions` | `{ ownerId, projectId }` | No | Owner-scoped lookups | ARCH §8.4 |
 | `revisions` | `{ projectId, createdAt: -1 }` | No | Revision chat history | ARCH §8.5 |
