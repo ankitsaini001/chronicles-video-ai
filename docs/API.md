@@ -634,7 +634,7 @@ Every background write is conditional on "still running this attempt", so a late
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
 | Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count. **Counted and enforced since F12** (inside C2's transaction, so concurrent clicks can't pass 5) | same | `quota: projects_per_day` |
-| Plan + revision requests per project | 20 | Every plan job attempt that asks Gemini (C2's job and each E2 retry, with or without an Edit idea; an attempt counts 1 when it sends its **first** Gemini request (atomically, only below 20; retries and the repair inside the attempt don't add more); a job that never reached Gemini, or a Try again that reuses a saved answer, costs nothing (F15, after code review)), and each D5 accepted; stored in `projects.planRequestCount`. **Enforced since F15**: E2 refuses at 20; a job reaching Gemini at 20 fails with `QUOTA_EXCEEDED` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Plan + revision requests per project | 20 | Every plan job attempt that asks Gemini (C2's job and each E2 retry, with or without an Edit idea; an attempt counts 1 when it sends its **first** Gemini request (atomically, only below 20; retries and the repair inside the attempt don't add more); a job that never reached Gemini, or a Try again that reuses a saved answer, costs nothing (F15, after code review)), and each D5 revision attempt that asks Gemini (as built in F18: same rule as E2, counted at the attempt's first Gemini request, not at acceptance; D5 refuses at 20); stored in `projects.planRequestCount`. **Enforced since F15**: E2 refuses at 20; a job reaching Gemini at 20 fails with `QUOTA_EXCEEDED` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
 | Brainstorms (C7) per user per day | 30 | C7 accepted (after the 10/hour check and the body check, before Gemini); busy or refused answers still count. Not in a transaction: one atomic "add 1 while under 30" on the counter (F14) | 00:00 in the user's timezone | `quota: brainstorms_per_day` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
@@ -868,7 +868,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | `/dashboard` | C1 (`tab`), B1 | C5 archive, C4 rename, "+ New video" → `/projects/new` |
 | `/projects/new` ① Idea | B1 (defaults), B4 (voices) | C7 brainstorm, C2 create storyboard → poll C6 |
 | ① Idea of an existing project in `plan_failed` (storyboard failed) | C3 (idea text + `lastError`) | **Edit idea** = C4 with `text` (and optional `title`), then **Try again** = E2 on the failed plan job → poll C6 |
-| `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob` |
+| `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob`. **As built (F16–F20):** the page reads C3/D2/D6 data on the server; `/projects/[id]` redirects here when `currentStep` is `storyboard`; no E3 Cancel yet; D8 approves only (video job F23) |
 | `/projects/[id]/video` ③ | C3, F2 current render, F3 `kind=video` | F3 `kind=download`, F4 caption fixes, D5 revision (`stage: video`), E2 retry, E3 cancel, F1 previous versions, poll C6 |
 | `/projects/[id]/publish` ④ | C3, F2, F3 (`thumbnail`, `video`), G1, H3 | G2 connect, H1 AI caption, H2 publish now / schedule, H5 cancel, H6 retry, F3 download, poll H4 / C6 |
 | `/settings` | B1, G1 | B2 defaults, A5 change password, G2 connect, G4 disconnect, B3 delete account |
@@ -1103,6 +1103,8 @@ Errors: `404 NOT_FOUND`.
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM1G6H7J" } }
 ```
 
+**As built (F16).** Owner only (another user's project, a missing one or a malformed id → the same 404). The stuck-job rule (§8.5) is applied first, like C6. `activeJob` is filled while a job runs. `allowedActions` on a storyboard: `edit_storyboard` (D3, D4, D7), `request_revision` (D5, while under the 20 AI requests), `approve_storyboard` (D8, in `storyboard_ready`/`generate_failed` until the current version is the approved one), `retry_job` (E2, when the newest change request failed with a retryable error and the storyboard is still the version it was made on). Nothing while a job runs. `rename`/`archive` arrive with F21. Rate: the shared 300 reads/min.
+
 #### C4. `PATCH /api/v1/projects/{projectId}` — Rename, or edit the idea after the storyboard failed
 Auth: creator. Rate: 60/min. Body: at least one of `title` string 1–120 · `text` string (the idea; same length rules as C2 for the project's `inputType`) · plus `expectedStateVersion` int (required).
 - **Rename** (`title` only): allowed in every state except `archived`. Doesn't touch plans or approvals.
@@ -1222,6 +1224,8 @@ Success `200` → `{ items: PlanVersionSummary[], nextCursor }`. Errors: `404 NO
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM2A1B2C" } }
 ```
 
+**As built (F17).** `limit` 1–50 (20); `cursor` is opaque (base64url of the last `versionNumber`); a bad `limit`, a repeated parameter or a tampered cursor → `400`. `isApproved` = this exact version has a `storyboardApprovals` row (whether the project is approved now: `project.approvedPlanVersionId === project.currentPlanVersionId`). The "Version N ▾" menu loads this when it opens.
+
 #### D2. `GET /api/v1/projects/{projectId}/plan-versions/{planVersionId}` — Full plan
 Purpose: the storyboard screen (scene cards, narration, visual plan, pattern badge, warnings, estimated duration). `planVersionId` may be the literal **`current`**. Auth: creator.
 Success `200` → `PlanVersion` (the `plan` is exactly the code contract, §11.2). `changedSceneIds` lists scenes that differ from the parent version (for highlighting after a revision).
@@ -1321,6 +1325,8 @@ Example (plan abbreviated to 3 scenes for readability; real plans have 3–10 sc
 { "error": { "code": "NOT_FOUND", "message": "The storyboard isn't ready yet.", "details": { "reason": "no_plan_yet" }, "requestId": "req_01JCXM2D3E4F" } }
 ```
 
+**As built (F16).** `current` or a version id of this project (another project's version → 404). `changedSceneIds` = scenes changed or added compared to the parent version (`[]` for version 1 and for a restored version 1). The storyboard page (`/projects/[id]/storyboard`) reads the same data on the server: scene cards with the pattern badge, the narration, a "Visual:" line built from the scene's objects (pattern + object labels, e.g. "Process: Sunlight → Atmosphere → Your eyes"; no AI call), `plan.warnings` and `validation.warnings` on their scene (scene-less ones once at the top), and for an invalid version the `validation.issues` in plain words. Hindi text is marked `lang="hi"` (Noto Sans Devanagari is in every font stack).
+
 #### D3. `POST /api/v1/projects/{projectId}/narration-edits` — Edit narration (inline)
 Purpose: save one inline narration edit as a new **`user_edit`** plan version (ARCHITECTURE §11 UI rules). Auth: creator. Rate: 60/min.
 
@@ -1348,6 +1354,8 @@ Response `201`: a `PlanVersion` with `"versionNumber": 3`, `"source": "user_edit
 { "error": { "code": "JOB_ALREADY_RUNNING", "message": "We're still working on the previous step.", "details": { "activeJobId": "67330e009f1e4b2a7c0d3c02", "activeJobType": "revise" }, "requestId": "req_01JCXM2G5H6J" } }
 ```
 
+**As built (F17).** Body strict; `text`/`speech`/`display` cleaned (control and format characters removed, NFC, line breaks and runs of spaces → one space), 1–300. Unknown scene or narration id → `400` (`details.issues[0].path` `sceneId`/`narrationId`). `basePlanVersionId` not current → `409 STALE_VERSION`. The new plan gets the new version's `versionId`/`parentVersionId`, then goes through the same validator as the AI's plans (`validatePlan`); saved even when invalid (`valid: false`, `issues`, `warnings: []`). No AI call; not counted toward the 20. ONE transaction (`packages/db/src/storyboard-edits.ts`). The UI clears `speech`/`display` of a block whose text it changes (so the new words are spoken and shown) and saves each changed block as its own version. TODO F30: post invalidation (no posts yet). Rate: 60/min, shared with D4, D7 and C4.
+
 #### D4. `POST /api/v1/projects/{projectId}/voice` — Switch narrator voice
 Purpose: Male ↔ Female on the storyboard (PRD §9). Creates a `user_edit` version whose only change is `voicePreset`; after a video exists the next generation re-records **all** scenes (PIPELINE_DESIGN §9). Auth: creator. Rate: 60/min.
 Body: `basePlanVersionId` id ✓ · `voiceGender` `VoiceGender` ✓ (must differ from the current one) · `expectedStateVersion` ✓. Same states/effects as D3 (allowed while a post is `scheduled` or `publish_failed`; that post's approval is cancelled immediately); also sets `project.voiceGender`. Only the voice gender can be switched: the project's **language can't be changed** in V1; to get another language the creator creates a new project (C2) (PRD decision #25).
@@ -1359,6 +1367,8 @@ Response `201`: `PlanVersion` with `"versionNumber": 3`, `"source": "user_edit"`
 ```json
 { "error": { "code": "INVALID_INPUT", "message": "This project already uses the male voice.", "details": { "issues": [ { "path": "voiceGender", "message": "unchanged" } ] }, "requestId": "req_01JCXM2K7L8M" } }
 ```
+
+**As built (F19).** Only the voice preset of the project's own language changes (`voicePresetFor(language, gender)`); the same voice → `400 INVALID_INPUT` (`issues[0].message: "unchanged"`). `project.voiceGender` is updated in the same transaction. No AI call; not counted. The chip offers only the two voices of the project's language; ▶ only where a sample file exists (F13).
 
 #### D5. `POST /api/v1/projects/{projectId}/revisions` — Revision chat
 Purpose: plain-language change to the whole storyboard/video or one scene (PRD §6.2, §6.3). Auth: creator. Rate: 20/hour; quota 20 plan+revision requests per project. **Idempotency-Key required.**
@@ -1388,6 +1398,13 @@ Errors: `400 INVALID_INPUT` · `404` · `409 STALE_VERSION` · `409 INVALID_STAT
 { "error": { "code": "QUOTA_EXCEEDED", "message": "This project has reached 20 changes. Start a new project to keep going.", "details": { "quota": "plan_requests_per_project", "limit": 20, "used": 20, "resetsAt": null }, "requestId": "req_01JCXM2N9P0Q" } }
 ```
 
+**As built (F18).**
+- Order: Origin → session → 20/hour → strict body (`message` 3–500 after the idea-text cleaning; `sceneId` exactly when `scope = scene`) → Idempotency-Key → the AI planner and Inngest must be set up (else `500`, nothing saved) → ONE transaction (`packages/db/src/revisions.ts requestRevision`): no job running, `expectedStateVersion`, `basePlanVersionId` = current, the scene exists (`400`), under 20 (`429`), insert the revision (`pending`) and its queued `revise` job (key `rev:{revisionId}`), `activeJobId`, +1 `stateVersion`, the answer saved on the Idempotency-Key record. After the commit: Inngest `revision.requested` (lost → re-sent by the stuck-job rule).
+- **Counting (same rule as F15's Try again):** the request is not counted at acceptance; the job's attempt counts 1 of the 20 when it sends its FIRST Gemini request (atomically, only below 20). D5 itself refuses at 20.
+- The job `revise-plan` runs the same durable steps as `plan-video` (each request counted on the job before it is sent, each answer saved at once, ONE repair, 2 retries, `providerUsage` operation `revise`). The prompt (`packages/pipeline/src/planning/revision.ts`, new: the prototype had none) passes the current storyboard and the change request as delimited data. Progress: "Updating your storyboard…" / "Updating scene N…".
+- Success: a new `ai_revision` version (parent = base) becomes current, no approval, `storyboard_ready`; the revision gets `diff` and a short reply ("Done. I changed scene 3. Now 6 scenes, about 70 seconds."). An answer that changes no scene: revision `rejected` with a reply asking what to change, job `needs_input` (`clarification_needed`), no new version (this is how "ambiguous" ends in V1: no separate clarification schema). Failure: job `failed` (`PROVIDER_BUSY`/`PLAN_INVALID` retryable, `PROVIDER_REJECTED` not), revision `failed`, the storyboard and state unchanged (`project.lastError` is not set; the page shows the job's message). Try again = E2.
+- `stage: video` needs `currentRenderId` (`409 INVALID_STATE` until F23). No `SPEND_CEILING` yet (F27). E3 cancel is not built (the screen has no Cancel button).
+
 #### D6. `GET /api/v1/projects/{projectId}/revisions` — Revision chat history
 Auth: creator. Query: `stage` optional filter, `limit` (20), `cursor`. Sort: `createdAt` desc.
 Success `200` → `{ items: Revision[], nextCursor }`. Errors: `404` · `400 INVALID_INPUT`.
@@ -1403,6 +1420,8 @@ Success `200` → `{ items: Revision[], nextCursor }`. Errors: `404` · `400 INV
 { "error": { "code": "NOT_FOUND", "message": "We couldn't find this project.", "requestId": "req_01JCXM2R1S2T" } }
 ```
 
+**As built (F18).** Query `stage` (`storyboard`|`video`), `limit`, `cursor` (opaque; bound to the `stage` filter). The storyboard page shows the newest 20 (stage `storyboard`) as chat bubbles, oldest first.
+
 #### D7. `POST /api/v1/projects/{projectId}/plan-versions/{planVersionId}/restore` — Undo / restore
 Purpose: **Undo** returns to the previous version (the UI passes `parentVersionId` of the current one) or any older version from history. No data is deleted; the restored version keeps its id and hash, so an **existing approval of that exact version stays valid** (it's the same plan). Auth: creator.
 Body: `expectedStateVersion` ✓. Same allowed states as D3. Effect: `currentPlanVersionId = planVersionId`; `approvedPlanVersionId` = that id if it has an approval, else null; state `storyboard_ready` (approving it again with D8 reuses its existing video if one was already made, see D8 "Re-approval"); a `scheduled` or `publish_failed` post → `approval_invalidated` (+ notification), in the same transaction.
@@ -1413,6 +1432,8 @@ Success `200` → `Project`. Errors: `404` · `409 STALE_VERSION` · `409 INVALI
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This version is already the current one.", "details": { "reason": "already_current" }, "requestId": "req_01JCXM2V3W4X" } }
 ```
+
+**As built (F17).** The project's `voiceGender` follows the restored plan's voice preset (undoing a voice switch switches the chip back). A version of another project → 404. The UI's **↶ Undo** restores `parentVersionId` of the current version (disabled for version 1); the version menu restores any other version.
 
 #### D8. `POST /api/v1/projects/{projectId}/storyboard-approval` — Approve & generate video (approval #1)
 Purpose: the creator approves the **exact** plan version and starts generation. Auth: creator. Rate: 10/hour. **Idempotency-Key required.**
@@ -1444,6 +1465,8 @@ Idempotency-Key: 4e1d7a20-3c9b-4f5e-8a6d-1b2c3d4e5f60
 ```json
 { "error": { "code": "QUOTA_EXCEEDED", "message": "You've reached today's limit of 3 videos. Try again tomorrow.", "details": { "quota": "videos_per_day", "limit": 3, "used": 3, "resetsAt": "2026-11-12T18:30:00.000Z" }, "requestId": "req_01JCXM3A7B8C" } }
 ```
+
+**As built in F20 (until F23): the approval only.** Same checks, in this order: archived → `409 INVALID_STATE`; a job running → `409 JOB_ALREADY_RUNNING`; `expectedStateVersion` → `409 STALE_VERSION`; state not `storyboard_ready`/`generate_failed` → `409 INVALID_STATE`; not the current version → `409 APPROVAL_STALE` (`reason: not_current`); hash differs → `409 APPROVAL_STALE` (`reason: plan_hash_mismatch`); invalid → `422 PLAN_INVALID` (`details.issues`). Then ONE transaction: `storyboardApprovals` (or the existing row of this exact version, e.g. after an undo: unique per version), an `auditLogs` entry `storyboard.approved`, `approvedPlanVersionId` = the version, +1 `stateVersion`, the answer saved on the Idempotency-Key record. **No generate job, no videos/day count, no Inngest event yet**: the answer is `200 { approval, job: null, project }` with the project still `storyboard_ready`. That state (approved current version, no generate job) is exactly what F23 picks up: approving again (or F23's D8) then queues the `generate` job without a second approval row. Approving an already-approved current version returns the same approval (no change). The page then shows "✓ Approved · Version N" and "Making the video comes in a later update." Any later D3/D4/D5/D7 leaves the current version without an approval (D7 back to the approved version restores it).
 
 ### 14.5 Jobs
 
@@ -1478,6 +1501,8 @@ Response `202`: the job with `"state": "queued"`, `"attempt": 2`, `"error": null
 ```json
 { "error": { "code": "INVALID_STATE", "message": "This step can't be retried. Please edit your idea or storyboard instead.", "details": { "jobState": "failed", "retryable": false }, "requestId": "req_01JCXM3G1H2J" } }
 ```
+
+**As built (F18):** also retries a failed `revise` job (a storyboard change request): only while the storyboard is still the version the request was made on (else `409 INVALID_STATE`, `reason: storyboard_changed`, ask again) and under the 20 AI requests (`429`); the project keeps its state, only `activeJobId` is set; the revision goes back to `pending`.
 
 #### E3. `POST /api/v1/jobs/{jobId}/cancel` — Cancel
 Purpose: cancel a queued/running `plan`, `revise`, `generate` or `caption` job (e.g. "cancel the current render" before a revision, PRD §12). Auth: creator. Rate: 30/hour. Body: `{}`.

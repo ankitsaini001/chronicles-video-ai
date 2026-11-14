@@ -644,7 +644,9 @@ paths:
     get:
       operationId: getProject
       summary: Project detail
-      description: C3. Project with activeJob and allowedActions. ETag = stateVersion. Archived projects are still returned.
+      description: |
+        C3. Project with activeJob and allowedActions. ETag = stateVersion. Archived projects are still returned.
+        As built (F16): owner only (404 otherwise); the stuck-job rule is applied first (like C6); ETag "<stateVersion>". allowedActions on a storyboard: edit_storyboard, request_revision (under 20 AI requests), approve_storyboard (until the current version is approved), retry_job (last change request failed and is retryable).
       tags: [Projects]
       security:
         - sessionCookie: []
@@ -897,7 +899,9 @@ paths:
     get:
       operationId: listPlanVersions
       summary: Plan version history
-      description: D1. Sorted by versionNumber desc. Cursor pagination.
+      description: |
+        D1. Sorted by versionNumber desc. Cursor pagination.
+        As built (F17): limit 1-50 (20), cursor = opaque base64url of the last versionNumber; a bad cursor or limit → 400. isApproved = this exact version has a storyboard approval.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -933,7 +937,9 @@ paths:
     get:
       operationId: getPlanVersion
       summary: Full plan version (or `current`)
-      description: D2. The plan exactly as the code contract (packages/pipeline/src/contracts/plan.ts), validation issues/warnings, stats, approval and changed scenes. 404 with details.reason = no_plan_yet before the first plan exists.
+      description: |
+        D2. The plan exactly as the code contract (packages/pipeline/src/contracts/plan.ts), validation issues/warnings, stats, approval and changed scenes. 404 with details.reason = no_plan_yet before the first plan exists.
+        As built (F16): `current` or a version id of this project; no storyboard yet → 404 details.reason no_plan_yet; changedSceneIds = scenes changed or added compared to the parent version ([] for version 1).
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -973,6 +979,7 @@ paths:
         Allowed in storyboard_ready, generate_failed, video_ready, scheduled, publish_failed with no active job. A scheduled
         or publish_failed post's approval is cancelled immediately (approval_invalidated + notification). Rate limit 60/min.
         409: STALE_VERSION, INVALID_STATE, JOB_ALREADY_RUNNING.
+        As built (F17): text cleaned (control/format characters removed, NFC, line breaks and space runs → one space), 1-300; unknown scene/narration id → 400; the new version goes through the same plan validator as AI plans and is saved even when invalid (valid false, issues). No AI call, not counted toward the 20. Posts (F30) don't exist yet, so nothing to invalidate there.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1020,7 +1027,9 @@ paths:
     post:
       operationId: changeVoice
       summary: Switch the narrator voice (new user_edit version)
-      description: D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled or publish_failed; that post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
+      description: |
+        D4. Male ↔ Female; only voicePreset changes. The project language can't be changed in V1 (create a new project; PRD decision #25). **expectedStateVersion required.** Same states and effects as D3 (allowed while scheduled or publish_failed; that post's approval is cancelled immediately). 400 when the gender is unchanged. Rate limit 60/min.
+        As built (F19): only the voice preset of the project's own language changes; same voice → 400 INVALID_INPUT (issues[0].message unchanged). No AI call, not counted.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1081,6 +1090,7 @@ paths:
         + notification), not when the revise job succeeds (PRD §7).
         **Idempotency-Key and expectedStateVersion required.** Rate limit 20/hour; quota 20 plan+revision
         requests per project (429, resetsAt null); 503 SPEND_CEILING.
+        As built (F18): stage `video` needs a currentRenderId (409 INVALID_STATE until F23). The request is NOT counted at acceptance: its revise job counts 1 of the 20 when it sends its first Gemini request (same rule as F15's Try again); D5 refuses at 20. A request whose answer changes no scene ends `rejected` (job `needs_input`, reason clarification_needed) with a reply asking what to change. No SPEND_CEILING yet (F27).
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1135,7 +1145,9 @@ paths:
     get:
       operationId: listRevisions
       summary: Revision chat history
-      description: D6. Sorted by createdAt desc. Optional stage filter. Cursor pagination.
+      description: |
+        D6. Sorted by createdAt desc. Optional stage filter. Cursor pagination.
+        As built (F18): query stage (storyboard|video), limit, cursor (createdAt + _id; bound to the stage filter).
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1175,7 +1187,9 @@ paths:
     post:
       operationId: restorePlanVersion
       summary: Undo / restore an earlier plan version
-      description: D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
+      description: |
+        D7. Makes the version current again (no data deleted). An existing approval of that exact version stays valid. A scheduled or publish_failed post's publish approval is cancelled immediately (approval_invalidated + notification). **expectedStateVersion required.** 409 INVALID_STATE when already current.
+        As built (F17): the project's voiceGender follows the restored plan's voice preset; approvedPlanVersionId = the version when it has a storyboard approval.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1229,6 +1243,7 @@ paths:
         Re-approval: if a generate job for this exact plan version already succeeded (e.g. after undo), no new
         job is started and no quota is used; the answer is 200 with that job, and the project moves to
         video_ready with currentRenderId = the newest ready render of that version.
+        AS BUILT IN F20 (until F23): only the approval part. No generate job, no videos/day count, no Inngest event; the answer is **200** `{ approval, job: null, project }` and the project stays storyboard_ready with approvedPlanVersionId = currentPlanVersionId (F23 starts the job from exactly that state). An existing approval of the same version (e.g. after undo) is reused. Each new approval writes an auditLogs entry `storyboard.approved`.
       tags: [Storyboard]
       security:
         - sessionCookie: []
@@ -1347,6 +1362,7 @@ paths:
         the job sends its first Gemini request, F15); refused with 429 QUOTA_EXCEEDED plan_requests_per_project
         when the project is already at 20. Not for publish jobs: use the post retry. **Idempotency-Key required.**
         409: INVALID_STATE, JOB_ALREADY_RUNNING, APPROVAL_REQUIRED. 503 SPEND_CEILING. Rate limit 30/hour.
+        As built (F18): also retries a failed `revise` job (a change request), while the storyboard is still the version the request was made on (else 409 INVALID_STATE reason storyboard_changed) and under 20 AI requests (429).
       tags: [Jobs]
       security:
         - sessionCookie: []

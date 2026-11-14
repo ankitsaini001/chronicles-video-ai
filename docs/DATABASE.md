@@ -490,12 +490,12 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `stages` | list of `{ name, status, startedAt, endedAt, attempts, error }` | One entry per step; status `pending` \| `running` \| `succeeded` \| `failed` \| `skipped` \| `cancelled` | Yes |
 | `progress` | `{ stage, percent 0–100, message }` | What the progress bar shows | Yes |
 | `error` | `{ code, message, retryable }`? | Why it failed; `retryable` → show **Retry** | No |
-| `needsInput` | `{ reason, message, sceneId }`? | When the creator must change something (e.g. video longer than 90 s) | No |
+| `needsInput` | `{ reason, message, sceneId }`? | When the creator must change something (e.g. video longer than 90 s). F18: a revise job whose answer changed nothing (`clarification_needed`) | No |
 | `result` | `{ planVersionId?, renderId?, revisionId?, postId? }`? | What the job produced | No |
 | `idempotencyKey` | string, unique, **required** | Stops duplicate jobs from double-clicks. One format per job type (Q6): `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. Also used as the Inngest event id of the first attempt | Yes |
-| `inputHash` | string (64 hex) | **Plan jobs (F15):** sha256 of the idea the job plans from (type, text, picked brainstorm choice, language, voice). An E2 retry after an Edit idea updates it and the key | Plan |
+| `inputHash` | string (64 hex) | **Plan jobs (F15):** sha256 of the idea the job plans from (type, text, picked brainstorm choice, language, voice). An E2 retry after an Edit idea updates it and the key. **Revise jobs (F18):** sha256 of base version, scope, scene and message | Plan, revise |
 | `event` | `{ id, sentAt, lastTriedAt }` | **F15:** the Inngest event that starts the current attempt (`id` = the key, or `{jobId}:retry:{attempt}`), when it was handed to Inngest and when that was last tried (for the stuck-job rule, API.md §8.5) | Yes |
-| `planner` | `{ attempt, inputHash, planVersionId, requests, answers[] }`? | **Plan jobs (F15): the checkpoint.** `requests` = Gemini requests made in this attempt (counted before sending, at most 4); `answers` = each answer as soon as it arrives `{ n (1 first, 2 repair), text, model, finishReason, usage, valid, issueCount }`; `planVersionId` = the id the saved version gets. A re-run step or a retry for the same idea reuses a saved answer instead of asking again | Plan |
+| `planner` | `{ attempt, inputHash, planVersionId, requests, answers[] }`? | **Plan and revise jobs (F15, F18): the checkpoint.** `requests` = Gemini requests made in this attempt (counted before sending, at most 4); `answers` = each answer as soon as it arrives `{ n (1 first, 2 repair), text, model, finishReason, usage, valid, issueCount }`; `planVersionId` = the id the saved version gets. A re-run step or a retry for the same idea reuses a saved answer instead of asking again | Plan |
 | `queuedAt` | date | When the job last became `queued` (C2 or E2), for the stuck-job rule | Yes |
 | `inngestRunId` | string? | Link to the run in the Inngest dashboard (for debugging) | No |
 | `cancelRequestedAt` | date? | Set when the creator presses Cancel; the job stops between steps | No |
@@ -552,6 +552,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - `plan.ownerId`, `plan.projectId`, `plan.versionId` are set by code, never by the AI.
 - A copy of the plan is also written to R2 (`users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json`, ARCHITECTURE §9) for the render step; MongoDB is the record the app reads. **Not yet in F15** (R2 is set up in F22; the copy is written when the render step needs it).
 - **F15:** the AI's first plan is saved only when it is valid (an answer still invalid after the one repair fails the job with `PLAN_INVALID`, PRD decision #24b); `parentVersionId` is `null` for `ai_plan`; `versionNumber` = the project's highest + 1, in the same transaction that points the project at it. **Created in F15** (`packages/db/src/plan-versions.ts`).
+- **F17, F19 (`user_edit`):** a narration edit (D3) or voice switch (D4) copies the current version's plan with the new `versionId`/`parentVersionId`, applies the change, runs the same plan validator as the AI's plans and saves it in ONE transaction with the project's pointers (`currentPlanVersionId`, `approvedPlanVersionId = null`, `stateVersion + 1`, and `voiceGender` for D4). Saved even when invalid. `plannerUsage: null`. Undo/restore (D7) adds no version. Code: `packages/db/src/storyboard-edits.ts`.
+- **F18 (`ai_revision`):** saved by the `revise` job only when valid and only when at least one scene changed; `parentVersionId` = the version the request was made on. Code: `packages/db/src/revisions.ts`.
 
 **Indexes**
 - unique `{ projectId: 1, versionNumber: -1 }`: no two "version 3"s in one project; also lists versions newest first.
@@ -598,6 +600,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 
 **Rules:** each accepted revision counts toward the **20 plan + revision requests per project** (with the first plan and each plan retry after an Edit idea). A revision can't change the project language.
 
+**As built (F18):** D5 inserts the revision (`pending`) and its queued `revise` job in ONE transaction with the project's `activeJobId`. The 20-request count happens when the job's attempt sends its first Gemini request (`reservePlanRequest`, as for F15's Try again), not at acceptance; D5 refuses at 20. The job finishes in ONE transaction: `succeeded` (with `resultPlanVersionId`, `diff`, and a short `assistantReply` built by code, e.g. "Done. I changed scene 3. Now 6 scenes, about 70 seconds."), `rejected` (the answer changed no scene: `assistantReply` asks what to change, no new version, job `needs_input`), or `failed` (the storyboard stays as it was; E2 Try again puts it back to `pending`). The language stays the project's (code-owned plan field). Code: `packages/db/src/revisions.ts`. **Created in F18.** Index: `npm run db -- indexes --feature F18 --apply`.
+
 **Indexes:** `{ projectId: 1, createdAt: -1 }`: the chat history, newest first.
 
 #### 4.12 `storyboardApprovals` (insert-only)
@@ -626,6 +630,8 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `approvedAt` | date | When | Yes |
 
 **Rules:** created **only** by the signed-in creator through D8. Background jobs, admins and the AI can never create one. Any new storyboard version has no approval, so it must be approved again.
+
+**As built (F20):** D8 checks (current version, same `planHash`, `validation.valid`, no job, `stateVersion`) and, in ONE transaction, inserts the approval (or reuses this exact version's existing one, e.g. after an undo), writes an `auditLogs` entry (`storyboard.approved`) and sets `projects.approvedPlanVersionId`. **No `generate` job and no `usageCounters` videos +1 until F23**: the project stays `storyboard_ready` with `approvedPlanVersionId === currentPlanVersionId`, the state F23's D8 continues from (it then creates the job without a second approval). Code: `packages/db/src/storyboard-approvals.ts`. **Created in F20.** Index: `npm run db -- indexes --feature F20 --apply`.
 
 **Indexes:** unique `planVersionId` = a version can be approved only once (approving it again reuses the same approval).
 
@@ -772,6 +778,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `at` | date | When | Yes |
 
 **Rules:** append-only. No automatic expiry in V1. On account deletion the entries are **anonymized**, not deleted (§6.7).
+**As built (F20):** the first entry type is `storyboard.approved` (`subject: { type: "planVersion", id }`, `data: { projectId, approvalId }`), written in the D8 transaction. Created in F20.
 
 **Indexes:** none in V1 (Q8). Nothing on screen searches it yet; add one when the admin page needs it.
 
@@ -1461,8 +1468,8 @@ A collection appears in Atlas the first time something is written to it (or when
 | F14 | `providerUsage` (brainstorm calls) |
 | F15 | `jobs`, `planVersions` (and `providerUsage` rows with `operation: "plan"`). Indexes: `npm run db -- indexes --feature F15 --apply` |
 | F17, F19 | More `planVersions` (`user_edit`) |
-| F18 | `revisions` |
-| F20 | `storyboardApprovals`, `auditLogs` |
+| F18 | `revisions`; `jobs` of type `revise`; `providerUsage` rows with `operation: "revise"`. Indexes: `npm run db -- indexes --feature F18 --apply` |
+| F20 | `storyboardApprovals`, `auditLogs` (no generate job and no videos counter yet: F23). Indexes: `npm run db -- indexes --feature F20 --apply` |
 | F21 | Archived projects (no new collection) |
 | F22 | Nothing in MongoDB: your R2 bucket |
 | F23 | `speechArtifacts`, `renders` (files in R2) |

@@ -59,11 +59,11 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ✅ Done |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ✅ Done |
 | F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ✅ Done |
-| F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | 🔄 In progress |
-| F17 | [Edit narration + versions + undo](F17-narration-edit-undo.md) | F16 | 🔄 In progress |
-| F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | 🔄 In progress |
-| F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | 🔄 In progress |
-| F20 | [Approve storyboard (approval #1)](F20-approve-storyboard.md) | F18 | 🔄 In progress |
+| F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | 🧪 Testing |
+| F17 | [Edit narration + versions + undo](F17-narration-edit-undo.md) | F16 | 🧪 Testing |
+| F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | 🧪 Testing |
+| F19 | [Switch voice on the storyboard](F19-voice-switch.md) | F16 | 🧪 Testing |
+| F20 | [Approve storyboard (approval #1)](F20-approve-storyboard.md) | F18 | 🧪 Testing |
 | F21 | [My videos: project cards and tabs](F21-dashboard-project-list.md) | F15 | ⬜ Not started |
 
 ### A4 · Generate and review video
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F16 (storyboard screen, read-only). Phases A1 and A2 done; F12–F15 done.
+**Next up:** the founder tests F16–F20 together (🧪), after code review. Phases A1 and A2 done; F12–F15 done.
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
