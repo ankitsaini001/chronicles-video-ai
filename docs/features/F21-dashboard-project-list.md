@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing |
+| **Status** | ✅ Done (code review fixed; e2e F15, F16–F20, F21 passed; founder tested 2026-11-14) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F15 |
 | **Design** | Stitch: ByteReel — My videos |
