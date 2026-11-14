@@ -694,6 +694,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - The **20 plan + revision requests per project** are not here: they are `projects.planRequestCount` (4.8), because they never reset.
 
 **Indexes:** unique `{ ownerId: 1, kind: 1, period: 1 }`; TTL on `expiresAt` (`expireAfterSeconds: 0`).
+**Warning:** the daily limits (projects and brainstorms) rely on the unique index. Without it, two first requests of the day can create two counters and each count from 0, so the limit can be passed. Apply the F12 indexes before using the app (`npm run db -- indexes --feature F12 --apply`).
 
 #### 4.15 `providerUsage`
 **Purpose:** a record of every paid call: Gemini (AI planner), ElevenLabs (voice), Vercel Sandbox (rendering), Meta (free, logged for completeness). It feeds the spend ceilings and the admin "spend" page, and later tells us the real cost per video.
@@ -736,7 +737,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `latencyMs` | int? | From sending the request to its end (null while `reserved`) (F14) | Yes (null while reserved) |
 | `at` | date | When | Yes |
 
-**Rules:** written **before** the call (`status: reserved`) and finalized after (`final` or `failed`), so a crash can't hide spending: a `reserved` row still counts toward the ceilings. **One row per provider request**: each retry and each repair is its own row. **Never stores what the creator typed** (no subject, prompt or answer text). Kept 12 months (ARCHITECTURE §22; see Q10 for account deletion). **Created in F14** (C7 brainstorm calls; `packages/db/src/provider-usage.ts`).
+**Rules:** written **before** the call (`status: reserved`) and finalized after (`final` or `failed`), so a crash can't hide spending: a `reserved` row still counts toward the ceilings. **One row per provider request**: each retry and each repair is its own row. **Never stores what the creator typed** (no subject, prompt or answer text). Kept 12 months (ARCHITECTURE §22; see Q10 for account deletion). **TODO F27** (spend ceilings): a row left `reserved` (the server stopped mid-call) counts toward the ceilings forever; F27 adds a cleanup that marks `reserved` rows older than e.g. 15 minutes as `failed` (outcome `abandoned`), keeping their estimate. **Created in F14** (C7 brainstorm calls; `packages/db/src/provider-usage.ts`).
 
 **Indexes:** `{ at: -1 }` (totals by time), `{ ownerId: 1, at: -1 }` (one user's usage), `{ provider: 1, at: -1 }` (per service).
 
