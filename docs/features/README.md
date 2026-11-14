@@ -58,7 +58,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F12 | [Step 1 Idea: create a project (no AI yet)](F12-idea-create-project.md) | F11 | ✅ Done |
 | F13 | [Voice preview samples](F13-voice-preview.md) | F12 | ✅ Done |
 | F14 | [Brainstorm with AI](F14-brainstorm.md) | F12 | ✅ Done |
-| F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | 🧪 Testing |
+| F15 | [Generate the storyboard with AI](F15-generate-storyboard.md) | F12 | ✅ Done |
 | F16 | [Step 2: storyboard screen (read-only)](F16-storyboard-view.md) | F15 | ⬜ Not started |
 | F17 | [Edit narration + versions + undo](F17-narration-edit-undo.md) | F16 | ⬜ Not started |
 | F18 | [Revision chat on the storyboard](F18-storyboard-revision-chat.md) | F17 | ⬜ Not started |
@@ -98,7 +98,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** F15 is being planned (AI storyboard). Phases A1 and A2 done; F12–F14 done.
+**Next up:** F16 (storyboard screen, read-only). Phases A1 and A2 done; F12–F15 done.
 
 ## Open decisions (must be settled before the named feature)
 - **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.

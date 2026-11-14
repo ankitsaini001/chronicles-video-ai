@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (waiting for code review and the founder's test) |
+| **Status** | ✅ Done (code review fixed; founder tested 2026-11-14: real storyboard, page updated by itself, waiting job started once the runner was on, old project, phone width) |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F12 |
 | **Design** | — |
