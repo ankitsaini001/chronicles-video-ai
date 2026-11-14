@@ -17,6 +17,11 @@ import { buildBrainstormRepairPrompt, buildBrainstormSystemInstruction, buildBra
  */
 
 export const BRAINSTORM_TIMEOUT_MS = 30_000;
+/**
+ * A retry or the repair starts only if at least this much of the 30 s is left: a request with less
+ * time would just be cut off (and logged as a wasted call). The first request always starts.
+ */
+export const BRAINSTORM_MIN_ATTEMPT_MS = 5_000;
 /** Initial answer + one repair. */
 export const BRAINSTORM_MAX_ANSWERS = 2;
 /** Retries per answer for busy/network errors, with short waits (the whole call has 30 s). */
@@ -96,6 +101,8 @@ export interface BrainstormInput {
   usage?: BrainstormUsageSink;
   timeoutMs?: number;
   retry?: { maxRetries?: number; backoffMs?: readonly number[]; maxWaitMs?: number };
+  /** Least time left for a retry or the repair (default BRAINSTORM_MIN_ATTEMPT_MS). */
+  minAttemptMs?: number;
   /** Tests: clock and sleep. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -124,6 +131,9 @@ export async function brainstormIdeas(input: BrainstormInput): Promise<Brainstor
   const now = input.now ?? Date.now;
   const timeoutMs = input.timeoutMs ?? BRAINSTORM_TIMEOUT_MS;
   const deadline = now() + timeoutMs;
+  const minAttemptMs = input.minAttemptMs ?? BRAINSTORM_MIN_ATTEMPT_MS;
+  /** True once the time is up, or too little is left for another request. */
+  const outOfTime = () => controller.signal.aborted || deadline - now() < minAttemptMs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const systemInstruction = buildBrainstormSystemInstruction(language);
@@ -142,8 +152,9 @@ export async function brainstormIdeas(input: BrainstormInput): Promise<Brainstor
 
   /** One request to the provider, logged before and after. */
   const callOnce = async (): Promise<{ response: PlannerResponse; evaluation: BrainstormEvaluation }> => {
-    if (controller.signal.aborted) {
-      throw new ProviderError({ provider: provider.name, kind: "transient", message: "brainstorm time limit reached" });
+    // The first request always starts; a retry or the repair only with enough time left.
+    if (controller.signal.aborted || (calls > 0 && outOfTime())) {
+      throw new ProviderError({ provider: provider.name, kind: "transient", message: "brainstorm time limit reached (or too little time left for another request)" });
     }
     const handle = usage ? await usage.begin() : null;
     calls++;
@@ -169,16 +180,18 @@ export async function brainstormIdeas(input: BrainstormInput): Promise<Brainstor
           backoffMs: input.retry?.backoffMs ?? BRAINSTORM_RETRY.backoffMs,
           maxWaitMs: input.retry?.maxWaitMs ?? BRAINSTORM_RETRY.maxWaitMs,
           deadline,
+          minAttemptMs,
           now,
           ...(input.sleep ? { sleep: input.sleep } : {}),
         });
       } catch (error) {
-        throw toBrainstormError(error, controller.signal.aborted);
+        throw toBrainstormError(error, outOfTime());
       }
       const { response, evaluation } = result;
       if (evaluation.kind === "ok") return { ideas: evaluation.ideas, model: response.model, calls, repaired: answer > 1 };
       if (evaluation.kind === "unsuitable") throw new BrainstormError("rejected", "unsuitable", "The model found no safe educational video for this subject.");
-      if (answer === BRAINSTORM_MAX_ANSWERS || controller.signal.aborted) break;
+      if (answer === BRAINSTORM_MAX_ANSWERS) break;
+      if (outOfTime()) throw new BrainstormError("busy", "timeout", "Too little time left for the repair request.");
       turns.push({ role: "model", text: response.text.trim() || "(empty answer)" }, { role: "user", text: buildBrainstormRepairPrompt(evaluation.problems, language) });
     }
     throw new BrainstormError("busy", "invalid_output", "No valid brainstorm answer after the repair attempt.");

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   BRAINSTORM_IDEA_COUNT,
+  BRAINSTORM_MIN_ATTEMPT_MS,
   BRAINSTORM_PROMPT_VERSION,
   BRAINSTORM_RETRY,
   BRAINSTORM_TIMEOUT_MS,
@@ -244,6 +245,45 @@ describe("brainstormIdeas (runner)", () => {
     expect(usage.events).toEqual(["begin 1", "end 1 failed timeout"]);
   });
 
+  it("no retry when less than 5 s would be left after the wait (slow busy answer)", async () => {
+    let t = 0;
+    const slowBusy = async () => {
+      t += 24_500; // the first request took 24.5 s, then 503
+      throw busy(503);
+    };
+    const provider = new ScriptedProvider([slowBusy, answer()]);
+    const usage = recordingUsage();
+    const error = await brainstormIdeas({ provider, subject: "Indian monsoon", language: "en", usage: usage.sink, now: () => t, sleep: async (ms) => void (t += ms) }).catch((e) => e);
+    expect(BRAINSTORM_MIN_ATTEMPT_MS).toBe(5_000);
+    expect(error).toMatchObject({ reason: "busy" });
+    expect(provider.requests).toHaveLength(1); // 24.5 + 1 + 5 >= 30: not retried
+    expect(usage.events).toEqual(["begin 1", "end 1 failed busy"]);
+  });
+
+  it("a retry still happens when enough time is left", async () => {
+    let t = 0;
+    const quickBusy = async () => {
+      t += 20_000;
+      throw busy(503);
+    };
+    const provider = new ScriptedProvider([quickBusy, answer()]);
+    const r = await brainstormIdeas({ provider, subject: "Indian monsoon", language: "en", now: () => t, sleep: async (ms) => void (t += ms) });
+    expect(r.calls).toBe(2); // 20 + 1 + 5 < 30
+  });
+
+  it("no repair when less than 5 s is left after an invalid answer", async () => {
+    let t = 0;
+    const slowInvalid = async (): Promise<PlannerResponse> => {
+      t += 26_000;
+      return { text: answer(IDEAS_EN.slice(0, 4)), model: "m", finishReason: "STOP", usage: null, retries: 0, durationMs: 26_000 };
+    };
+    const provider = new ScriptedProvider([slowInvalid, answer()]);
+    const usage = recordingUsage();
+    await expect(brainstormIdeas({ provider, subject: "Indian monsoon", language: "en", usage: usage.sink, now: () => t, sleep: noSleep })).rejects.toMatchObject({ reason: "busy", detail: "timeout" });
+    expect(provider.requests).toHaveLength(1);
+    expect(usage.events).toEqual(["begin 1", "end 1 final invalid_output"]);
+  });
+
   it("the whole brainstorm has 30 s by default", () => {
     expect(BRAINSTORM_TIMEOUT_MS).toBe(30_000);
   });
@@ -281,6 +321,10 @@ describe("withRetries deadline (providers/retry.ts)", () => {
     t = 1_000;
     await expect(withRetries(call, { maxRetries: 2, backoffMs: [100], deadline: 1_400, now: () => t, sleep: async (ms) => void (t += ms) })).rejects.toBeTruthy();
     expect(call).toHaveBeenCalledTimes(3);
+    call.mockClear();
+    t = 1_000;
+    await expect(withRetries(call, { maxRetries: 2, backoffMs: [100], deadline: 1_400, minAttemptMs: 300, now: () => t, sleep: async (ms) => void (t += ms) })).rejects.toBeTruthy();
+    expect(call).toHaveBeenCalledTimes(1); // 1000 + 100 + 300 >= 1400
   });
 });
 

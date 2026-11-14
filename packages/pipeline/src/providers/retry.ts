@@ -20,6 +20,11 @@ export interface RetryOptions {
    * short synchronous calls with a fixed overall timeout (C7 brainstorm: 30 s).
    */
   deadline?: number;
+  /**
+   * With `deadline`: the least time a retry must still have after its wait (default 0). A retry
+   * that would start with less is not made (C7: 5 s, too little for a useful answer).
+   */
+  minAttemptMs?: number;
   /** Clock for `deadline` (tests). Default Date.now. */
   now?: () => number;
   onRetry?: (info: { attempt: number; waitMs: number; error: ProviderError }) => void;
@@ -52,7 +57,7 @@ export async function withRetries<T>(call: () => Promise<T>, options: RetryOptio
           message: `${error.message} (the provider asked to wait ${Math.ceil(waitMs / 1000)} s, longer than the ${maxWaitMs / 1000} s we wait automatically)`,
         });
       }
-      if (options.deadline !== undefined && now() + waitMs >= options.deadline) throw error;
+      if (options.deadline !== undefined && now() + waitMs + (options.minAttemptMs ?? 0) >= options.deadline) throw error;
       options.onRetry?.({ attempt, waitMs, error });
       await sleep(waitMs);
     }
