@@ -39,6 +39,12 @@ export type ProjectState =
 
 export type ProjectStep = "idea" | "storyboard" | "video" | "publish";
 
+/**
+ * States in which the storyboard may be changed (API.md D3–D7): edit, voice, revision, undo.
+ * Anything but a running job; a change after a video exists makes a new version to approve again.
+ */
+export const STORYBOARD_EDIT_STATES: readonly ProjectState[] = ["storyboard_ready", "generate_failed", "video_ready", "scheduled", "publish_failed"];
+
 /** Idea text limits per input type (API.md C2, DATABASE.md §4.8), counted after trim + NFC. */
 export const IDEA_LIMITS = {
   topic: { min: IDEA_MIN_CHARS, max: IDEA_TOPIC_MAX_CHARS },
@@ -165,18 +171,24 @@ export type ProjectResource = {
 const hexOrNull = (id: ObjectId | null) => (id ? id.toHexString() : null);
 
 /** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
-export type AllowedAction = "edit_idea" | "retry_job";
+export type AllowedAction = "edit_idea" | "retry_job" | "edit_storyboard";
 
 /**
- * What the creator may do now (API.md §11.1, "the server owns state"). F15: after a failed
- * storyboard, `edit_idea` (C4), and `retry_job` (E2) while the last plan job may be retried and the
- * project is under its 20 storyboard requests. Rename and archive arrive with F21, cancel with E3.
+ * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs.
+ * - F15, after a failed storyboard: `edit_idea` (C4), and `retry_job` (E2) while the last plan job
+ *   may be retried and the project is under its 20 storyboard requests.
+ * - F17, with a storyboard: `edit_storyboard` (D3 narration edit, D4 voice, D7 undo/restore).
+ * Rename and archive arrive with F21.
  */
 export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined): AllowedAction[] {
-  if (doc.state !== "plan_failed" || doc.activeJobId) return [];
-  const actions: AllowedAction[] = ["edit_idea"];
-  if (latestPlanJob && doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject && canRetryPlanJob(latestPlanJob, planInputHash(doc))) actions.push("retry_job");
-  return actions;
+  if (doc.activeJobId) return [];
+  if (doc.state === "plan_failed") {
+    const actions: AllowedAction[] = ["edit_idea"];
+    if (latestPlanJob && doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject && canRetryPlanJob(latestPlanJob, planInputHash(doc))) actions.push("retry_job");
+    return actions;
+  }
+  if (STORYBOARD_EDIT_STATES.includes(doc.state) && doc.currentPlanVersionId) return ["edit_storyboard"];
+  return [];
 }
 
 export interface ProjectRelated {

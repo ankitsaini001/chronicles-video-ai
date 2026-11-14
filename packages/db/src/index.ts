@@ -78,6 +78,7 @@ export {
   PROJECT_SCHEMA_VERSION,
   ProjectQuotaExceededError,
   PROJECTS_COLLECTION,
+  STORYBOARD_EDIT_STATES,
   TITLE_MAX,
   titleFromIdea,
   projectTitle,
@@ -210,3 +211,17 @@ export {
   type StuckCheck,
   type ValidPlanToSave,
 } from "./plan-jobs";
+export {
+  assertStoryboardEditable,
+  cleanNarrationText,
+  NARRATION_MAX_CHARS,
+  NarrationEditBodySchema,
+  ObjectIdString,
+  restorePlanVersion,
+  RestoreBodySchema,
+  saveUserEditVersion,
+  voiceGenderOfPreset,
+  type BuiltPlan,
+  type NarrationEditBody,
+  type RestoreBody,
+} from "./storyboard-edits";

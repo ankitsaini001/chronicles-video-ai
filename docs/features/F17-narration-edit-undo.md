@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress |
 | **Phase** | A3 · Idea → Storyboard |
 | **Depends on** | F16 |
 | **Design** | — |
