@@ -1,46 +1,63 @@
+import { getDb, hasLibraryProjects, listProjects, PAGE_LIMITS, readDbConfig, type LibraryTab } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Button, cn, PlayIcon } from "@/components/ui";
+import { FirstVisit } from "@/components/dashboard/FirstVisit";
+import { ProjectList } from "@/components/dashboard/ProjectList";
+import { Button, cn } from "@/components/ui";
+import { getMe } from "@/lib/account/me";
 import { requireUser } from "@/lib/auth/session";
 
-// "My videos" (Stitch "ByteReel — My videos (empty)"). Sign-up and log in land here.
-// F11 shows the first-visit empty state; the project cards arrive in F21.
+// "My videos" (F21; Stitch "My videos" and "My videos (empty)"). Sign-up and log in land here.
+// - No projects in My videos yet (none, or all archived): the first-visit page (how it works, your
+//   limits, "Create your first video"). No tabs there: there is nothing to filter.
+// - Otherwise: "+ New video", the tabs and the cards of the chosen tab, newest-updated first. The
+//   first page comes from the same function as C1 (GET /api/v1/projects); "Load more" calls C1.
+//   An empty tab gets a short friendly line.
 // The tabs are links (?tab=ready …), so they work without JavaScript, survive a reload and the
-// browser's Back button. An unknown tab shows Drafts.
-// One primary button per screen (BRAND §2): the design's extra "+ New video" button next to the
-// title is left out while there are no videos; it comes with the cards in F21.
+// browser's Back button. An unknown tab shows Drafts. There is no Archived tab (founder, F21).
 
 export const metadata: Metadata = { title: "My videos" };
 
 const DASHBOARD_TABS = [
-  { id: "drafts", label: "Drafts", title: "No videos yet", text: "Turn any topic into a ready-to-post Reel in a few minutes." },
-  { id: "ready", label: "Ready", title: "Nothing ready yet", text: "Finished videos you haven't posted yet will show up here." },
-  { id: "scheduled", label: "Scheduled", title: "Nothing scheduled", text: "Videos you schedule for Instagram will show up here." },
-  { id: "published", label: "Published", title: "Nothing published yet", text: "Videos you post to Instagram will show up here." },
-] as const;
+  { id: "drafts", label: "Drafts", empty: "No drafts right now. Start a new video any time." },
+  { id: "ready", label: "Ready", empty: "Nothing ready yet. Finished videos you haven't posted will show up here." },
+  { id: "scheduled", label: "Scheduled", empty: "Nothing scheduled. Videos you schedule for Instagram will show up here." },
+  { id: "published", label: "Published", empty: "Nothing published yet. Videos you post to Instagram will show up here." },
+] as const satisfies readonly { id: LibraryTab; label: string; empty: string }[];
 
-type TabId = (typeof DASHBOARD_TABS)[number]["id"];
+type DashboardTab = (typeof DASHBOARD_TABS)[number];
 
-function pickTab(value: string | string[] | undefined): (typeof DASHBOARD_TABS)[number] {
+function pickTab(value: string | string[] | undefined): DashboardTab {
   const wanted = Array.isArray(value) ? value[0] : value;
   return DASHBOARD_TABS.find((t) => t.id === wanted) ?? DASHBOARD_TABS[0];
 }
 
-function tabHref(id: TabId): string {
+function tabHref(id: LibraryTab): string {
   return id === "drafts" ? "/dashboard" : `/dashboard?tab=${id}`;
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   // The layout checks too, but layouts don't re-run on every navigation (see app/(app)/layout.tsx).
-  await requireUser();
+  const user = await requireUser();
   const tab = pickTab((await searchParams).tab);
+  const settings = readDbConfig(process.env);
+  if (!settings.ok) throw new Error(settings.problems.join(" "));
+  const db = getDb(settings.config);
+  const [hasProjects, page] = await Promise.all([hasLibraryProjects(db, user.id), listProjects(db, user.id, { tab: tab.id, limit: PAGE_LIMITS.default, cursor: null })]);
+
+  if (!hasProjects) return <FirstVisit me={await getMe(user)} />;
 
   return (
     <>
-      <h1 className="mb-6 font-display text-3xl font-extrabold tracking-tight text-text sm:text-4xl">My videos</h1>
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-text sm:text-4xl">My videos</h1>
+        <Button href="/projects/new" className="shrink-0">
+          + New video
+        </Button>
+      </div>
 
       {/* No scroll box here: the four tabs fit even at 320px (tighter padding and text on phones). */}
-      <nav aria-label="Filter videos" className="mb-10 border-b border-line sm:mb-12">
+      <nav aria-label="Filter videos" className="mb-6 border-b border-line sm:mb-8">
         <ul className="flex items-center justify-between sm:justify-start sm:gap-2">
           {DASHBOARD_TABS.map((t) => {
             const current = t.id === tab.id;
@@ -63,25 +80,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </ul>
       </nav>
 
-      <section aria-labelledby="empty-title" className="mx-auto flex max-w-lg flex-1 flex-col items-center justify-center pb-8 text-center">
-        {/* A phone-shaped (9:16) outline with a glowing play button. */}
-        <div
-          aria-hidden="true"
-          className="mb-8 flex h-64 w-36 items-center justify-center rounded-[28px] border-2 border-dashed border-amber/25 bg-surface shadow-[0_0_50px_#f5a5241f] sm:h-80 sm:w-44"
-        >
-          <div className="relative flex items-center justify-center">
-            <div className="absolute inset-0 rounded-full bg-amber/20 blur-xl" />
-            <div className="relative flex size-16 items-center justify-center rounded-full border border-amber/40 bg-surface-2 shadow-[0_0_25px_#f5a52459]">
-              <PlayIcon className="ml-0.5 size-6 text-amber" />
-            </div>
-          </div>
-        </div>
-        <h2 id="empty-title" className="mb-3 font-display text-2xl font-bold text-text">
-          {tab.title}
-        </h2>
-        <p className="mb-8 max-w-sm text-base leading-relaxed text-muted">{tab.text}</p>
-        <Button href="/projects/new">Create your first reel</Button>
-      </section>
+      <ProjectList key={tab.id} tab={tab.id} initialItems={page.items} initialCursor={page.nextCursor} now={new Date().toISOString()} timeZone={user.timezone} emptyText={tab.empty} />
     </>
   );
 }
