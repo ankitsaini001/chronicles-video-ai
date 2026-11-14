@@ -1,4 +1,4 @@
-import { allowedActionsFor, currentStepOf, getDb, IDEA_LIMITS, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
+import { allowedActionsFor, currentStepOf, displayStateOf, getDb, IDEA_LIMITS, readDbConfig, USAGE_LIMITS } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -16,6 +16,8 @@ import { loadProjectWithJobs } from "@/lib/plan/jobs";
 // Leaving and coming back keeps the progress: the job runs on the server (Inngest) and this page
 // reads it again. Only the owner sees it: another user's project, a missing one and a malformed id
 // all get the same 404 page, so nobody can tell whether a project exists (ARCHITECTURE §10.3).
+// An archived project (F21) still opens from a saved link, on the step it was on, read-only: no
+// Try again / Edit idea, and a note that it is archived.
 
 export const metadata: Metadata = { title: "Your project" };
 
@@ -40,11 +42,18 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const loaded = await loadProjectWithJobs(db, user.id, id);
   if (!loaded) notFound();
   const { project, activeJob, latestPlanJob } = loaded;
-  if (currentStepOf(project.state) === "storyboard") redirect(`/projects/${project._id.toHexString()}/storyboard`);
+  const step = currentStepOf(displayStateOf(project));
+  if (step === "storyboard") redirect(`/projects/${project._id.toHexString()}/storyboard`);
   const jobState = project.state === "planning" || project.state === "plan_failed" ? project.state : null;
+  const archived = project.state === "archived";
 
-  const eyebrow =
-    project.state === "planning" ? "Writing storyboard" : project.state === "plan_failed" ? "Storyboard not ready" : "Idea saved";
+  const eyebrow = archived
+    ? "Archived"
+    : project.state === "planning"
+      ? "Writing storyboard"
+      : project.state === "plan_failed"
+        ? "Storyboard not ready"
+        : "Idea saved";
 
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-col">
@@ -52,10 +61,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         <Link href="/dashboard" className="self-start text-xs font-medium text-muted transition-colors hover:text-text sm:absolute sm:left-0 sm:self-center">
           ← My videos
         </Link>
-        <ProjectStepper current={currentStepOf(project.state)} />
+        <ProjectStepper current={step} />
       </div>
       <section aria-labelledby="project-title" className="rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-10">
-        <p className={`mb-2 font-mono text-xs uppercase tracking-wider ${project.state === "plan_failed" ? "text-danger" : "text-success"}`}>{eyebrow}</p>
+        <p className={`mb-2 font-mono text-xs uppercase tracking-wider ${archived ? "text-muted" : project.state === "plan_failed" ? "text-danger" : "text-success"}`}>{eyebrow}</p>
         <h1 id="project-title" className="mb-6 font-display text-2xl font-bold tracking-tight break-words text-text sm:text-[28px]">
           {project.title}
         </h1>
@@ -99,6 +108,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           </div>
         </dl>
 
+        {archived && (
+          <p className="mb-8 rounded-2xl border border-line bg-surface-2 px-4 py-3 text-sm text-text">
+            This video is archived. It no longer shows in My videos and can&apos;t be changed.
+          </p>
+        )}
         {project.state === "draft" && (
           <p className="mb-8 rounded-2xl border border-line bg-progress-bg px-4 py-3 text-sm text-text">
             This idea was saved before storyboards could be made. To get a storyboard, create a new project with it.

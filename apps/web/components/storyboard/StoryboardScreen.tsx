@@ -318,7 +318,9 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
           <p className="hidden font-mono text-xs tracking-wide text-muted sm:block">
             ≈ {seconds}s · {version.stats.sceneCount} scenes · Version {version.versionNumber}
           </p>
-          {approved ? (
+          {project.state === "archived" ? (
+            <p className="ml-auto text-sm text-muted">Archived. This storyboard is read-only.</p>
+          ) : approved ? (
             <p className="ml-auto inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
               <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
             </p>

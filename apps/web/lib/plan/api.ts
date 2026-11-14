@@ -1,4 +1,4 @@
-import { isTerminal, POLL_AFTER_MS, ProjectActionError, toJobResource, toProjectResource, currentStepOf, type JobResource, type ProjectResource } from "@bytereel/db";
+import { isTerminal, POLL_AFTER_MS, ProjectActionError, toJobResource, toProjectResource, currentStepOf, displayStateOf, type JobResource, type ProjectResource } from "@bytereel/db";
 import { getInngest } from "../../inngest/client";
 import { ApiProblem, type ApiErrorCode } from "../api/v1";
 import { plannerProviderFromEnv } from "./provider";
@@ -63,7 +63,7 @@ export function toProjectStatus({ project, activeJob, latestPlanJob, latestRevis
   return {
     projectId: resource.id,
     state: project.state,
-    currentStep: currentStepOf(project.state),
+    currentStep: currentStepOf(displayStateOf(project)),
     stateVersion: project.stateVersion,
     currentPlanVersionId: resource.currentPlanVersionId,
     currentRenderId: resource.currentRenderId,
