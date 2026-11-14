@@ -50,7 +50,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <div className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-text sm:text-4xl">My videos</h1>
+        <h1 className="font-display text-[28px] font-extrabold tracking-tight whitespace-nowrap text-text sm:text-4xl">My videos</h1>
         <Button href="/projects/new" className="shrink-0">
           + New video
         </Button>
