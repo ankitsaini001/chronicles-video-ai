@@ -2,7 +2,7 @@
   "name": "@bytereel/storage",
   "version": "0.0.0",
   "private": true,
-  "description": "File storage on Cloudflare R2 (private bucket): config check, key builder, R2ArtifactStore, presigned links (docs/ARCHITECTURE.md §9).",
+  "description": "File storage on Cloudflare R2 (private bucket): config check, key builder, R2ArtifactStore, presigned links (docs/ARCHITECTURE.md \u00a79).",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1161.0",
-    "@aws-sdk/s3-request-presigner": "3.1161.0",
-    "@bytereel/pipeline": "0.0.0"
+    "@aws-sdk/s3-request-presigner": "3.1161.0"
   }
 }

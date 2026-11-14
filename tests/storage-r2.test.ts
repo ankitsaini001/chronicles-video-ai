@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { describe, expect, it, vi } from "vitest";
-import { ArtifactKeys, InvalidArtifactKeyError } from "../packages/pipeline/src/storage";
 import {
   attachmentContentDisposition,
   checkTtlSeconds,
-  CONTENT_TYPES,
+  createR2Client,
+  R2_CONNECTION_TIMEOUT_MS,
+  R2_MAX_ATTEMPTS,
+  R2_REQUEST_TIMEOUT_MS,
+  StorageError,
   InvalidPresignOptionsError,
   InvalidStorageKeyError,
   isStorageKey,
@@ -129,6 +134,13 @@ describe("Content-Disposition for downloads", () => {
     expect(decodeURIComponent(extended)).toBe("..-a\"b-cd(it's)*.mp4".replace(/^\.+/, ""));
   });
 
+  it("a lone surrogate (broken text) doesn't crash: it becomes U+FFFD", () => {
+    const value = attachmentContentDisposition("broken \uD800 title \uDC00.mp4");
+    const encoded = /filename\*=UTF-8''(.+)$/.exec(value)?.[1] ?? "";
+    expect(decodeURIComponent(encoded)).toBe("broken \uFFFD title \uFFFD.mp4");
+    expect(value.startsWith('attachment; filename="broken title.mp4"')).toBe(true);
+  });
+
   it("an empty or dots-only name falls back to download", () => {
     expect(attachmentContentDisposition("")).toBe('attachment; filename="download"');
     expect(attachmentContentDisposition("...")).toBe('attachment; filename="download"');
@@ -203,44 +215,55 @@ describe("presigned link TTL bounds", () => {
 
 // ---------- R2ArtifactStore with a mocked S3 client ----------
 
+const CONFIG = { accountId: FAKE.R2_ACCOUNT_ID, accessKeyId: FAKE.R2_ACCESS_KEY_ID, secretAccessKey: FAKE.R2_SECRET_ACCESS_KEY, bucket: "reel-app-dev" };
+
+function sdkError(name: string, status: number | null, extra: Record<string, unknown> = {}) {
+  return Object.assign(new Error(name), { name, ...(status ? { $metadata: { httpStatusCode: status } } : {}), ...extra });
+}
+
 function mockedStore(options: { allowHealthcheck?: boolean } = {}) {
   // A real client with fake credentials: signing works offline; `send` is replaced, so nothing goes over the network.
-  const client = new S3Client({
-    region: "auto",
-    endpoint: `https://${FAKE.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-    forcePathStyle: true,
-    credentials: { accessKeyId: FAKE.R2_ACCESS_KEY_ID, secretAccessKey: FAKE.R2_SECRET_ACCESS_KEY },
-  });
+  const client = createR2Client(CONFIG);
   const objects = new Map<string, { body: Uint8Array; contentType: string; metadata: Record<string, string> }>();
   const send = vi.fn(async (command: unknown) => {
+    if (command instanceof HeadBucketCommand) return {};
     if (command instanceof PutObjectCommand) {
       const input = command.input;
+      if (input.IfNoneMatch === "*" && objects.has(input.Key!)) throw sdkError("PreconditionFailed", 412);
       objects.set(input.Key!, { body: input.Body as Uint8Array, contentType: input.ContentType!, metadata: input.Metadata ?? {} });
       return {};
     }
-    const notFound = () => Object.assign(new Error("not found"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
     if (command instanceof GetObjectCommand) {
       const found = objects.get(command.input.Key!);
-      if (!found) throw notFound();
+      if (!found) throw sdkError("NoSuchKey", 404);
       return { Body: { transformToByteArray: async () => found.body } };
     }
     if (command instanceof HeadObjectCommand) {
       const found = objects.get(command.input.Key!);
-      if (!found) throw Object.assign(new Error("not found"), { name: "NotFound", $metadata: { httpStatusCode: 404 } });
+      if (!found) throw sdkError("NotFound", 404);
       return { ContentLength: found.body.byteLength, ContentType: found.contentType, Metadata: found.metadata };
     }
     throw new Error("unexpected command");
   });
   (client as unknown as { send: typeof send }).send = send;
-  const store = new R2ArtifactStore({ bucket: "reel-app-dev", client, ...options });
+  const store = new R2ArtifactStore({ bucket: "reel-app-dev", client, secrets: CONFIG, ...options });
   return { store, send, objects };
 }
 
 describe("R2ArtifactStore (mocked S3 client)", () => {
-  it("put sends bucket, key, content type and SHA-256 and returns the hash and size", async () => {
+  it("the client has timeouts and a fixed number of attempts", async () => {
+    const client = createR2Client(CONFIG);
+    expect(await client.config.maxAttempts()).toBe(R2_MAX_ATTEMPTS);
+    const handler = client.config.requestHandler as unknown as { configProvider: Promise<{ connectionTimeout?: number; requestTimeout?: number }> };
+    expect(await handler.configProvider).toMatchObject({ connectionTimeout: R2_CONNECTION_TIMEOUT_MS, requestTimeout: R2_REQUEST_TIMEOUT_MS });
+    expect(R2_CONNECTION_TIMEOUT_MS).toBe(5_000);
+    expect(R2_REQUEST_TIMEOUT_MS).toBe(120_000);
+  });
+
+  it("put sends bucket, key, the content type from the key and SHA-256 and returns the hash and size", async () => {
     const { store, send } = mockedStore();
     const key = StorageKeys.renderQa(REF);
-    const stored = await store.put(key, '{"ok":true}', CONTENT_TYPES.json);
+    const stored = await store.put(key, '{"ok":true}');
     const hex = createHash("sha256").update('{"ok":true}').digest("hex");
     expect(stored).toEqual({ key, sha256: `sha256:${hex}`, bytes: 11 });
     const input = (send.mock.calls[0]![0] as PutObjectCommand).input;
@@ -253,6 +276,34 @@ describe("R2ArtifactStore (mocked S3 client)", () => {
       ChecksumSHA256: Buffer.from(hex, "hex").toString("base64"),
     });
     expect(input).not.toHaveProperty("ACL"); // never public
+    expect(input).not.toHaveProperty("IfNoneMatch"); // overwrite allowed unless createOnly
+  });
+
+  it("content types follow the key extension", async () => {
+    const { store, send } = mockedStore({ allowHealthcheck: true });
+    const cases: [StorageKey, string][] = [
+      [StorageKeys.renderOutput(REF), "video/mp4"],
+      [StorageKeys.speechAudio(OWNER, CACHE_KEY), "audio/mpeg"],
+      [StorageKeys.renderFrame(REF, 1), "image/png"],
+      [StorageKeys.renderThumbnail(REF), "image/jpeg"],
+      [StorageKeys.speechAlignment(OWNER, CACHE_KEY), "application/json"],
+      [healthcheckKey(), "text/plain; charset=utf-8"],
+    ];
+    for (const [key, type] of cases) {
+      await store.put(key, "x");
+      expect((send.mock.lastCall![0] as PutObjectCommand).input.ContentType).toBe(type);
+    }
+  });
+
+  it("createOnly sends If-None-Match: * and a second upload is refused with already_exists", async () => {
+    const { store, send } = mockedStore();
+    const key = StorageKeys.renderOutput(REF);
+    await store.put(key, "first", { createOnly: true });
+    expect((send.mock.lastCall![0] as PutObjectCommand).input.IfNoneMatch).toBe("*");
+    const error = await store.put(key, "second", { createOnly: true }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StorageError);
+    expect(error).toMatchObject({ operation: "put", code: "already_exists", status: 412 });
+    expect(Buffer.from((await store.get(key))!).toString()).toBe("first");
   });
 
   it("get and head return the file, its size and saved hash; null when missing", async () => {
@@ -260,27 +311,68 @@ describe("R2ArtifactStore (mocked S3 client)", () => {
     const key = StorageKeys.renderOutput(REF);
     expect(await store.get(key)).toBeNull();
     expect(await store.head(key)).toBeNull();
-    const bytes = new Uint8Array([1, 2, 3, 4]);
-    const stored = await store.put(key, bytes, CONTENT_TYPES.mp4);
+    const stored = await store.put(key, new Uint8Array([1, 2, 3, 4]));
     expect(Array.from((await store.get(key))!)).toEqual([1, 2, 3, 4]);
     expect(await store.head(key)).toEqual({ bytes: 4, contentType: "video/mp4", sha256: stored.sha256 });
   });
 
-  it("other errors are not swallowed", async () => {
+  it("get treats only NoSuchKey as missing: a missing bucket or a bare 404 is an error", async () => {
     const { store, send } = mockedStore();
-    send.mockRejectedValueOnce(Object.assign(new Error("Access Denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } }));
-    await expect(store.get(StorageKeys.renderOutput(REF))).rejects.toThrow("Access Denied");
+    const key = StorageKeys.renderOutput(REF);
+    send.mockRejectedValueOnce(sdkError("NoSuchBucket", 404));
+    await expect(store.get(key)).rejects.toMatchObject({ name: "StorageError", operation: "get", code: "bucket_not_found", status: 404 });
+    send.mockRejectedValueOnce(sdkError("UnknownError", 404));
+    await expect(store.get(key)).rejects.toMatchObject({ code: "failed", status: 404 });
+    send.mockRejectedValueOnce(sdkError("AccessDenied", 403));
+    await expect(store.get(key)).rejects.toMatchObject({ code: "access_denied", status: 403 });
   });
 
-  it("refuses keys not built by the key builder, unknown content types and healthcheck/ without permission", async () => {
+  it("checkBucket passes, or fails loudly on a missing bucket or refused token", async () => {
     const { store, send } = mockedStore();
-    await expect(store.put("users/../x.mp4" as StorageKey, "x", CONTENT_TYPES.mp4)).rejects.toThrow(InvalidStorageKeyError);
-    await expect(store.put(StorageKeys.renderQa(REF), "x", "text/html" as typeof CONTENT_TYPES.text)).rejects.toThrow("content type");
-    await expect(store.put(healthcheckKey(), "x", CONTENT_TYPES.text)).rejects.toThrow(InvalidStorageKeyError);
+    await expect(store.checkBucket()).resolves.toBeUndefined();
+    expect((send.mock.lastCall![0] as HeadBucketCommand).input).toEqual({ Bucket: "reel-app-dev" });
+    send.mockRejectedValueOnce(sdkError("NotFound", 404));
+    await expect(store.checkBucket()).rejects.toMatchObject({ operation: "checkBucket", code: "bucket_not_found" });
+    send.mockRejectedValueOnce(sdkError("Forbidden", 403));
+    await expect(store.checkBucket()).rejects.toMatchObject({ operation: "checkBucket", code: "access_denied" });
+  });
+
+  it("wraps network errors in a StorageError whose message and cause never show the account host or keys", async () => {
+    const { store, send } = mockedStore();
+    const host = `${FAKE.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+    send.mockRejectedValueOnce(
+      Object.assign(new Error(`getaddrinfo ENOTFOUND ${host} (key ${FAKE.R2_ACCESS_KEY_ID}, ${FAKE.R2_SECRET_ACCESS_KEY})`), {
+        code: "ENOTFOUND",
+        hostname: host,
+      }),
+    );
+    const error = await store.put(StorageKeys.renderQa(REF), "{}").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StorageError);
+    const storageError = error as StorageError;
+    expect(storageError).toMatchObject({ operation: "put", code: "network", status: null });
+    expect(storageError.message).toBe("Storage put failed: couldn't reach R2 (check the internet connection)");
+    const cause = storageError.cause as Error;
+    expect(cause).toBeInstanceOf(Error);
+    expect(cause.message).toContain("ENOTFOUND [hidden].r2.cloudflarestorage.com");
+    expect(cause).not.toHaveProperty("hostname"); // a new error, not the original object
+    const everything = [storageError.message, storageError.stack, cause.message, cause.stack, JSON.stringify(storageError), String(storageError.cause)].join("\n");
+    for (const secret of [FAKE.R2_ACCOUNT_ID, FAKE.R2_ACCESS_KEY_ID, FAKE.R2_SECRET_ACCESS_KEY]) expect(everything).not.toContain(secret);
+  });
+
+  it("classifies timeouts", async () => {
+    const { store, send } = mockedStore();
+    send.mockRejectedValueOnce(sdkError("TimeoutError", null));
+    await expect(store.head(StorageKeys.renderQa(REF))).rejects.toMatchObject({ operation: "head", code: "timeout" });
+  });
+
+  it("refuses keys not built by the key builder and healthcheck/ without permission", async () => {
+    const { store, send } = mockedStore();
+    await expect(store.put("users/../x.mp4" as StorageKey, "x")).rejects.toThrow(InvalidStorageKeyError);
+    await expect(store.put(healthcheckKey(), "x")).rejects.toThrow(InvalidStorageKeyError);
     await expect(store.get("healthcheck/../../etc" as StorageKey)).rejects.toThrow(InvalidStorageKeyError);
     expect(send).not.toHaveBeenCalled();
     const allowed = mockedStore({ allowHealthcheck: true });
-    await expect(allowed.store.put(healthcheckKey(), "hello", CONTENT_TYPES.text)).resolves.toMatchObject({ bytes: 5 });
+    await expect(allowed.store.put(healthcheckKey(), "hello")).resolves.toMatchObject({ bytes: 5 });
   });
 
   it("presignedGet signs a GET with the TTL and, for downloads, an encoded Content-Disposition", async () => {
@@ -303,32 +395,36 @@ describe("R2ArtifactStore (mocked S3 client)", () => {
     await expect(store.presignedGet("users/x" as StorageKey)).rejects.toThrow(InvalidStorageKeyError);
     expect(send).not.toHaveBeenCalled(); // signing is local
   });
+});
 
-  it("works as the pipeline ArtifactStore for render artifacts (versionId = render id)", async () => {
-    const { store, objects } = mockedStore();
-    const run = { ownerId: OWNER, projectId: PROJECT, versionId: RENDER };
-    const writer = await store.acquireWriter(run);
-    const written = await writer.writeJson(ArtifactKeys.timeline, { frames: 1800 });
-    await writer.release();
-    expect(objects.has(StorageKeys.renderTimeline(REF))).toBe(true);
-    expect(written.key).toBe("timeline.json");
-    expect(await store.readJson(run, ArtifactKeys.timeline)).toEqual({ frames: 1800 });
-    expect(await store.exists(run, ArtifactKeys.timeline)).toBe(true);
-    expect(await store.exists(run, ArtifactKeys.output)).toBe(false);
-    expect(await store.verify(run, ArtifactKeys.timeline, written.sha256)).toBe(true);
-    expect(await store.verify(run, ArtifactKeys.timeline, `sha256:${HEX}`)).toBe(false);
-    expect(store.describeRun(run)).toBe(`r2://reel-app-dev/users/${OWNER}/projects/${PROJECT}/renders/${RENDER}`);
-    await expect(writer.write(ArtifactKeys.timeline, "x")).rejects.toThrow("released");
-  });
+describe("healthcheck/ is only for the storage check command", () => {
+  const ROOT = path.resolve(import.meta.dirname, "..");
+  const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "runs", "out"]);
+  // The definition (packages/storage/src) and tests are allowed; the only USER is tools/cli/storage.ts.
+  const ALLOWED = [/^packages\/storage\/src\//, /^tools\/cli\/storage\.ts$/];
 
-  it("refuses non-ObjectId runs and artifacts that don't live in R2", async () => {
-    const { store } = mockedStore();
-    await expect(store.acquireWriter({ ownerId: "owner-1", projectId: PROJECT, versionId: RENDER })).rejects.toThrow(InvalidStorageKeyError);
-    const run = { ownerId: OWNER, projectId: PROJECT, versionId: RENDER };
-    const writer = await store.acquireWriter(run);
-    for (const key of [ArtifactKeys.plan, ArtifactKeys.manifest, ArtifactKeys.approval, "../output.mp4"]) {
-      await expect(writer.write(key, "x")).rejects.toThrow(InvalidArtifactKeyError);
+  async function sourceFiles(dir: string): Promise<string[]> {
+    const out: string[] = [];
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...(await sourceFiles(full)));
+      else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) out.push(full);
     }
+    return out;
+  }
+
+  it("no code outside tools/cli/storage.ts uses allowHealthcheck or the healthcheck key", async () => {
+    const offenders: string[] = [];
+    for (const top of ["apps", "packages", "tools"]) {
+      for (const file of await sourceFiles(path.join(ROOT, top))) {
+        const rel = path.relative(ROOT, file).split(path.sep).join("/");
+        if (ALLOWED.some((pattern) => pattern.test(rel))) continue;
+        const text = await readFile(file, "utf8");
+        if (/allowHealthcheck|@bytereel\/storage\/healthcheck|healthcheckKey|healthcheckStorageKey/.test(text)) offenders.push(rel);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

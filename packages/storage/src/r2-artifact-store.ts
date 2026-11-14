@@ -1,34 +1,38 @@
 import { createHash } from "node:crypto";
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import {
-  assertArtifactKey,
-  ArtifactKeys,
-  InvalidArtifactKeyError,
-  type ArtifactStore,
-  type RunRef,
-  type RunWriter,
-  type WrittenArtifact,
-} from "@bytereel/pipeline/storage";
-import { r2Endpoint, type R2Config } from "./config";
+import { r2Endpoint, redactR2, type R2Config } from "./config";
 import { attachmentContentDisposition } from "./content-disposition";
-import { assertStorageKey, StorageKeys, type RenderRef, type StorageKey } from "./keys";
+import { assertStorageKey, type StorageKey } from "./keys";
 
 /** Presigned link lifetimes (ARCHITECTURE §9): 15 min for the browser, at most 2 h (Instagram fetch, D5). */
 export const DEFAULT_PRESIGN_TTL_SECONDS = 900;
 export const MAX_PRESIGN_TTL_SECONDS = 7200;
 
-/** The only content types we store. Anything else is refused (we never serve HTML from the bucket). */
-export const CONTENT_TYPES = {
+/** Network limits for every R2 request (a stuck connection must not hang a job step). */
+export const R2_CONNECTION_TIMEOUT_MS = 5_000;
+export const R2_REQUEST_TIMEOUT_MS = 120_000;
+export const R2_MAX_ATTEMPTS = 3;
+
+/**
+ * The content type of every file comes from its key's extension (keys are built by StorageKeys).
+ * Only these types exist: we never store or serve HTML from the bucket.
+ */
+const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   json: "application/json",
   mp4: "video/mp4",
   mp3: "audio/mpeg",
   png: "image/png",
   jpg: "image/jpeg",
-  text: "text/plain; charset=utf-8",
-} as const;
-export type StorageContentType = (typeof CONTENT_TYPES)[keyof typeof CONTENT_TYPES];
-const ALLOWED_CONTENT_TYPES = new Set<string>(Object.values(CONTENT_TYPES));
+  txt: "text/plain; charset=utf-8",
+};
+
+export function contentTypeForKey(key: StorageKey): string {
+  const ext = /\.([a-z0-9]+)$/.exec(key)?.[1] ?? "";
+  const type = CONTENT_TYPE_BY_EXTENSION[ext];
+  if (!type) throw new Error("no content type for this key's extension");
+  return type;
+}
 
 export interface StoredObject {
   key: StorageKey;
@@ -42,6 +46,11 @@ export interface ObjectInfo {
   contentType: string | null;
   /** The sha256 saved with the object at upload ("sha256:<hex>"), or null if it has none. */
   sha256: string | null;
+}
+
+export interface PutOptions {
+  /** Refuse (StorageError "already_exists") if a file with this key is already there. Use for finished artifacts. */
+  createOnly?: boolean;
 }
 
 export interface PresignOptions {
@@ -71,108 +80,182 @@ export function checkTtlSeconds(ttlSeconds: number | undefined): number {
   return ttl;
 }
 
+// ---------- errors ----------
+
+export type StorageOperation = "checkBucket" | "put" | "get" | "head" | "presign";
+export type StorageErrorCode = "already_exists" | "access_denied" | "bucket_not_found" | "timeout" | "network" | "failed";
+
+const PLAIN: Record<StorageErrorCode, string> = {
+  already_exists: "a file with this key already exists",
+  access_denied: "R2 refused the request (check the token has Object Read & Write on this bucket)",
+  bucket_not_found: "the bucket was not found (check R2_BUCKET)",
+  timeout: "R2 took too long to answer",
+  network: "couldn't reach R2 (check the internet connection)",
+  failed: "R2 returned an error",
+};
+
+/**
+ * Every failure of the store. The message is plain and safe to show or log; `cause` is a NEW error
+ * holding only the redacted name and message of the original (never the original object, whose
+ * fields may contain the account host).
+ */
+export class StorageError extends Error {
+  readonly operation: StorageOperation;
+  readonly code: StorageErrorCode;
+  readonly status: number | null;
+
+  constructor(operation: StorageOperation, code: StorageErrorCode, status: number | null, cause?: Error) {
+    super(`Storage ${operation} failed: ${PLAIN[code]}${status ? ` (HTTP ${status})` : ""}`, cause ? { cause } : undefined);
+    this.name = "StorageError";
+    this.operation = operation;
+    this.code = code;
+    this.status = status;
+  }
+}
+
+interface SdkErrorShape {
+  name?: unknown;
+  message?: unknown;
+  code?: unknown;
+  $metadata?: { httpStatusCode?: number };
+}
+
+function errorName(error: unknown): string {
+  const name = (error as SdkErrorShape | null)?.name;
+  return typeof name === "string" ? name : "";
+}
+
+function httpStatus(error: unknown): number | null {
+  return (error as SdkErrorShape | null)?.$metadata?.httpStatusCode ?? null;
+}
+
+function classify(operation: StorageOperation, error: unknown): StorageErrorCode {
+  const name = errorName(error);
+  const code = (error as SdkErrorShape | null)?.code;
+  const status = httpStatus(error);
+  if (name === "NoSuchBucket" || (operation === "checkBucket" && (status === 404 || name === "NotFound"))) return "bucket_not_found";
+  if (name === "PreconditionFailed" || status === 412) return "already_exists";
+  if (name === "AccessDenied" || status === 401 || status === 403) return "access_denied";
+  if (name === "TimeoutError" || name === "RequestTimeout" || code === "ETIMEDOUT" || code === "ECONNABORTED") return "timeout";
+  if (typeof code === "string" && ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "EPIPE"].includes(code)) return "network";
+  return "failed";
+}
+
 function sha256Hex(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-/** One S3 client for R2: region "auto", the account's endpoint, path-style addressing. */
+/** One S3 client for R2: region "auto", the account's endpoint, path-style, timeouts and retries set. */
 export function createR2Client(config: R2Config): S3Client {
   return new S3Client({
     region: "auto",
     endpoint: r2Endpoint(config.accountId),
     forcePathStyle: true,
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+    maxAttempts: R2_MAX_ATTEMPTS,
+    requestHandler: { connectionTimeout: R2_CONNECTION_TIMEOUT_MS, requestTimeout: R2_REQUEST_TIMEOUT_MS },
     // Only send/check checksums when an operation needs them (R2 compatibility); we add SHA-256 ourselves.
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
   });
 }
 
-function httpStatus(error: unknown): number | undefined {
-  return (error as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode;
-}
-
-function isNotFound(error: unknown): boolean {
-  const name = (error as { name?: unknown } | null)?.name;
-  return name === "NoSuchKey" || name === "NotFound" || httpStatus(error) === 404;
-}
+type Secrets = Pick<R2Config, "accountId" | "accessKeyId" | "secretAccessKey">;
 
 /**
- * Pipeline run artifacts that live in R2, mapped to the render folder of ARCHITECTURE §9
- * (a run's versionId is the render's id). Plans, approvals and the manifest live in MongoDB;
- * narration audio/alignment go to users/{ownerId}/speech/… (F23).
- */
-const RUN_ARTIFACTS: Record<string, { key: (ref: RenderRef) => StorageKey; contentType: StorageContentType }> = {
-  [ArtifactKeys.timeline]: { key: StorageKeys.renderTimeline, contentType: CONTENT_TYPES.json },
-  [ArtifactKeys.captions]: { key: StorageKeys.renderCaptions, contentType: CONTENT_TYPES.json },
-  [ArtifactKeys.output]: { key: StorageKeys.renderOutput, contentType: CONTENT_TYPES.mp4 },
-  [ArtifactKeys.qa]: { key: StorageKeys.renderQa, contentType: CONTENT_TYPES.json },
-};
-
-/**
- * Private Cloudflare R2 storage (ARCHITECTURE §6 rule 2, §9). Implements the pipeline's
- * `ArtifactStore` so stage code does not change, and adds put/get/head by key plus presigned links.
+ * Private Cloudflare R2 storage (ARCHITECTURE §9): put/get/head by a key from `StorageKeys`, plus
+ * presigned links. F23 calls it directly; the pipeline's LocalArtifactStore stays for the CLI and tests.
  *
  * Nothing here ever makes an object public: no ACLs, no public URLs; reading from a browser is only
  * possible through a short-lived presigned GET link.
  */
-export class R2ArtifactStore implements ArtifactStore {
+export class R2ArtifactStore {
   readonly bucket: string;
   private readonly client: S3Client;
   private readonly allowHealthcheck: boolean;
+  private readonly secrets: Secrets | null;
 
   /**
+   * @param options.secrets values hidden from error causes (set by fromConfig).
    * @param options.allowHealthcheck only `npm run storage -- check` sets this, to use the healthcheck/ prefix.
    */
-  constructor(options: { bucket: string; client: S3Client; allowHealthcheck?: boolean }) {
+  constructor(options: { bucket: string; client: S3Client; secrets?: Secrets; allowHealthcheck?: boolean }) {
     this.bucket = options.bucket;
     this.client = options.client;
+    this.secrets = options.secrets ?? null;
     this.allowHealthcheck = options.allowHealthcheck ?? false;
   }
 
   static fromConfig(config: R2Config, options: { allowHealthcheck?: boolean } = {}): R2ArtifactStore {
-    return new R2ArtifactStore({ bucket: config.bucket, client: createR2Client(config), ...options });
+    return new R2ArtifactStore({ bucket: config.bucket, client: createR2Client(config), secrets: config, ...options });
   }
 
   private checkKey(key: StorageKey): void {
     assertStorageKey(key, { allowHealthcheck: this.allowHealthcheck });
   }
 
-  /** Upload a file. Returns its SHA-256 (also saved on the object as metadata) and size. */
-  async put(key: StorageKey, data: string | Uint8Array, contentType: StorageContentType): Promise<StoredObject> {
+  private wrap(operation: StorageOperation, error: unknown): StorageError {
+    if (error instanceof StorageError) return error;
+    const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const cause = new Error(this.secrets ? redactR2(raw, this.secrets) : raw);
+    return new StorageError(operation, classify(operation, error), httpStatus(error), cause);
+  }
+
+  /** Fails loudly (StorageError) when the bucket is missing or the token can't use it. Call at worker/CLI start. */
+  async checkBucket(): Promise<void> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch (error) {
+      throw this.wrap("checkBucket", error);
+    }
+  }
+
+  /**
+   * Upload a file; the content type comes from the key's extension. Returns its SHA-256 (also checked
+   * by R2 on upload and saved on the object as metadata) and size.
+   */
+  async put(key: StorageKey, data: string | Uint8Array, options: PutOptions = {}): Promise<StoredObject> {
     this.checkKey(key);
-    if (!ALLOWED_CONTENT_TYPES.has(contentType)) throw new Error("content type is not allowed");
+    const contentType = contentTypeForKey(key);
     const body = typeof data === "string" ? Buffer.from(data, "utf8") : data;
     const hex = sha256Hex(body);
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-        ContentLength: body.byteLength,
-        // R2 checks this and refuses the upload if the bytes it received are different.
-        ChecksumSHA256: Buffer.from(hex, "hex").toString("base64"),
-        Metadata: { sha256: hex },
-      }),
-    );
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+          ContentLength: body.byteLength,
+          // R2 checks this and refuses the upload if the bytes it received are different.
+          ChecksumSHA256: Buffer.from(hex, "hex").toString("base64"),
+          Metadata: { sha256: hex },
+          ...(options.createOnly ? { IfNoneMatch: "*" } : {}),
+        }),
+      );
+    } catch (error) {
+      throw this.wrap("put", error);
+    }
     return { key, sha256: `sha256:${hex}`, bytes: body.byteLength };
   }
 
-  /** Download a file, or null if it doesn't exist. */
+  /** Download a file, or null if it doesn't exist (only R2's NoSuchKey means "missing"). */
   async get(key: StorageKey): Promise<Uint8Array | null> {
     this.checkKey(key);
     try {
       const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
-      if (!result.Body) return null;
+      if (!result.Body) throw new Error("R2 answered without a body");
       return await result.Body.transformToByteArray();
     } catch (error) {
-      if (isNotFound(error)) return null;
-      throw error;
+      if (errorName(error) === "NoSuchKey") return null;
+      throw this.wrap("get", error);
     }
   }
 
-  /** Size, type and saved SHA-256 of a file without downloading it, or null if it doesn't exist. */
+  /**
+   * Size, type and saved SHA-256 of a file without downloading it, or null if it doesn't exist.
+   * A HEAD answer has no body, so a 404 can't tell "no file" from "no bucket": call checkBucket() first.
+   */
   async head(key: StorageKey): Promise<ObjectInfo | null> {
     this.checkKey(key);
     try {
@@ -184,8 +267,8 @@ export class R2ArtifactStore implements ArtifactStore {
         sha256: saved && /^[0-9a-f]{64}$/.test(saved) ? `sha256:${saved}` : null,
       };
     } catch (error) {
-      if (isNotFound(error)) return null;
-      throw error;
+      if (errorName(error) === "NotFound" || httpStatus(error) === 404) return null;
+      throw this.wrap("head", error);
     }
   }
 
@@ -204,88 +287,11 @@ export class R2ArtifactStore implements ArtifactStore {
         : {}),
     });
     const signedAt = Date.now();
-    const url = await getSignedUrl(this.client, command, { expiresIn: ttl });
-    return { url, expiresAt: new Date(signedAt + ttl * 1000) };
-  }
-
-  // ---------- ArtifactStore (pipeline runs) ----------
-
-  /** run.versionId is the render id; all three ids must be MongoDB ObjectIds. */
-  private runKey(run: RunRef, artifactKey: string): { key: StorageKey; contentType: StorageContentType } {
-    assertArtifactKey(artifactKey);
-    const entry = RUN_ARTIFACTS[artifactKey];
-    if (!entry) {
-      throw new InvalidArtifactKeyError(
-        `"${artifactKey}" is not stored in R2 (only ${Object.keys(RUN_ARTIFACTS).join(", ")}; plans and approvals live in MongoDB)`,
-      );
-    }
-    return { key: entry.key({ ownerId: run.ownerId, projectId: run.projectId, renderId: run.versionId }), contentType: entry.contentType };
-  }
-
-  /**
-   * No lock object in R2: in the app the single writer per render is the MongoDB job
-   * (one active job per project, DATABASE.md jobs). Writes go straight to the final key; an R2 PUT
-   * is atomic (readers see the old file or the complete new one, never half a file).
-   */
-  async acquireWriter(run: RunRef): Promise<RunWriter> {
-    this.runKey(run, ArtifactKeys.output); // validate the ids now, not on the first write
-    return new R2RunWriter(run, this);
-  }
-
-  /** Used by R2RunWriter. */
-  async writeRunArtifact(run: RunRef, artifactKey: string, data: string | Uint8Array): Promise<WrittenArtifact> {
-    const { key, contentType } = this.runKey(run, artifactKey);
-    const stored = await this.put(key, data, contentType);
-    return { key: artifactKey, sha256: stored.sha256, bytes: stored.bytes };
-  }
-
-  async read(run: RunRef, key: string): Promise<Uint8Array | null> {
-    return this.get(this.runKey(run, key).key);
-  }
-
-  async readJson(run: RunRef, key: string): Promise<unknown | null> {
-    const data = await this.read(run, key);
-    if (data === null) return null;
     try {
-      return JSON.parse(Buffer.from(data).toString("utf8"));
-    } catch {
-      throw new Error(`${key} in ${this.describeRun(run)} is not valid JSON`);
+      const url = await getSignedUrl(this.client, command, { expiresIn: ttl });
+      return { url, expiresAt: new Date(signedAt + ttl * 1000) };
+    } catch (error) {
+      throw this.wrap("presign", error);
     }
-  }
-
-  async exists(run: RunRef, key: string): Promise<boolean> {
-    return (await this.head(this.runKey(run, key).key)) !== null;
-  }
-
-  async verify(run: RunRef, key: string, expectedSha256: string): Promise<boolean> {
-    const data = await this.read(run, key);
-    return data !== null && `sha256:${sha256Hex(data)}` === expectedSha256;
-  }
-
-  describeRun(run: RunRef): string {
-    const output = this.runKey(run, ArtifactKeys.output).key;
-    return `r2://${this.bucket}/${output.slice(0, output.lastIndexOf("/"))}`;
-  }
-}
-
-class R2RunWriter implements RunWriter {
-  private released = false;
-
-  constructor(
-    readonly run: RunRef,
-    private readonly store: R2ArtifactStore,
-  ) {}
-
-  async write(key: string, data: string | Uint8Array): Promise<WrittenArtifact> {
-    if (this.released) throw new Error("this run writer was released; acquire a new one to write");
-    return this.store.writeRunArtifact(this.run, key, data);
-  }
-
-  async writeJson(key: string, value: unknown): Promise<WrittenArtifact> {
-    return this.write(key, `${JSON.stringify(value, null, 2)}\n`);
-  }
-
-  async release(): Promise<void> {
-    this.released = true;
   }
 }

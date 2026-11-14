@@ -5,9 +5,17 @@ const MAX_NAME_CHARS = 120;
 const FALLBACK_BASE = "download";
 const EXTENSION = /\.[A-Za-z0-9]{1,8}$/;
 
+/**
+ * Same as String.prototype.toWellFormed() (ES2024, not in our TypeScript lib): a lone surrogate
+ * becomes U+FFFD. Without this, encodeURIComponent throws on a broken title.
+ */
+function toWellFormed(value: string): string {
+  return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+}
+
 /** Remove control characters and path separators; keep the visible name. */
 function cleanName(name: string): string {
-  const cleaned = name
+  const cleaned = toWellFormed(name)
     .normalize("NFC")
     .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "")
     .replace(/[/\\]/g, "-")
