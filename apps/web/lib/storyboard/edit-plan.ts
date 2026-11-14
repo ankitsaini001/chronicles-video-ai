@@ -1,4 +1,5 @@
-import { ProjectActionError, type BuiltPlan, type PlanVersionDocument, type StoredPlan } from "@bytereel/db";
+import { ProjectActionError, voiceGenderOfPreset, type BuiltPlan, type PlanVersionDocument, type StoredPlan } from "@bytereel/db";
+import { voicePresetFor, type VoiceLanguage } from "@bytereel/db/voices";
 import type { Plan } from "@bytereel/pipeline/contracts";
 import { hashPlan, validatePlan } from "@bytereel/pipeline/planning";
 import type { ObjectId } from "mongodb";
@@ -44,5 +45,19 @@ export function narrationChange(edit: { sceneId: string; narrationId: string; te
     block.text = edit.text;
     if (edit.speech !== undefined) block.speech = edit.speech;
     if (edit.display !== undefined) block.display = edit.display;
+  };
+}
+
+/**
+ * D4 (F19): the only change is the plan's voice preset, for the project's language (a voice of
+ * another language is never offered: the language can't change, PRD decision #25). Choosing the
+ * voice the plan already has → 400 INVALID_INPUT (nothing saved).
+ */
+export function voiceChange(voiceGender: "female" | "male"): (plan: StoredPlan) => void {
+  return (plan) => {
+    if (voiceGenderOfPreset(plan.voicePreset) === voiceGender) {
+      throw new ProjectActionError("INVALID_INPUT", `This project already uses the ${voiceGender} voice.`, { issues: [{ path: "voiceGender", message: "unchanged" }] });
+    }
+    plan.voicePreset = voicePresetFor(plan.language as VoiceLanguage, voiceGender).preset;
   };
 }

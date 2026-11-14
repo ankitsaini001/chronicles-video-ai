@@ -50,6 +50,14 @@ export const NarrationEditBodySchema = z.strictObject({
 });
 export type NarrationEditBody = z.output<typeof NarrationEditBodySchema>;
 
+/** D4 body (API.md D4, F19): switch the narrator voice (Male ↔ Female). The language can't change. */
+export const VoiceSwitchBodySchema = z.strictObject({
+  basePlanVersionId: ObjectIdString,
+  voiceGender: z.enum(["female", "male"], { error: "must be female or male" }),
+  expectedStateVersion: StateVersion,
+});
+export type VoiceSwitchBody = z.output<typeof VoiceSwitchBodySchema>;
+
 /** D7 body (API.md D7). */
 export const RestoreBodySchema = z.strictObject({ expectedStateVersion: StateVersion });
 export type RestoreBody = z.output<typeof RestoreBodySchema>;

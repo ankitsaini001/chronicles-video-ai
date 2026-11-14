@@ -247,6 +247,8 @@ export {
   RestoreBodySchema,
   saveUserEditVersion,
   voiceGenderOfPreset,
+  VoiceSwitchBodySchema,
+  type VoiceSwitchBody,
   type BuiltPlan,
   type NarrationEditBody,
   type RestoreBody,
