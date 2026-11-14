@@ -117,6 +117,8 @@ describe("evaluateBrainstormOutput", () => {
 
   it("cleans text: control characters and line breaks out, NFC, spaces collapsed, trimmed; extra fields dropped", () => {
     expect(cleanIdeaField("  Café\n\tnotes\u0007  ")).toBe("Café notes");
+    expect(cleanIdeaField("\u202ERain\u202C\u200B fall\uFEFF")).toBe("Rain fall");
+    expect(cleanIdeaField("क्\u200Dष")).toBe("क्\u200Dष"); // ZWJ kept for Devanagari
     const ideas = IDEAS_EN.map((i, n) => (n === 0 ? { ...i, title: "  Why\nthe monsoon\u0000 reaches Kerala first ", extra: "x" } : i));
     const r = evaluateBrainstormOutput(answer(ideas), "en");
     expect(r.kind === "ok" && r.ideas[0]).toEqual({ id: "idea-1", title: "Why the monsoon reaches Kerala first", hook: IDEAS_EN[0]!.hook, angle: IDEAS_EN[0]!.angle });
@@ -143,6 +145,11 @@ describe("evaluateBrainstormOutput", () => {
     expect(evaluateBrainstormOutput(answer(hindi), "en").kind).toBe("invalid");
     expect(evaluateBrainstormOutput(answer(hindi), "hinglish").kind).toBe("invalid");
     expect(evaluateBrainstormOutput(answer(IDEAS_EN), "hinglish").kind).toBe("ok");
+    const chinese = IDEAS_EN.map((i, n) => (n === 1 ? { ...i, title: "为什么季风先到喀拉拉邦" } : i));
+    expect(evaluateBrainstormOutput(answer(chinese), "en")).toEqual({ kind: "invalid", problems: ["Idea 2 title is not in English; use Latin letters only."] });
+    const mixed = IDEAS_EN.map((i, n) => (n === 0 ? { ...i, title: "Monsoon aur बारिश" } : i));
+    expect(evaluateBrainstormOutput(answer(mixed), "hinglish").kind).toBe("invalid");
+    expect(evaluateBrainstormOutput(answer(IDEAS_EN.map((i, n) => (n === 0 ? { ...i, title: "₹500 note: 2016 to 2026" } : i))), "en").kind).toBe("ok");
   });
 
   it("refuses repeated titles, broken JSON and a wrong shape", () => {

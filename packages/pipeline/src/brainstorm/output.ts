@@ -48,10 +48,15 @@ export function brainstormOutputJsonSchema(): Record<string, unknown> {
   };
 }
 
-/** Every control character (line breaks and tabs too) becomes a space; then NFC, one space, trim. */
+/**
+ * Every control character (line breaks and tabs too) becomes a space; invisible format characters
+ * (bidi overrides, zero-width space, BOM …) are removed except ZWNJ/ZWJ, which Devanagari needs;
+ * then NFC, one space, trim.
+ */
 export function cleanIdeaField(raw: string): string {
   return raw
     .replace(/\p{Cc}/gu, " ")
+    .replace(/(?![\u200C\u200D])\p{Cf}/gu, "")
     .normalize("NFC")
     .replace(/\s+/g, " ")
     .trim();
@@ -63,6 +68,15 @@ const RawOutputSchema = z.object({
 });
 
 const DEVANAGARI = /\p{Script=Devanagari}/u;
+const LETTER = /\p{L}/gu;
+const LATIN_LETTER = /\p{Script=Latin}/gu;
+
+/** English and Hinglish (Roman script): at least 80% of the letters are Latin (rejects e.g. Chinese or Devanagari answers). */
+function mostlyLatin(text: string): boolean {
+  const letters = text.match(LETTER)?.length ?? 0;
+  const latin = text.match(LATIN_LETTER)?.length ?? 0;
+  return letters > 0 && latin / letters >= 0.8;
+}
 
 export type BrainstormEvaluation =
   | { kind: "ok"; ideas: BrainstormIdea[] }
@@ -102,7 +116,7 @@ export function evaluateBrainstormOutput(text: string, language: Language): Brai
       if (value.length < min) problems.push(`${where} is empty or too short (at least ${min} characters).`);
       else if (value.length > max) problems.push(`${where} has ${value.length} characters; at most ${max} are allowed.`);
       else if (language === "hi" && !DEVANAGARI.test(value)) problems.push(`${where} is not written in Hindi (Devanagari script).`);
-      else if (language !== "hi" && DEVANAGARI.test(value)) problems.push(`${where} uses Devanagari letters; use ${language === "en" ? "English" : "Roman script"} only.`);
+      else if (language !== "hi" && !mostlyLatin(value)) problems.push(`${where} is not in ${language === "en" ? "English" : "Roman script"}; use Latin letters only.`);
     }
   });
 

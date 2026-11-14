@@ -87,4 +87,11 @@ describe("brainstorm idea text (F14)", () => {
     const r = CreateProjectBodySchema.safeParse({ inputType: "brainstorm", text, language: "en", voiceGender: "female", brainstormChoice: { subject: "Indian monsoon", ...idea } });
     expect(r.success).toBe(true);
   });
+
+  it("format characters (bidi, zero-width space, BOM) are removed; ZWJ/ZWNJ stay for Devanagari", () => {
+    expect(cleanIdeaText("\u202Eabc\u202C \u200Bdef\uFEFF")).toBe("abc def");
+    const kshaHalf = "क्\u200Dष"; // ZWJ asks for the half form
+    expect(cleanIdeaText(` ${kshaHalf}\u200B `)).toBe(kshaHalf);
+    expect(cleanIdeaText("र\u200Cहा")).toBe("र\u200Cहा");
+  });
 });

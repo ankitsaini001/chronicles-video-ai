@@ -3,7 +3,7 @@
 // Pure code with no database import: the browser loads it via "@bytereel/db/idea-text".
 //
 // Cleaning order (API.md §2): remove control characters (except tab, line feed and carriage
-// return), Unicode NFC, then trim. NFC matters for Hindi: the nukta letters क़ ख़ ग़ ज़ ड़ ढ़ फ़ य़
+// return) and invisible format characters (except ZWNJ/ZWJ, F14 review), Unicode NFC, then trim. NFC matters for Hindi: the nukta letters क़ ख़ ग़ ज़ ड़ ढ़ फ़ य़
 // (U+0958–U+095F) become two characters each under NFC, so counting before NFC would be wrong.
 
 /** Notes may be up to 5,000 characters (API.md C2). */
@@ -17,10 +17,16 @@ export const BRAINSTORM_SUBJECT_LIMITS = { min: 2, max: 100 } as const;
 
 /** Control characters (Unicode Cc) other than tab, line feed and carriage return. */
 const CONTROL_CHARS = /(?![\t\n\r])\p{Cc}/gu;
+/**
+ * Invisible format characters (Unicode Cf: bidi overrides, zero-width space, BOM, soft hyphen …),
+ * except ZWNJ/ZWJ (U+200C/U+200D), which Devanagari needs to choose the right letter shapes
+ * (F14 review).
+ */
+const FORMAT_CHARS = /(?![\u200C\u200D])\p{Cf}/gu;
 
 /** The idea as the server stores and counts it. */
 export function cleanIdeaText(raw: string): string {
-  return raw.replace(CONTROL_CHARS, "").normalize("NFC").trim();
+  return raw.replace(CONTROL_CHARS, "").replace(FORMAT_CHARS, "").normalize("NFC").trim();
 }
 
 /** "topic" up to 300 characters of cleaned text, "notes" above. */
