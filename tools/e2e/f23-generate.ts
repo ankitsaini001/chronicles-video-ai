@@ -13,6 +13,9 @@ import { ObjectId } from "mongodb";
  * Also: the one-at-a-time queue ("Waiting to start…"), Cancel (waiting and while rendering), a
  * failure + Try again, cached narration reused, the limits in order (language → videos/day → voice
  * characters → the app-wide guard), the older video kept after an edit, owner-only access.
+ * Code review fixes: every ElevenLabs request counted before it is sent (`voice.sentKeys`) and logged in
+ * providerUsage; ready recordings keep no audio bytes; "Edit storyboard" from a failed or ready video
+ * (the storyboard opens, with "Back to video").
  * The storyboard comes from the local Gemini stand-in (E2E_FAKE_GEMINI=1: ZERO Gemini calls).
  * Two full renders (about 3 min each on the dev machine) and one cancelled one: allow ~15 minutes.
  *
@@ -209,7 +212,10 @@ async function main(): Promise<void> {
   const timeline = JSON.parse(Buffer.from((await files.get(render1!.timelineKey))!).toString("utf8"));
   check("timeline v2 in R2 (60–90 s)", timeline.schemaVersion === 2 && timeline.totalFrames >= 1800 && timeline.totalFrames <= 2700, `${timeline.totalFrames} frames`);
   const speech = await db.collection("speechArtifacts").find({ ownerId: a.id }).toArray();
-  check("speechArtifacts: one ready recording per scene, paid by this job, no pending lock left", speech.length === render1!.speech.length && speech.every((s) => s.status === "ready" && s.claim === null && s.response === null && s.paidByJobId?.toHexString() === p1Job));
+  check("speechArtifacts: one ready recording per scene, paid by this job, no pending lock left, no audio bytes kept", speech.length === render1!.speech.length && speech.every((s) => s.status === "ready" && s.claim === null && s.response === null && !("audio" in s) && s.paidByJobId?.toHexString() === p1Job));
+  const usage1 = await db.collection("providerUsage").find({ jobId: oid(p1Job), provider: "elevenlabs" }).toArray();
+  check("providerUsage: one ElevenLabs row per request (final ok, characters logged, cost 0)", usage1.length === speech.length && usage1.every((u) => u.status === "final" && u.outcome === "ok" && u.operation === "tts_with_timestamps" && u.units?.characters > 0 && u.estCostInr === 0), `${usage1.length} rows`);
+  check("job.voice: every request counted before it was sent (sentKeys), no unused reservation left, its month noted", job1?.voice?.sentKeys?.length === speech.length && job1.voice.cacheKeys.length === 0 && typeof job1.voice.period?.user === "string" && typeof job1.voice.period?.app === "string");
   await verifyInR2("R2: narration audio + both timing files per recording (SHA-256 checked)", speech.flatMap((s) => [s.audioKey, s.alignmentKey, s.normalizedAlignmentKey]), Object.fromEntries(speech.map((s) => [s.audioKey, s.audioSha256])));
   const chars1 = speech.reduce((sum, s) => sum + (s.characters as number), 0);
   check("voice characters counted for the creator AND the app (once per recording)", (await counter(a.id, "voiceChars", tz)) === chars1 && (await counter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC")) === appBefore + chars1, `${chars1} characters`);
@@ -221,6 +227,9 @@ async function main(): Promise<void> {
   check("/projects/[id] sends the video step to /video", (redirected.status >= 300 && redirected.status < 400 && redirected.location.endsWith(`/projects/${p1}/video`)) || redirected.html.includes(`/projects/${p1}/video`), `${redirected.status}`);
   view = await page(a.cookie, `/projects/${p1}/video`);
   check("video page: 'Your video is ready' (watching comes in F24)", view.status === 200 && view.html.includes("Your video is ready") && view.html.includes("Watching and downloading"));
+  check("video page (ready): 'Edit storyboard' opens the storyboard", view.html.includes("Edit storyboard") && view.html.includes(`href="/projects/${p1}/storyboard"`));
+  const readyBoard = await page(a.cookie, `/projects/${p1}/storyboard`);
+  check("…and the storyboard of a ready video opens (no redirect) with 'Back to video'", readyBoard.status === 200 && readyBoard.html.includes("Back to video") && readyBoard.html.includes("Approved · Version"), `${readyBoard.status} ${readyBoard.location}`);
   check("the job's work folder was removed", !existsSync(path.join(ROOT, "runs", ".tmp", "generate", st.currentRenderId)));
 
   // ---------- decision 5: an edit keeps the older video until a new one is made ----------
@@ -258,6 +267,12 @@ async function main(): Promise<void> {
   check("only the changed scene needed new narration (the others reused for free); its 3 attempts were counted", edited.length === 1 && (await counter(a.id, "voiceChars", tz)) === userBefore + 3 * editedChars, `${editedChars} chars × 3`);
   view = await page(a.cookie, `/projects/${p2}/video`);
   check("video page shows the plain error and Try again", view.html.includes("Voice service busy. Please try again in a few minutes.") && view.html.includes("Try again"));
+  check("video page (failed): 'Edit storyboard' is offered", view.html.includes("Edit storyboard") && view.html.includes(`href="/projects/${p2}/storyboard"`));
+  const failedBoard = await page(a.cookie, `/projects/${p2}/storyboard`);
+  check("…and the storyboard of a failed video opens (no redirect) with 'Back to video', still editable", failedBoard.status === 200 && failedBoard.html.includes("Back to video") && (await current(a.cookie, p2)).project.allowedActions.includes("edit_storyboard"), `${failedBoard.status} ${failedBoard.location}`);
+  const usage2 = await db.collection("providerUsage").find({ jobId: oid(p2Job2), provider: "elevenlabs" }).toArray();
+  check("providerUsage: the 3 busy requests are logged as failed (busy), none left reserved", usage2.length === 3 && usage2.every((u) => u.status === "failed" && u.outcome === "busy"), `${usage2.length} rows`);
+  check("the failed recording's lock was released (failed, no claim)", edited[0]?.claim === null);
   r = await send(a.cookie, "POST", `/api/v1/jobs/${p2Job2}/retry`, {}, { "idempotency-key": key() });
   check("E2 Try again → 202, same job, attempt 2, generating", r.status === 202 && r.json.id === p2Job2 && r.json.attempt === 2 && (await projectOf(p2))?.state === "generating", `${r.status} ${JSON.stringify(r.json.error ?? null)}`);
   st = await waitFor(a.cookie, p2, (s) => s.activeJob?.progress?.stage === "render" || s.pollAfterMs === null, 6 * 60_000);
