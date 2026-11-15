@@ -8,8 +8,9 @@ import { fitSize, Flash, SlamWord, textLines, Title } from "../ui";
 import { heroCamera, ofKind, TOP, type Ctx, type Pattern } from "./shared";
 
 /**
- * Title / hook: the picture and the question from frame 1. The first words of the narration slam
- * in big over the hero; then the headline (gold title) and the subtitle pill take over.
+ * Title / hook: the picture and the question from frame 1. The first words of the narration (up to
+ * 3) slam in big over the hero within the first few frames; then the headline (gold title) and the
+ * subtitle pill take over.
  */
 
 /** The opening words that slam in: up to the first punctuation, at most 3 words. */
@@ -73,7 +74,8 @@ export const Hook: Pattern = {
         {out < 1 && (
           <div style={{ position: "absolute", left: 70, width: 940, top: TOP, display: "flex", flexWrap: "wrap", justifyContent: "center", alignItems: "baseline", transform: `scale(${1 + out * 0.4}) translateY(${-out * 40}px)`, opacity: 1 - out }}>
             {slam.map((w, i) => (
-              <SlamWord key={i} text={i === slam.length - 1 && needsDots ? `${w.text}…` : w.text} frame={f} at={i === 0 ? Math.min(w.startFrame - 1, ctx.scene.startFrame) : w.startFrame} size={slamSize(slam)} color={i === slam.length - 1 ? C.amber : undefined} />
+              // the whole question is on screen within the first few frames, even when it is said slowly
+              <SlamWord key={i} text={i === slam.length - 1 && needsDots ? `${w.text}…` : w.text} frame={f} at={Math.min(w.startFrame, ctx.scene.startFrame + i * 4) - (i === 0 ? 1 : 0)} size={slamSize(slam)} color={i === slam.length - 1 ? C.amber : undefined} />
             ))}
           </div>
         )}
