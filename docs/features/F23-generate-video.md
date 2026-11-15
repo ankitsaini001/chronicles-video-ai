@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (built 2026-11-15; waiting for code review and the founder's test) |
+| **Status** | 🧪 Testing (built 2026-11-15; code review findings fixed 2026-11-16; waiting for the re-review and the founder's test) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F22, F00 |
 | **Design** | Stitch: ByteReel — Step 3 Making video (`docs/design/stitch/step3-making-video.html`) |
@@ -24,7 +24,7 @@ F20 built approval #1 without the video job. F23 MUST:
 - [x] **The generate job follows the language switch:** D8 (right after the project is found, before anything is counted or set up), E2 on a video job (first thing in its transaction) and the worker's first step refuse a switched-off language: `422 LANGUAGE_UNAVAILABLE` / job error `LANGUAGE_UNAVAILABLE` (not retryable), before any ElevenLabs call. No `approve_storyboard` / `generate_video` in `allowedActions` for those projects (approving now starts the paid voice job).
 
 ## MUST from F22 (code review, 2026-11-14): R2 writers (ARCHITECTURE §9)
-- [x] **Speech lock:** the unique `{ownerId, cacheKey}` `speechArtifacts` document is claimed as `pending` with a conditional insert (upsert `$setOnInsert`) **before** calling ElevenLabs; `ready` → reused; another job's fresh claim → this step tries again in 60 s; this job's own claim (a re-run or a retry) or a claim older than 10 min → taken over. The provider's answer is saved on the document **before** the upload, so a crash after the upload never needs a second paid call.
+- [x] **Speech lock:** the unique `{ownerId, cacheKey}` `speechArtifacts` document is claimed as `pending` with a conditional insert (upsert `$setOnInsert`) **before** calling ElevenLabs; `ready` → reused; `failed` → taken over (its saved answer and bytes reused); a fresh claim → this step waits 60 s (`step.sleep`) and looks again, up to 12 times; the same job's claim is taken over at once only when its answer is saved, otherwise only after 10 min (its first run may still be calling ElevenLabs). The provider's answer AND the paid audio bytes are saved on the document in one write **before** any upload, so a failed upload, a crash, a retry or a Try again never needs a second paid call (code review, 2026-11-16).
 - [x] **A new `renderId` for every render attempt** (made when the render step starts; an attempt that doesn't finish writes no `renders` document).
 - [x] **Create-only uploads:** every narration and video file goes up with `{ createOnly: true }`; `already_exists` is accepted only when the stored file has the same SHA-256 (an earlier run of the same step), otherwise it is an error.
 - [ ] **Publish (F29/F30) verifies the R2 object's SHA-256 against `renders.mp4Sha256` before sending it to Instagram.** For F30 (written into that feature's file when it starts). F23 stores `renders.mp4Sha256` (also saved on the R2 object).
@@ -70,8 +70,10 @@ Watching and downloading it is the next feature (F24).
 - **A render document is written only when the video is ready** (one transaction with the project), so failed or cancelled attempts never take a video number; the attempt in progress is `jobs.render.renderId`.
 - **D8 for a switched-off language is refused** (no approve-only path any more): approving now starts the voice job.
 - **No `cancelOn`**: each step checks `cancelRequestedAt` itself, so the job always ends in a known state.
-- **Characters for a provider retry** of a scene are reserved too (it may be billed again); spent characters are never refunded (cost-safe).
-- **The app-wide month is the UTC calendar month.** If the ElevenLabs account resets on another day, two app months can overlap one ElevenLabs month; then ElevenLabs itself refuses at 10,000 and the job fails with "Voice service unavailable right now" (no cost on the free plan).
+- **Every ElevenLabs request is counted before it is sent** (code review, 2026-11-16): the first request of a recording uses the up-front reservation; a provider retry, a Try again after a broken answer or a timeout, a changed model or voice, or a new month is counted again with the same limits. Over-counting a request ElevenLabs didn't bill is fine; spent characters are never refunded (cost-safe). Each request is also one `providerUsage` row (`elevenlabs`, `tts_with_timestamps`).
+- **The app-wide month is the UTC calendar month.** If the ElevenLabs account resets on another day, two app months can overlap one ElevenLabs month; then ElevenLabs itself refuses at 10,000 and the job fails with "Voice limit reached this month." (retryable; no cost on the free plan).
+- **After a failure or when the video is ready, "Edit storyboard"** on the video page opens the storyboard (which now opens in every state where edits are allowed), with "Back to video" there (code review, 2026-11-16). A failure that can't be retried as it is (e.g. "Voice service unavailable") never leaves the project stuck.
+- **The render child gets no secrets** (only PATH, HOME, NODE_ENV, the locale, TZ, `REMOTION_*`, its TMPDIR) and **stopping a render kills its whole process tree** (Chrome runs in a process group of its own) after asking it to cancel (code review, 2026-11-16).
 
 ## Steps
 - [x] 1. Render job + child process: timing, captions v2, v4 render with music, JPEG thumbnail at 1.5 s, MP4 checks, cancel signal (`packages/pipeline/src/pipeline/render-job.ts`, `render-child.ts`, `render-protocol.ts`)
@@ -97,8 +99,15 @@ This makes ONE real video with the real ElevenLabs voice (about 1,000 of the mon
    thumbnail and "Video ready". The files are in Cloudflare → R2 → `reel-app-dev` → `users/<your id>/…`.
    To watch it before F24: open `output.mp4` there and download it.
 6. Optional checks: press **Cancel** during "Rendering" (back to the storyboard within seconds;
-   **Generate video** starts it again and reuses the recorded narration for free). Edit one sentence
-   after the video exists: the card keeps the thumbnail with "Older version".
+   **Generate video** starts it again and reuses the recorded narration for free). On the "Your video
+   is ready" page press **Edit storyboard** (next to Back to My videos): the storyboard opens with
+   **Back to video**; edit one sentence there: the card keeps the thumbnail with "Older version".
+7. If anything fails ("We couldn't finish your video"): **Try again** when it is offered, or
+   **Edit storyboard** to change it first. Recorded narration is never paid for twice.
+
+## Known limits
+- **The app's voice counters only know what the app sent.** The founder decided (2026-11-16) not to add a way to seed them: characters used outside the app (on the ElevenLabs website, the voice samples, the founder's earlier tests: about 1,200 in the month to 2026-12-12) are not counted, so the app-wide 9,000 guard can be above what is really left. That is safe on the free plan: ElevenLabs itself refuses at its limit (it can't charge money), and the job then fails with the retryable "Voice limit reached this month." with **Edit storyboard** and **Back to My videos** as ways out.
+- If the render child process crashes on its own (not stopped by us), a Chrome it started may keep running until it notices; a normal finish, Cancel and the 20-minute limit all stop Chrome.
 
 ## How we test it (done when all are ticked)
 - [x] A real MP4 is produced and stored in R2 (e2e: real local render + real upload to `reel-app-dev`; stand-in voice)
@@ -113,3 +122,4 @@ This makes ONE real video with the real ElevenLabs voice (about 1,000 of the mon
 | 2026-11-13 | Voice decision noted: the founder's chosen English voices (Ranbir, Riya Rao) are Voice Library voices that need a paid plan; testing uses the free US voices Brian (male) and Matilda (female). |
 | 2026-11-15 | Plan approved by the founder (decisions 1–6 above). Built in small commits on `dev`: render job + child process; D8 approve & generate with the limits in order, E2/E3, allowed actions, speech lock, voice reservation, renders, the queue's stuck rule, F23 indexes; the `generate-video` worker; the Step 3 screen; My videos thumbnails; unit tests (885 pass); a clean `next build`; docs. Everything ran with TMPDIR inside the project. Zero ElevenLabs and zero Gemini calls (stand-ins only). |
 | 2026-11-15 | E2E `tools/e2e/f23-generate.ts` on `bytereel_test` (stand-in voice and Gemini, real local renders, real uploads to `reel-app-dev`): **all 62 checks pass**. A 86 s water-cycle video took about 3.5 min from approval to "ready" (render ≈ 3 min, 8.8 MB); the second video waited "Waiting to start… 1 ahead" while the first rendered; Cancel while rendering stopped it in about 7 s; a busy voice → Try again → narration recorded, only the changed scene paid; the older video stayed after an edit; limits refused in order. The R2 test files (test user ids) are kept in the dev bucket. Ready for code review and the founder's test. |
+| 2026-11-16 | **Code review fixed** (13 findings + nits): the paid audio is saved with the ElevenLabs answer in one write before any upload (a retry, Try again or another job uploads it, never paying again; R2 refusing ends the job at once); every ElevenLabs request is counted right before it is sent (`voice.sentKeys`, credits per month in `voice.period`) and logged in `providerUsage`; ElevenLabs' own quota → "Voice limit reached this month." (retryable); **Edit storyboard** from a failed or ready video and **Back to video** on the storyboard; the start step can't leave a job "running"; a fresh lock without an answer is never taken over, waiting uses `step.sleep`, a job that ends releases its locks; only fixed plain lines reach the browser; the render child gets no secrets and stopping it kills its whole process tree (Chrome runs in its own group); the test-database guard uses the trimmed name; D8 agrees with E2; 404/422 before setup checks. Seeding the app's voice counter: not added (founder decision, see Known limits). Unit tests: 911 pass; typecheck and `next build` clean. E2E on `bytereel_test` (stand-in voice and Gemini, real local renders, real uploads to `reel-app-dev` under test user ids): **all 71 checks pass** (P1 ready in 199 s; Cancel while rendering stopped in 7.8 s; the busy scene's 3 requests and Try again's 4th all counted: 864 = 4 × 216); test database dropped. Zero ElevenLabs and zero Gemini calls; TMPDIR inside the project throughout. |
