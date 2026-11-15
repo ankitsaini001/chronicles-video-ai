@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (ready for the founder to watch the renders) |
+| **Status** | ✅ Done (two code reviews fixed; founder watched the renders and said OK on 2026-11-15) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F22, F00 |
 | **Design** | Approved sample `runs/local-dev/how-the-water-cycle-works-85b912/v1/water-cycle-v4-hero.mp4` (branch `exp/video-style-v2`) |
@@ -77,7 +77,7 @@ the creator wait much longer.
   hero sits below it (no overlap)
 - [x] 8. Docs: PRD decision #28, ARCHITECTURE §15.6, BRAND §7.1, API §11.2, DATABASE planVersions, F23 note
 - [x] 9. Code review (code-reviewer agent); every finding fixed (progress log, 2026-11-15)
-- [ ] 10. Founder watches the renders and says OK
+- [x] 10. Founder watches the renders and says OK (2026-11-15)
 
 ## Removed / not in this feature
 - **Removed (unused):** the old light-theme composition: `packages/video/src/patterns/*`, `primitives/` (the icon
@@ -131,7 +131,7 @@ Nothing here costs money or calls Gemini/ElevenLabs.
 - [x] `npm test`, typecheck, `next build`
 - [x] Re-render of the approved run and fixture renders; every contact sheet checked (no empty frames, overlaps, cut-offs or duplicates; readable at phone size)
 - [x] Code review passed (code-reviewer agent; all findings fixed 2026-11-15)
-- [ ] Founder watched the renders and said OK
+- [x] Founder watched the renders and said OK (2026-11-15)
 
 ## Render time and file size (measured 2026-11-15, this machine, 8 threads)
 The water-cycle run (68.2 s, 2045 frames, recorded narration). This machine is shared: render times
@@ -180,3 +180,4 @@ After the code-review fixes (same settings; all MP4 checks pass; machine very bu
 | 2026-11-15 | Built: hero catalog + optional `hero` per narration block (planner, prompt, validation, revision, review page); timeline v2 with a hero track and 3–5 word captions with word timings; the v4 engine with 8 layouts replacing the old composition; the 46-object hero library (34 new objects drawn by three helper agents in parallel, reviewed in the hero gallery); the music bed; review tools; two new fixtures; the storyboard "Visual:" line names the heroes. Render speed and size tuned and measured (table above). Contact-sheet review rounds fixed: comparison and part-card text too small, a chart opening on an empty baseline, a labeled diagram whose hero wandered off the diagram's object, a hook whose question was not all visible in the first second and touched the hero, weak-cue flicker in the fallback. 776 tests pass; typecheck and `next build` pass. Ready for code review and the founder's check. |
 | 2026-11-15 | Code review: every finding fixed, in small commits on `dev`. Temporary files: renders and tools never write to `/tmp` (`TMPDIR=<project>/runs/.tmp` in the npm scripts, `tools/project-tmp.ts`, `dev.mjs`; `workDir` required; F23 MUST line); checked before and after every render. Long words: shown smaller or broken at `-` `/` `.`, a plan problem only when they can't be shown; never a failed paid-for video. Heroes: the planner's "none" is `hero: null` (scene icon), generic keywords are label-only, opening and 3 s other-group hold rules, takeaway keeps the planner's pick, narration edits drop a stale hero, storyboard line matches the video; the approved water-cycle run keeps its exact hero sequence (test). Layout: one `LAYOUT.safeRight`, rail/timeline/cards/hook subtitle inside the Reels safe zone (test), 6–7 step rails, long card labels step down and never spill, every comparison point and chart bar drawn, new `long-labels` fixture. Hook: opening words end at a natural break ("Did you know…" kept; "SIP or FD?" title instead of "Should your monthly…"). Captions: overflow safety net back, one lit word at a time, a lone leftover hook word shown. Globe clip ids, tighter key terms, test gaps (old-plan hash value, music bytes/WAV, fixture renders silent with work folder in the run, real caption layout), PRD #28 sound effects, docs. Re-rendered the water-cycle run (`water-cycle-final-v4-fixed.mp4`) and the four fixtures; every contact sheet checked. 832 tests pass; typecheck and `next build` pass. Render time measured on a very busy machine (table above): no slower than before the review in a back-to-back test. Waiting for the founder's check. |
 | 2026-11-15 | Second code review (the fix round only): one high finding and five low ones, all fixed. A single word wider than its card (e.g. "Photosynthesis" in a diagram part) now makes the text smaller instead of being cut off mid-word; only at the smallest size does it break over lines (`overflowWrap: anywhere`). The hook's subtitle pill appears after the hook's own punch-in has settled (safe zone). A planner pick that confirms the hero a spoken word already showed counts as the planner's (the takeaway keeps it). One word alone with a full stop or comma ("Dr.", "So,", "Okay,") is no longer used as the hook's opening words; "Why?" and "Imagine," still are. The caption error message names the right line. Every e2e script header says to set TMPDIR inside the project. The water-cycle video is unaffected by these (no re-render needed). 833 tests pass; typecheck passes. |
+| 2026-11-15 | Founder watched `water-cycle-final-v4-fixed.mp4` and said OK. ✅ Done; pushed to `dev`. Next: F23 (Generate video). |

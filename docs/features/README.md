@@ -71,7 +71,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | # | Feature | Depends on | Status |
 |---|---|---|---|
 | F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | ✅ Done |
-| F22b | [Video style upgrade (v4 hero visuals)](F22b-video-style-v4.md) | F22, F00 | 🧪 Testing |
+| F22b | [Video style upgrade (v4 hero visuals)](F22b-video-style-v4.md) | F22, F00 | ✅ Done |
 | F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ⬜ Not started |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ⬜ Not started |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ⬜ Not started |
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** founder tests **F22b — Video style upgrade (v4 hero visuals)** (approved style by the founder and a colleague on 2026-11-15; now the only style, see its feature file for the renders to watch). Then F23 (English only, free ElevenLabs plan, local render, app-wide voice guard). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00 and F22 done.
+**Next up:** **F23 — Generate video** (English only, free ElevenLabs plan, local render, app-wide voice guard). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22 and F22b done (v4 hero style is the only video style).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
