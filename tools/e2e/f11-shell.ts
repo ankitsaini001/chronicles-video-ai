@@ -4,6 +4,8 @@ import { addInvite, API_RATE_LIMITS, closeMongoClient, getDb, rateLimitId, rateL
 /**
  * F11 end-to-end check over real HTTP, against a running `next start` server: the app shell,
  * the empty My videos page, the temporary /projects/new page and B1 GET /api/v1/me.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test` (never the real `bytereel`).
  *
  *   1. MONGODB_DB=bytereel_test npm run db -- indexes --feature F07 --feature F08 --apply

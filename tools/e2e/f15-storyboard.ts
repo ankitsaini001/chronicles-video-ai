@@ -12,6 +12,8 @@ import { ObjectId } from "mongodb";
  * PROVIDER_BUSY, PROVIDER_REJECTED, C4 edit idea, E2 retry (an attempt that asks Gemini counts 1 of 20, 429 at the limit, not
  * counted toward 5/day), C6/E1 polling, owner-only 404s, the stuck-job rule (dead job → failed,
  * lost event → sent again), the providerUsage log, the indexes and the project page.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239.
  *
  *   1. in apps/web:  npx next build

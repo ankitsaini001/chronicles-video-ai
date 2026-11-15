@@ -8,6 +8,8 @@ import { ObjectId } from "mongodb";
  * F16–F20 end-to-end check over real HTTP (storyboard screen, narration edit + versions + undo,
  * revision chat, voice switch, approval #1): a running `next start` server whose Gemini is the local
  * stand-in (E2E_FAKE_GEMINI=1: NO real AI call) and a private Inngest Dev Server on port 8299.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239 (never 3000/8288).
  *
  *   1. in apps/web:  npx next build

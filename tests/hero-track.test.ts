@@ -164,6 +164,19 @@ describe("hero track (pure)", () => {
       events: [],
     });
     expect(picked).toEqual([{ startFrame: 0, hero: "drop", icon: "bulb", source: "plan" }]);
+    // the first pick names the hero a word already showed: it is still the planner's first pick (second review)
+    const sameAsWord = heroTrack({
+      sceneType: "takeaway",
+      sceneStart: 0,
+      blocks: [
+        { narrationId: "a", startFrame: 0, words: words("The sun drives it all", 0) },
+        { narrationId: "b", hero: "sun", startFrame: 100, words: words("Heat lifts the water", 100) },
+        { narrationId: "c", hero: "cloud", startFrame: 200, words: words("and clouds carry it", 200) },
+      ],
+      objects: [],
+      events: [],
+    });
+    expect(sameAsWord).toEqual([{ startFrame: 0, hero: "sun", icon: "bulb", source: "plan" }]);
   });
 
   it("the approved water-cycle run keeps its hero sequence (recorded narration timing)", () => {

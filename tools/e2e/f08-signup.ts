@@ -4,6 +4,8 @@ import { type Document, ObjectId } from "mongodb";
 
 /**
  * F08 end-to-end check over real HTTP, against a running `next start` server.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test` (never the real `bytereel`).
  *
  *   1. npm run db -- indexes --feature F07 --feature F08 --apply   (with MONGODB_DB=bytereel_test)

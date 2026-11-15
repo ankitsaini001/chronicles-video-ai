@@ -19,6 +19,8 @@ describe("hook slam words end at a natural break (F22b review)", () => {
     expect(slamOf("Imagine, just for a second, no internet.")).toBe("Imagine,");
     expect(slamOf("Have you ever wondered where your plastic bottle goes?")).toBe("Have you ever");
     expect(slamOf("What if your money could grow while you sleep?")).toBe("What if");
+    expect(slamOf("Why? Because the sky is not really blue.")).toBe("Why?");
+    expect(slamOf("Okay, ready? Let's start with a magnet.")).toBe("Okay, ready?");
   });
 
   it("a cut-off fragment is never shown: no slam words, the title is on screen from the first frame and the captions show every word", () => {
@@ -26,6 +28,10 @@ describe("hook slam words end at a natural break (F22b review)", () => {
       "Should your monthly savings sit in a fixed deposit, or go into a SIP?",
       "When you press send on a chat message, how does it reach your friend?",
       "Where does rain come from, and where does it go after it falls?",
+      // one word with a full stop or comma is a fragment too (second review)
+      "Dr. Kalam once said that dreams are not what you see in sleep.",
+      "So, what happens to a letter after you post it?",
+      "Okay, picture a busy railway station at rush hour.",
     ]) {
       expect(hookSlam(words(text)), text).toEqual({ slam: [], end: 0 });
       expect(hookCaptionStart(words(text))).toBe(0);

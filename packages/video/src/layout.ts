@@ -129,11 +129,23 @@ export const HOOK_SUBTITLE_WIDTH = 2 * (LAYOUT.safeRight - LAYOUT.width / 2);
 /** Inter ExtraBold (800) is about 7% wider than the SemiBold widths of the caption estimate. */
 const EXTRA_BOLD = 1.07;
 
-/** Lines `text` takes at `size` px in `width` px (greedy word wrap, like the browser). */
-export function wrapLines(text: string, size: number, width: number): number {
+/**
+ * Lines `text` takes at `size` px in `width` px (greedy word wrap, like the browser). A single word
+ * wider than `width` does not fit (Infinity), so fitBox steps the size down instead of letting the
+ * card cut the word off; with `breakLongWords` it counts the lines the browser uses when it breaks
+ * that word (ui.tsx BoxText, overflowWrap "anywhere"), with the last piece's line treated as full.
+ */
+export function wrapLines(text: string, size: number, width: number, breakLongWords = false): number {
   let lines = 1;
   let line = "";
   for (const word of text.split(/\s+/u).filter(Boolean)) {
+    const wordWidth = estimateTextWidth(word, size) * EXTRA_BOLD;
+    if (wordWidth > width) {
+      if (!breakLongWords) return Number.POSITIVE_INFINITY;
+      lines += (line ? 1 : 0) + Math.ceil(wordWidth / width) - 1;
+      line = word;
+      continue;
+    }
     const next = line ? `${line} ${word}` : word;
     if (line && estimateTextWidth(next, size) * EXTRA_BOLD > width) {
       lines++;
@@ -157,7 +169,7 @@ export interface TextBox {
  * The biggest font size (from `max` down to `min`, 2 px steps) at which `text` fits `height` px of
  * `width` px lines. `maxLines` is how many lines the box holds at that size: the text is cut off
  * after them (ui.tsx BoxText), so it never spills out of its card. `clipped` when it does not fit
- * even at `min`.
+ * even at `min`: then a word wider than the box is broken over lines, not cut off at the card edge.
  */
 export function fitBox(text: string, box: TextBox): { size: number; lines: number; maxLines: number; clipped: boolean } {
   const maxLines = (size: number) => Math.max(1, Math.floor(box.height / (size * box.lineHeight)));
@@ -165,5 +177,5 @@ export function fitBox(text: string, box: TextBox): { size: number; lines: numbe
     const lines = wrapLines(text, size, box.width);
     if (lines <= maxLines(size)) return { size, lines, maxLines: maxLines(size), clipped: false };
   }
-  return { size: box.min, lines: wrapLines(text, box.min, box.width), maxLines: maxLines(box.min), clipped: true };
+  return { size: box.min, lines: wrapLines(text, box.min, box.width, true), maxLines: maxLines(box.min), clipped: true };
 }

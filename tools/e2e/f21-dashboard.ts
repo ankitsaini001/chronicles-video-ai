@@ -8,6 +8,8 @@ import { ObjectId } from "mongodb";
  * F21 end-to-end check over real HTTP ("My videos": C1 list + tabs + pages, C4 rename, C5 archive,
  * the cards and the first-visit page). NO AI call: the projects are written straight into the test
  * database, nothing starts a job.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239 (never 3000/8288).
  *
  *   1. in apps/web:  npx next build

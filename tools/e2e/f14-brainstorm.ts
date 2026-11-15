@@ -21,6 +21,8 @@ import { ObjectId } from "mongodb";
  * Checks C7 POST /api/v1/brainstorm (pipeline checks, 5 ideas per language, repair, busy, safety,
  * the providerUsage log, 10/hour, 30/day also under concurrent clicks, nothing saved as a project),
  * the Idea page markup and C2 with a picked idea (`inputType: "brainstorm"`).
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239.
  *
  *   1. in apps/web:  npx next build

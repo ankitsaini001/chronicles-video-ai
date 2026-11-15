@@ -50,6 +50,9 @@ export const Hook: Pattern = {
     // the pill (padding 2 × 36) stays left of the Reels buttons
     const subSize = subtitle ? fitSize(subtitle.label, HOOK_SUBTITLE_WIDTH - 72, 2, 50, 38) : 0;
     const subTop = Math.min(1180, heroY + heroSize / 2 + 10);
+    // the pill appears only once the hook's own punch-in (camera, up to × 1.06) has settled, so the
+    // scene camera's zoom alone decides its right edge (tests/video-layout.test.ts)
+    const subAt = subtitle ? Math.max(subtitle.revealFrame, end + 16) : 0;
     return (
       <AbsoluteFill>
         <CameraView cam={cam}>
@@ -61,7 +64,7 @@ export const Hook: Pattern = {
             </>
           )}
           {subtitle && (
-            <div style={{ position: "absolute", left: 540 - HOOK_SUBTITLE_WIDTH / 2, width: HOOK_SUBTITLE_WIDTH, top: subTop, display: "flex", justifyContent: "center", opacity: clamp01(popIn(f, subtitle.revealFrame) * 1.5), transform: `translateY(${(1 - Math.min(1, popIn(f, subtitle.revealFrame))) * 30}px)` }}>
+            <div style={{ position: "absolute", left: 540 - HOOK_SUBTITLE_WIDTH / 2, width: HOOK_SUBTITLE_WIDTH, top: subTop, display: "flex", justifyContent: "center", opacity: clamp01(popIn(f, subAt) * 1.5), transform: `translateY(${(1 - Math.min(1, popIn(f, subAt))) * 30}px)` }}>
               <div style={{ fontFamily: FONT, fontWeight: 800, fontSize: subSize, lineHeight: 1.15, textAlign: "center", textWrap: "balance", color: C.gold, background: "rgba(26,18,10,0.92)", border: "2px solid rgba(245,165,36,0.6)", borderRadius: 40, padding: "12px 36px", maxWidth: HOOK_SUBTITLE_WIDTH, boxSizing: "border-box", boxShadow: "0 0 26px rgba(245,165,36,0.3)" }}>
                 {subtitle.label}
               </div>

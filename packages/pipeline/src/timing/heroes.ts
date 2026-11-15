@@ -104,7 +104,11 @@ export function heroTrack(input: HeroTrackInput): HeroStep[] {
       continue;
     }
     if (c.hero === last.hero) {
-      if (c.pinned) lastHit = c.frame;
+      if (c.pinned) {
+        lastHit = c.frame;
+        // the planner picked the hero a word already showed: the step is the planner's (the takeaway keeps it)
+        last.source = c.source;
+      }
       continue;
     }
     if (c.pinned || c.strong) {

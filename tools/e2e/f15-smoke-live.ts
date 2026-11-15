@@ -9,6 +9,8 @@ import { ObjectId } from "mongodb";
  * Gemini → plan version 1), then prints scenes, words, estimated length, time and tokens.
  * Costs one planner job on Gemini (free tier: no money; at most 4 requests). If Gemini is busy, it
  * presses Try again (E2) at most once.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: only on the test database `bytereel_test`, port 3230–3239, and only against a server
  * WITHOUT the stand-in (E2E_FAKE_GEMINI unset) whose Inngest Dev Server is on port 8299.
  *

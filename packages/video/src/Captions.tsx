@@ -20,13 +20,15 @@ import { C, FONT, LAYOUT } from "./theme";
 export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore?: number }> = ({ track, frame, skipBefore = 0 }) => {
   const caption = track.captions.find((c) => frame >= c.startFrame && frame < c.endFrame);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  // each drawn line's index in caption.lines (the hook can hide a whole first line), for the error message
+  const lineIndexes = useRef<number[]>([]);
   useLayoutEffect(() => {
     if (!caption) return;
     lineRefs.current.forEach((el, i) => {
       if (el && el.offsetWidth > LAYOUT.captionWidth + 0.5) {
         cancelRender(
           new Error(
-            `Caption "${caption.id}" line ${i + 1} ("${caption.lines[i]}") is ${el.offsetWidth}px wide; the caption box fits ${LAYOUT.captionWidth}px. ` +
+            `Caption "${caption.id}" line ${(lineIndexes.current[i] ?? i) + 1} ("${caption.lines[lineIndexes.current[i] ?? i]}") is ${el.offsetWidth}px wide; the caption box fits ${LAYOUT.captionWidth}px. ` +
               "Lower CAPTION_STYLE.maxLineWidthPx or the caption font size.",
           ),
         );
@@ -38,14 +40,16 @@ export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore
   if (words.length === 0) return null;
   // the lines split the phrase's words in order; each word keeps its index (for the next word's start)
   let index = 0;
-  const lines = caption.lines
-    .map((line) => {
+  const shown = caption.lines
+    .map((line, lineIndex) => {
       const count = line.split(" ").length;
       const lineWords = caption.words.slice(index, index + count).map((w, k) => ({ w, i: index + k }));
       index += count;
-      return lineWords.filter(({ w }) => w.startFrame >= skipBefore);
+      return { lineIndex, words: lineWords.filter(({ w }) => w.startFrame >= skipBefore) };
     })
-    .filter((l) => l.length > 0);
+    .filter((l) => l.words.length > 0);
+  const lines = shown.map((l) => l.words);
+  lineIndexes.current = shown.map((l) => l.lineIndex);
   const enter = pop(frame, Math.max(caption.startFrame, words[0]!.startFrame - 2), 320, 18);
   // smaller only for one word too wide for a line at the normal size (captions.json fontSizePx)
   const fontSize = caption.fontSizePx ?? CAPTION_STYLE.fontSizePx;

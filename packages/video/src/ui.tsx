@@ -94,6 +94,9 @@ export const BoxText: React.FC<TextBox & { text: string; style?: React.CSSProper
         fontSize: fit.size,
         lineHeight: box.lineHeight,
         textWrap: "balance",
+        // Only reached at the smallest size (fitBox steps down first): a word wider than the card
+        // breaks over lines instead of being cut off mid-word.
+        overflowWrap: "anywhere",
         display: "-webkit-box",
         WebkitBoxOrient: "vertical",
         WebkitLineClamp: fit.maxLines,

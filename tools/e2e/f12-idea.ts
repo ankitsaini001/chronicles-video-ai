@@ -22,6 +22,8 @@ import { ObjectId } from "mongodb";
  * F12 end-to-end check over real HTTP, against a running `next start` server: the Step 1 Idea
  * page, C2 POST /api/v1/projects (pipeline checks, idempotency, projects/day quota, also under
  * concurrent clicks), the temporary project page (owner only) and the projects count in B1.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test` (never the real `bytereel`).
  * It creates the F07/F08/F12 indexes there itself.
  *

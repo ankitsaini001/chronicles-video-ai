@@ -43,10 +43,13 @@ export function hookSlam(words: readonly CaptionTrackWord[], max = 3): HookSlam 
   let count = 0;
   const upTo = Math.min(max, words.length);
   for (let i = 0; i < upTo; i++) {
-    if (BREAK.test(words[i]!.text)) {
-      count = i + 1;
-      break;
-    }
+    const text = words[i]!.text;
+    if (!BREAK.test(text)) continue;
+    // one word alone ("Dr.", "So,", "Okay,") is a fragment, unless it is a whole question or
+    // exclamation ("Why?") or a natural opener ("Imagine,")
+    if (i === 0 && !/[?!]["')\]]?$/u.test(text) && !NATURAL_OPENERS.includes(plain(text))) continue;
+    count = i + 1;
+    break;
   }
   if (!count) {
     for (let n = upTo; n >= 1 && !count; n--) {

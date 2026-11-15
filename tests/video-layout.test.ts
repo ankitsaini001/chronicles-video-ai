@@ -24,6 +24,7 @@ import {
   TIMELINE,
   VALUE_CARD,
   WIDE_CARD,
+  wrapLines,
 } from "../packages/video/src/layout";
 import { LAYOUT } from "../packages/video/src/theme";
 import { hashPlan, validatePlan } from "../packages/pipeline/src/planning";
@@ -118,6 +119,26 @@ describe("video layout: long labels stay inside their cards (F22b review)", () =
     const plan = checked.plan;
     const alignments = Object.fromEntries(plan.scenes.map((s) => [s.id, synthesizeSceneAlignment(s, plan.language)]));
     expect(compileTimeline({ plan, planHash: hashPlan(plan), alignments }).timeline.scenes).toHaveLength(6);
+  });
+
+  it("a single long word makes the text smaller instead of being cut off mid-word (second review)", () => {
+    const point = pointTextBox(comparisonLayout([["a"], ["b"]]).rowH);
+    const part = partTextBox(COLUMNS[0].width, partRowHeight(3));
+    for (const word of ["Photosynthesis", "Electromagnetism", "Telecommunications", "Cryptocurrencies", "Authentication"]) {
+      for (const box of [point, part]) {
+        const fit = fitBox(word, box);
+        // either the word fits whole on one line at the chosen size, or (only at the smallest size) it breaks over lines
+        if (fit.clipped) {
+          expect(fit.size, word).toBe(box.min);
+          expect(Number.isFinite(fit.lines), word).toBe(true);
+        } else {
+          expect(wrapLines(word, fit.size, box.width), word).toBe(1);
+        }
+      }
+    }
+    expect(fitBox("Photosynthesis", part).size).toBeLessThan(part.max);
+    expect(fitBox("Photosynthesis", part).clipped).toBe(false);
+    expect(wrapLines("Photosynthesis", 50, part.width)).toBe(Number.POSITIVE_INFINITY);
   });
 
   it("text that still does not fit is cut off at the box's last line (never spills out)", () => {
