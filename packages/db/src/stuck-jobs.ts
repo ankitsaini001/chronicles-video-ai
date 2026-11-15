@@ -14,7 +14,8 @@ import { failReviseJob } from "./revisions";
 // behind others ("Waiting to start…") and must never be failed for waiting. It is failed (INTERNAL,
 // retryable) only when NOTHING in the video queue has moved for 15 min: neither this job (its own
 // progress, or since it was queued) nor any other video job (their progress, start or finish). A
-// render writes progress every few seconds, so a long render keeps the whole queue alive.
+// render writes progress every few seconds, so a long render keeps the whole queue alive. A running
+// video job whose Cancel was pressed and that hasn't moved for a minute is ended as cancelled.
 // For all three: queued and its start event not handed over (or sent but not started after 2 min)
 // → the caller sends the event again; the same event id means Inngest drops it if the first one
 // did arrive. Only one reader claims a resend (conditional update on `event.lastTriedAt`).
@@ -23,6 +24,8 @@ import { failReviseJob } from "./revisions";
 
 /** Generate jobs: failed only when the whole video queue has been still for this long. */
 export const GENERATE_IDLE_LIMIT_MS = 15 * 60_000;
+/** Generate jobs: Cancel was pressed and the job hasn't moved for this long (the worker is gone): cancelled. */
+export const GENERATE_CANCEL_GRACE_MS = 60_000;
 
 /**
  * Pure: is this generate job stuck? `lastOtherActivity` is when any other video job last moved.
@@ -44,6 +47,11 @@ export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Da
   const reload = async () => (await getJob(db, job._id)) ?? job;
 
   if (job.type === "generate") {
+    // Cancel was pressed but nothing stopped the job (the worker died between steps): end it as cancelled.
+    if (job.state === "running" && job.cancelRequestedAt && at - job.updatedAt.getTime() >= GENERATE_CANCEL_GRACE_MS) {
+      await endGenerateJob(db, { jobId: job._id, attempt: job.attempt, outcome: "cancelled", staleBefore: new Date(at - GENERATE_CANCEL_GRACE_MS), now });
+      return { job: await reload(), resendEventId: null };
+    }
     const own = (job.state === "running" ? job.updatedAt : job.queuedAt).getTime();
     // Cheap first: only look at the rest of the queue when this job itself has been still that long.
     if ((job.state === "running" || job.state === "queued") && at - own >= GENERATE_IDLE_LIMIT_MS && isGenerateJobStuck(job, await lastGenerateActivity(db, job._id), now)) {

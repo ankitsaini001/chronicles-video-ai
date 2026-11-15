@@ -240,7 +240,7 @@ export {
   type LibraryTab,
   type ProjectSummaryResource,
 } from "./project-library";
-export { checkStuckJob, checkStuckPlanJob, GENERATE_IDLE_LIMIT_MS, isGenerateJobStuck, type StuckCheck } from "./stuck-jobs";
+export { checkStuckJob, checkStuckPlanJob, GENERATE_CANCEL_GRACE_MS, GENERATE_IDLE_LIMIT_MS, isGenerateJobStuck, type StuckCheck } from "./stuck-jobs";
 export {
   approveAndGenerate,
   beginRender,

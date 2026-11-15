@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   GENERATE_MESSAGES,
@@ -93,6 +93,20 @@ type StepResult = { status: "ok" } | { status: "ended"; outcome: GenerateJobOutc
 
 /** A recording held by another job: try this step again after this long. */
 export const SPEECH_BUSY_WAIT_MS = 60_000;
+
+/** A render's work folder this old was left by a render that never finished (the server restarted). */
+export const OLD_WORK_FOLDER_MS = 6 * 60 * 60_000;
+
+/** Remove work folders of renders that never finished (older than 6 h); never the current one. */
+async function removeOldWorkFolders(parent: string, current: string): Promise<void> {
+  const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === current || !/^[0-9a-f]{24}$/.test(entry.name)) continue;
+    const folder = path.join(parent, entry.name);
+    const info = await stat(folder).catch(() => null);
+    if (info && Date.now() - info.mtimeMs > OLD_WORK_FOLDER_MS) await rm(folder, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
 
 const sha256 = (data: Uint8Array) => `sha256:${createHash("sha256").update(data).digest("hex")}`;
 
@@ -333,6 +347,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     // their work there (and leave it behind after a cancel), so removing the work folder cleans all.
     const tmp = path.join(workDir, "tmp");
     await mkdir(tmp, { recursive: true });
+    await removeOldWorkFolders(path.dirname(workDir), renderId.toHexString());
     const files = deps.files();
     try {
       // The narration, checked against the SHA-256 saved when it was recorded.

@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   allowedActionsFor,
   approveAndGenerate,
+  checkStuckJob,
   canTakeOverSpeech,
   claimSpeech,
   endGenerateJob,
@@ -326,6 +327,19 @@ describe("one video at a time: the queue and its stuck-job rule", () => {
     expect(isGenerateJobStuck({ state: "succeeded", queuedAt: minutes(99), updatedAt: minutes(99) }, null, NOW)).toBe(false);
   });
 
+  it("Cancel pressed but the worker is gone: after a minute without progress the job ends as cancelled", async () => {
+    const job = generateJob({ state: "running", cancelRequestedAt: minutes(2), updatedAt: minutes(2) });
+    const writes: any[] = [];
+    const { db } = fakeDb({
+      "jobs.findOne": () => job,
+      "jobs.updateOne": (_f: unknown, u: unknown) => void writes.push(u),
+      "projects.updateOne": (_f: unknown, u: unknown) => void writes.push(u),
+    });
+    await checkStuckJob(db, job, NOW);
+    expect(writes[0].$set).toMatchObject({ state: "cancelled" });
+    expect(writes[1].$set).toMatchObject({ state: "storyboard_ready" });
+  });
+
   it("'Waiting to start…' says how many videos are before this one", () => {
     expect(waitingText(0)).toBe("Waiting to start…");
     expect(waitingText(null)).toBe("Waiting to start…");
@@ -567,6 +581,14 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
       const files = fakeFiles();
       const provider = { calls: 0 };
       const seen: { spec?: RenderJobSpec; tmp?: string } = {};
+      // A work folder left by a render that never finished (7 h old) and a recent one (another render).
+      const generateDir = path.join(root, "runs", ".tmp", "generate");
+      const stale = path.join(generateDir, "a".repeat(24));
+      const recent = path.join(generateDir, "b".repeat(24));
+      await mkdir(stale, { recursive: true });
+      await mkdir(recent, { recursive: true });
+      const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60_000);
+      await utimes(stale, sevenHoursAgo, sevenHoursAgo);
       const outcome = await runGenerateJob(
         { event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps },
         { store, files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult, seen) as never, root, retryLater, log: () => undefined, heartbeatMs: 10 },
@@ -587,6 +609,8 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
       expect(seen.tmp).toBe(path.join(seen.spec!.workDir, "tmp"));
       expect(seen.spec!.music).toBe(true);
       expect(existsSync(seen.spec!.workDir)).toBe(false);
+      expect(existsSync(stale)).toBe(false);
+      expect(existsSync(recent)).toBe(true);
     });
   });
 
