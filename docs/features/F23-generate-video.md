@@ -30,6 +30,11 @@ F20 built approval #1 without the video job. F23 MUST:
 - [ ] **Publish (F29/F30) verifies the R2 object's SHA-256 against `renders.mp4Sha256` before sending it to Instagram** (write it into that feature's file when it starts).
 - [ ] Call `R2ArtifactStore` directly with keys from `StorageKeys` (no ArtifactStore adapter); call `checkBucket()` at worker start.
 
+## Note from F22b (video style v4, 2026-11-15)
+- The render stage now draws **video style v4 "hero visuals"** (packages/video, ARCHITECTURE §15.6): it needs `timeline.json` + `captions.json` **schema version 2** (hero track, caption words) from `compileTimeline`, the scene audio, and `music: BACKGROUND_MUSIC` (the code-generated music bed is written into the render's public folder by `renderExplainer`). Pass `workDir` so the Remotion bundle stays in the job's temp folder.
+- **Render time is now about 2 minutes locally** for a 68 s video (about 105 s idle and up to about 140 s busy on the 8-thread dev machine; old engine 78 s; the approved sample took about 4 minutes before the speed work), files about 7 MB. Budget the "Rendering" progress step for **up to about 4 minutes** on slower hosts (Vercel Sandbox with fewer vCPUs, cold start); measure it in the Sandbox benchmark (ARCHITECTURE §15.5).
+- Plans may carry `hero` per narration block; old plans without it render with keyword heroes (no migration).
+
 ## Goal
 Turn the approved storyboard into an MP4 in the background, with progress steps.
 

@@ -120,6 +120,18 @@ Body text max width: ~65 characters.
 - **Motion:** subtle. Tiles float, buttons lift 2px on hover, sections fade in from a visible state. Respect `prefers-reduced-motion`.
 - **Not used:** promo/announcement bars, festive string lights (removed by the founder), heavy particle effects.
 
+### 7.1 Video imagery and motion (video style v4 "hero visuals", approved 2026-11-15, F22b)
+Every video uses this one style (code: `packages/video/src`, hero library `packages/video/src/heroes`).
+- **Stage:** the dark Ember Gold background (`#0B0806` → `#050302`) with a still amber glow, a soft vignette and a few drifting light motes. No scenery, no landscapes, no mascot.
+- **One hero object per sentence:** one big illustrated object (about 520–600 px of the 1080 px width) in the middle of the frame, gently floating; a new object pops in while the old one shrinks away, objects of one family morph (cloud → rain cloud). The planner picks it per narration block from a fixed library of 46 objects (nature and water, money, technology, science and health, time and places, generic); when it does not, a free keyword fallback picks one, else the scene's icon is shown large in a glowing medallion. The screen is never empty and never shows ghost or placeholder outlines.
+- **Object look:** rich dark shapes with an amber/gold rim light and a soft glow. Glows are gradient shapes, never blur filters (render speed).
+- **Never twice at once:** a small icon in a card or rail is hidden when it shows the same object as the hero.
+- **Big, readable diagrams:** titles 56–88 px in the gold gradient, cards and labels 40–66 px, numbers up to 140 px; everything inside the Reels safe zone (top 290 px and bottom 420 px kept clear, text left of the right-hand buttons).
+- **Layouts per pattern:** hook (the first words slam in over the picture from frame 1, then the gold title and a subtitle pill), labeled diagram (the thing in a glowing ring, its parts as big cards), process flow (current step in a big card, numbered step rail with self-drawing arrows and a travelling light), comparison (two columns, each with its hero, a VS badge, ✓/✗ points), timeline (a line that draws from milestone to milestone, the current one named big), chart (a ring around the hero for shares, big bars or a line for values, a count-up card), step sequence ("STEP 2 OF 4", segmented progress, the current step in a big numbered card), takeaway (gold title, the hero inside an endless loop of light, checklist rows that tick).
+- **Captions:** phrases of 3–5 words in Inter ExtraBold 66 px, the word being spoken in an amber pill, key terms (numbers and words from the on-screen labels) in amber, over a soft dark band.
+- **Motion:** camera punch-in when a new hero arrives, slow push-in and a slight handheld drift, light-wipe transitions between scenes, a thin progress bar at the top. The end card shows only the takeaway: **no "Follow for more"**.
+- **Sound:** the narration leads; a soft code-generated music bed sits about 20 dB under it (higher in pauses), with a whoosh at scene changes and soft chimes on checks and values. One switch turns it off (`BACKGROUND_MUSIC`).
+
 ## 8. Content patterns (home page)
 - **Nav:** logo · How it works · Examples · Hindi voices `NEW` · **Sign in** (small primary).
 - **While Hindi is switched off** (`ENABLED_LANGUAGES`, `packages/db/src/languages.ts`; since 2026-11-14) the home page never advertises Hindi: no "Hindi voices NEW" nav item, the हिंदी hero tile reads "Notes", the Hindi sample card is hidden (3 sample cards: one column on phones, 3 columns from 768 px, 960 px wide on desktop), the "Voice & languages" section is hidden, and the copy says "a natural voice" / FAQ "English." Everything comes back when Hindi is switched on.

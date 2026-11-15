@@ -58,7 +58,7 @@ ByteReel is a web application where an educational creator turns a topic or note
 | G6 | Reuse the proven pipeline | Prototype contracts, validation, compiler, providers and Remotion components move into a shared package (§6) |
 | G7 | Languages: English, Hindi, Hinglish | Language and voice preset are plan fields; fonts and validation already support Devanagari |
 
-**Out of scope for V1** (per the PRD): billing, branding, teams, series/autopilot, uploads, other platforms, analytics, music.
+**Out of scope for V1** (per the PRD): billing, branding, teams, series/autopilot, uploads, other platforms, analytics, music choices (only the built-in code-generated music bed, PRD decision #28).
 
 ---
 
@@ -125,7 +125,7 @@ ByteReel is a web application where an educational creator turns a topic or note
 | **Server actions / route handlers** | AuthN/AuthZ, input validation (Zod), calling domain services, emitting Inngest events | Long-running work (> a few seconds) |
 | **Domain services** (`packages/core`) | Project lifecycle, versioning, approvals, state transitions, quotas | Know about HTTP or React |
 | **Pipeline library** (`packages/pipeline`, from the prototype) | Plan contracts, validation, hashing, planner, speech, alignment mapping, timeline/caption compiler | Know about users or HTTP |
-| **Video package** (`packages/video`) | Remotion composition, 8 patterns, primitives, fonts, captions | Call any network service |
+| **Video package** (`packages/video`) | Remotion composition (video style v4, §15.6): 8 pattern layouts, the hero object library, captions, fonts | Call any network service |
 | **Inngest functions** | Durable orchestration, retries, concurrency limits, scheduling | Hold state outside MongoDB/R2 |
 | **Render worker** (Vercel Sandbox) | Bundle + render the deterministic timeline to MP4, upload to R2 | Call AI providers |
 | **Repositories** (`packages/db`) | Typed MongoDB access, **every query owner-scoped** | Return another owner's data |
@@ -172,7 +172,7 @@ A single repo using **npm workspaces**; no extra monorepo tooling.
 │     └─ inngest/               # Inngest client + function registrations
 ├─ packages/
 │  ├─ pipeline/                 # ← moved from prototype src/: contracts, planning, timing, providers, validation
-│  ├─ video/                    # ← moved from prototype src/video: Remotion composition, patterns, fonts
+│  ├─ video/                    # Remotion composition (style v4): scenes/ layouts, heroes/ object library, captions, fonts
 │  ├─ core/                     # domain services: projects, versions, approvals, quotas, state machines
 │  ├─ db/                       # MongoDB client, repositories (owner-scoped), index definitions, migrations
 │  ├─ storage/                  # R2 ArtifactStore implementation, key builder, presigned URLs
@@ -591,6 +591,14 @@ Sandbox creation failure / timeout → retry once → `generate_failed` with **R
 
 ### 15.5 Benchmark and fallback (📏 P3/P4)
 Measure cold start, render time and cost per 60/90 s video at 2/4/8 vCPUs. If too slow or costly: **fallback A** is Remotion Lambda (AWS); **fallback B** is a small always-on VPS render worker pulling jobs (cheapest at low volume). The `Renderer` interface keeps this swappable.
+
+### 15.6 The video engine: style v4 "hero visuals" (F22b, 2026-11-15)
+- **Inputs:** only `timeline.json` and `captions.json` (schema version 2) plus the scene audio. The compiler (`packages/pipeline/src/timing`) writes everything the screen needs: per scene a **hero track** (`heroes`: which object is on screen from which frame; `timing/heroes.ts`) and per caption its **words** with frames and a key-term flag. The renderer has no randomness and no AI.
+- **Hero choice:** the planner picks `hero` per narration block from the hero catalog (`planning/hero-catalog.ts`, 46 names with keywords, shared with the prompt and the storyboard screen). Without a pick the compiler uses a free, deterministic keyword fallback (events on content objects, then spoken words, with hold/look-ahead/no-flicker rules), else an object label, else the scene icon in a medallion. Old plans without `hero` render unchanged (the field is optional and omitted, so their hash is unchanged).
+- **Composition** (`packages/video/src/Explainer.tsx`): backdrop → one layout per pattern (`scenes/`) with the hero layer (`heroes/HeroLayer.tsx`) and a camera → light-wipe transitions → phrase captions → progress bar → narration + music bed. Hero artwork: `heroes/*.tsx` (no SVG/CSS filters: glows are gradient shapes, for render speed).
+- **Music bed:** generated in Node at render time (`pipeline/music.ts`, about 1.5 s), written into the render's public folder; one switch `BACKGROUND_MUSIC`. Silent fixture renders never get music.
+- **Encoding:** JPEG frames, H.264 CRF 26 (`RENDER_SETTINGS` in `pipeline/render.ts`). Measured locally on 2026-11-15 (8 threads, Remotion's default concurrency 4), 68 s water-cycle video: old engine 78 s / 2.9 MB, v4 sample 241 s / 17.9 MB, **v4 engine about 105 s idle, up to 140 s busy / 6.6 MB** depending on other load on the machine (details in F22b). Concurrency 6 was about 10% faster on this machine; the Sandbox benchmark (§15.5) picks the value for production.
+- **Review tools:** `tools/video/rerender-run.ts` (free re-render of a recorded run), `tools/video/hero-gallery.ts` (the hero library as stills), `tools/video/contact_sheet.py` (frames of an MP4 in a grid). Temporary files stay inside the run folder or the given work folder.
 
 ---
 

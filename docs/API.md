@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 1.0 · 2026-11-12 |
 | **Status** | Draft for founder review |
-| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #25) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts` |
+| **Inputs** | [`PRD.md`](../PRD.md) v1.0 FINAL (decisions log incl. #25) · [`ARCHITECTURE.md`](ARCHITECTURE.md) v1.1 (approved) · [`PIPELINE_DESIGN.md`](PIPELINE_DESIGN.md) v1.0 · code contracts `packages/pipeline/src/contracts/*.ts`, `packages/pipeline/src/planning/planner-output.ts`, `packages/pipeline/src/planning/component-catalog.ts`, `packages/pipeline/src/planning/icon-catalog.ts`, `packages/pipeline/src/planning/hero-catalog.ts` |
 | **Machine-readable spec** | [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1): same endpoints, schemas and examples |
 | **Companion** | [`DATABASE.md`](DATABASE.md): collections, validators, indexes, transactions |
 
@@ -57,7 +57,7 @@
 | Timestamps | ISO-8601 **UTC** with milliseconds and `Z`: `"2026-11-12T09:30:00.000Z"`. The UI converts to the user's timezone (default `Asia/Kolkata`). Request timestamps (e.g. `scheduledAt`) must include an offset or `Z` |
 | Hashes | `"sha256:<64 lowercase hex>"` (`Sha256Schema`): `planHash`, `mp4Sha256`, `captionHash` |
 | Enums | Lowercase snake_case for app enums (`storyboard_ready`), the exact code enums for plan contracts (`"title-hook"`, `"indian-english-female"`), Meta's own values where they come from Meta (`BUSINESS`, `MEDIA_CREATOR`) |
-| Nulls | Optional response fields are **present with `null`** rather than omitted (easier for the UI). Request bodies may omit optional fields. Exception: plan objects keep the contract rule that `icon` is **omitted** when absent |
+| Nulls | Optional response fields are **present with `null`** rather than omitted (easier for the UI). Request bodies may omit optional fields. Exception: plans keep the contract rule that an object's `icon` and a narration block's `hero` are **omitted** when absent |
 | Unknown fields | Request bodies are **strict**: unknown keys → `400 INVALID_INPUT` (same as the Zod `strictObject` plan contracts) |
 | Body size | Max **64 KB** per JSON request → `413 PAYLOAD_TOO_LARGE` |
 | Strings | Trimmed and Unicode-NFC-normalized server side before length checks. Lengths are counted in characters (UTF-16 code units, as in Zod). Idea text and the C7 subject also lose control characters (except tab/line breaks) and invisible format characters (bidi overrides, zero-width space, BOM; ZWJ/ZWNJ are kept for Devanagari) first (F12, F14) |
@@ -686,6 +686,7 @@ Types use TypeScript notation; `| null` fields are always present. Full JSON Sch
 | `ObjectKind` | `headline`, `subtitle`, `icon`, `diagram`, `part`, `arrow`, `node`, `particles`, `column`, `point`, `axis`, `milestone`, `bar`, `line-point`, `pie-slice`, `counter`, `step`, `bullet` (allowed per pattern: `COMPONENT_CATALOG`) | component-catalog.ts |
 | `EventAction` | `appear`, `highlight`, `pulse`, `point-to`, `flow`, `rise`, `fall`, `speed-up`, `gather`, `check`, `cross`, `advance`, `grow`, `count-up`, `complete` (allowed per pattern: `COMPONENT_CATALOG`) | component-catalog.ts |
 | `IconName` | `sun`, `raindrop`, `droplets`, `cloud`, `waves`, `snowflake`, `glass`, `mountain`, `layers`, `thermometer`, `flame`, `wind`, `leaf`, `globe`, `bulb`, `check`, `cross`, `clock`, `coin`, `bank`, `chart`, `book`, `flag`, `star`, `question`, `people`, `gear`, `dot` | `ICON_NAMES` (icon-catalog.ts) |
+| `HeroName` | `chai-cup`, `dinosaur`, `glacier`, `rain-cloud`, `cloud`, `vapour`, `sun`, `groundwater`, `river`, `ocean`, `drop`, `globe`, `coin-stack`, `wallet`, `bank`, `piggy-bank`, `growth-chart`, `calculator`, `credit-card`, `house`, `smartphone`, `laptop`, `server`, `wifi`, `shield-lock`, `chip`, `atom`, `dna`, `heart`, `brain`, `plant`, `flask`, `virus`, `magnet`, `lightbulb`, `clock`, `calendar`, `map-pin`, `mountain`, `factory`, `truck`, `target`, `rocket`, `trophy`, `question-mark`, `checklist` (F22b) | `HERO_NAMES` (hero-catalog.ts) |
 | `ProjectState` | `draft` \| `planning` \| `plan_failed` \| `storyboard_ready` \| `generating` \| `generate_failed` \| `video_ready` \| `scheduled` \| `publishing` \| `published` \| `publish_failed` \| `archived` | ARCHITECTURE §7.2 |
 | `ProjectStep` | `idea` \| `storyboard` \| `video` \| `publish` | derived (which stepper step is active) |
 | `InputType` | `topic` \| `notes` \| `brainstorm` | ARCHITECTURE §8.3 |
@@ -722,7 +723,7 @@ Scene = {
   objects: VisualObject[];                // count per pattern (COMPONENT_CATALOG min/maxObjects)
   events: SceneEvent[];                   // ≤ 8 (SCENE_LIMITS.maxEvents)
 }
-NarrationBlock = { id: SafeId; text: string /*1–300*/; speech: string | null; display: string | null }
+NarrationBlock = { id: SafeId; text: string /*1–300*/; speech: string | null; display: string | null; hero?: HeroName /*the big object shown while it is spoken (F22b); omitted when none*/ }
 VisualObject  = { id: SafeId; kind: ObjectKind; label: string /*≤32 or ≤60 by kind*/; icon?: IconName /*omitted when none*/; value: number | null /*chart kinds only*/ }
 SceneEvent    = { id: SafeId; anchor: { narrationId: SafeId; phrase: string }; action: EventAction; target: SafeId /*object id in the same scene*/ }
 ValidationIssue = { sceneId: string | null; path: string; message: string }   // packages/pipeline/src/planning/validation-issue.ts

@@ -6,7 +6,7 @@
 | **Version** | V1 (MVP), **v1.0 FINAL** |
 | **Owner** | Solo founder-developer |
 | **Status** | ✅ **Final.** Approved for build; aligned with the Namaste AI Season 2 (Akshay Saini) PRD and stack |
-| **Last updated** | 2026-11-12 |
+| **Last updated** | 2026-11-15 |
 
 > **How to change this PRD:** it is now the baseline for building. Any change in scope, flow or stack must be added to the Decisions Log (§21) with a date, so we always know what changed and why.
 >
@@ -61,7 +61,7 @@ These defaults make the specification buildable. They can change during review w
 - Vertical **9:16 only**, at **1080 × 1920**, **30 fps**.
 - Target **adult creators**. Child-directed accounts and classroom administration are outside V1.
 - **Private / limited beta without billing.** Apply internal abuse controls and spend ceilings, without exposing a credit product.
-- **No background music** in the initial release. Speech, animation and captions are enough for the agreed scope.
+- **A soft background music bed, generated in code** (no music library, no cost), on by default behind one switch (decision #28). *Originally "no background music"; changed with the approved v4 video style.*
 - Begin with **eight reusable motion patterns**: title/hook, labeled diagram, process flow, comparison, timeline, chart, step sequence, takeaway.
 
 ---
@@ -290,7 +290,7 @@ Rules:
 | Visuals | Eight motion patterns, one default style |
 | Narration | ElevenLabs, Male or Female voice (creator's choice) per language |
 | Captions | Synchronized phrases, inside Instagram safe zones, editable |
-| Music | None in V1 |
+| Music | A soft code-generated music bed under the narration (ducked while speaking), on by default with one switch (decision #28) |
 
 ---
 
@@ -465,7 +465,7 @@ Notes:
 ---
 
 ## 19. Future Roadmap
-- Branding (colors, font, logo); background music
+- Branding (colors, font, logo); music choices beyond the built-in bed
 - Billing (Razorpay, INR plans), credits
 - Series / recurring topic generation with an approval queue
 - More motion patterns and styles; voice choice for creators
@@ -518,6 +518,7 @@ Everything else follows the course plan, so our code stays in sync.
 | 25 | Changing a project's language is not in V1; create a new project. Voice (female/male) can still be switched | 2026-11-13 |
 | 26 | "Brainstorm with AI" (C7, F14) uses its own model: `GEMINI_BRAINSTORM_MODEL` (optional, default `gemini-3.1-flash-lite`, a fixed id, never a `-latest` alias) with low thinking; the storyboard planner keeps `GEMINI_MODEL`. Reason: `gemini-3.6-flash` took 55–57 s on the free tier even with low thinking (over the 30 s limit); 3.1 Flash-Lite answered in 3–8 s with 5 good ideas. Exactly 5 ideas; 10/hour and 30/day per creator | 2026-11-13 |
 | 27 | **Hindi and Hinglish are hidden until the voice-plan decision** (founder). The ElevenLabs free plan can't use Hindi voices, so those storyboards could never become videos, and no AI tokens are spent on them. Hidden, not removed: one switch (`ENABLED_LANGUAGES` in `packages/db/src/languages.ts`, now `["en"]`) hides them on the home page and the Idea screen, and the server refuses them (422 `LANGUAGE_UNAVAILABLE`) for every AI/voice action; existing Hindi/Hinglish projects stay viewable. Re-enable by adding them back to the list | 2026-11-14 |
+| 28 | **Video style v4 "hero visuals" approved** (founder + colleague, 2026-11-15) and made the only style (F22b): one big hero object per sentence picked by the planner from a fixed library of about 46 objects (free keyword fallback), dark amber stage, 3–5 word phrase captions with the spoken word highlighted, light-wipe transitions, an end card with only the takeaway (no "Follow for more"), no mascot and no scenery. Includes a **soft code-generated music bed** (replaces "no background music" in #9 and §2.2/§10), on by default behind one switch (`BACKGROUND_MUSIC`, packages/pipeline/src/pipeline/music.ts). Render target: at most 2× the old engine's time, files under about 8 MB per minute | 2026-11-15 |
 
 ## 22. Open Items (resolved during build, do not block it)
 - Domain + trademark check for **ByteReel** (.com / .ai / .in / get… / try… variants); backups: ByteMotion, ByteKahaani
