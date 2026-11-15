@@ -13,6 +13,10 @@ import { iconFor, isIconName, type IconName } from "./icon-catalog";
  * er, y, ...). A keyword ending in "*" is a stem and matches any ending ("evaporat*" matches
  * "evaporates", "evaporation"). The longest matching keyword wins, so "cardiac" is a heart, not a
  * credit card. Avoid generic verbs ("rise", "grow", "return"): they appear in every topic.
+ *
+ * A keyword starting with "~" is LABEL-ONLY: it names the hero in an on-screen object label (an
+ * object called "Time" or "Fresh water"), but never as a spoken word, because in speech it is
+ * usually incidental ("over time", "every month", "the next steps", "it leaves", "prices drop").
  */
 
 export const HERO_NAMES = [
@@ -45,7 +49,7 @@ export interface HeroDef {
    * with this icon hides it, so the same object is never shown twice at once. null: no icon matches.
    */
   icon: IconName | null;
-  /** Lowercase keywords for the fallback match (see the file comment). */
+  /** Lowercase keywords for the fallback match (see the file comment; "~" = label-only). */
   keywords: readonly string[];
 }
 
@@ -60,57 +64,57 @@ const def = (name: HeroName, title: string, group: HeroGroup, icon: IconName | n
 
 /** Catalog order is the tie-break when two keywords of the same length match. */
 export const HERO_CATALOG: readonly HeroDef[] = [
-  def("chai-cup", "chai cup", "nature", "glass", ["chai", "tea", "cup", "coffee", "mug"]),
+  def("chai-cup", "chai cup", "nature", "glass", ["chai", "tea", "~cup", "coffee", "mug"]),
   def("dinosaur", "dinosaur", "nature", null, ["dinosaur", "dino", "jurassic", "prehistoric", "fossil"]),
   def("glacier", "glacier", "nature", "snowflake", ["glacier", "iceberg", "ice", "frozen", "polar", "arctic", "antarctic"]),
   def("rain-cloud", "rain cloud", "nature", "raindrop", ["rain", "rainfall", "precipitat*", "snow", "hail", "storm", "monsoon", "drizzle", "heavier"], "cloud"),
   def("cloud", "cloud", "nature", "cloud", ["cloud", "condens*", "fog", "mist"], "cloud"),
   def("vapour", "water vapour", "nature", "droplets", ["vapour", "vapor", "steam", "evaporat*", "humid*"]),
-  def("sun", "sun", "nature", "sun", ["sun", "sunlight", "sunshine", "solar", "heat"]),
+  def("sun", "sun", "nature", "sun", ["sun", "sunlight", "sunshine", "solar", "~heat"]),
   def("groundwater", "groundwater", "nature", "layers", ["groundwater", "underground", "soil", "aquifer", "seep"], "land"),
-  def("river", "river", "nature", "waves", ["river", "stream", "flow", "canal", "waterfall"], "land"),
-  def("ocean", "ocean", "nature", "waves", ["ocean", "sea", "lake", "salt", "salty", "marine", "beach", "wave"]),
-  def("drop", "water drop", "nature", "raindrop", ["droplet", "drop", "fresh", "thirst*"]),
+  def("river", "river", "nature", "waves", ["river", "~stream", "~flow", "canal", "waterfall"], "land"),
+  def("ocean", "ocean", "nature", "waves", ["ocean", "sea", "lake", "salt", "salty", "marine", "beach", "~wave"]),
+  def("drop", "water drop", "nature", "raindrop", ["droplet", "~drop", "~fresh", "thirst*"]),
   def("globe", "globe", "nature", "globe", ["earth", "planet", "world", "globe", "global", "country", "countries", "international"]),
 
   def("coin-stack", "rupee coins", "money", "coin", ["rupee", "coin", "money", "cash", "price", "cost", "paise", "salary", "income", "earn", "fee", "paisa"]),
   def("wallet", "wallet", "money", null, ["wallet", "spend", "spending", "expense", "budget", "purse", "pocket"]),
-  def("bank", "bank", "money", "bank", ["bank", "deposit", "account", "loan", "branch", "rbi", "fd"]),
+  def("bank", "bank", "money", "bank", ["bank", "deposit", "~account", "loan", "~branch", "rbi", "fd"]),
   def("piggy-bank", "piggy bank", "money", null, ["piggy", "saving", "savings", "save"]),
-  def("growth-chart", "growth chart", "money", "chart", ["growth", "invest*", "profit", "stock", "sensex", "nifty", "compound", "mutual", "sip", "portfolio"]),
-  def("calculator", "calculator", "money", null, ["calculat*", "emi", "tax", "taxes", "math", "maths", "arithmetic", "formula"]),
-  def("credit-card", "credit card", "money", null, ["card", "credit", "debit", "upi", "payment", "swipe", "transaction"]),
+  def("growth-chart", "growth chart", "money", "chart", ["growth", "invest*", "profit", "stock", "sensex", "nifty", "~compound", "mutual", "~sip", "portfolio"]),
+  def("calculator", "calculator", "money", null, ["calculat*", "emi", "tax", "taxes", "math", "maths", "arithmetic", "~formula"]),
+  def("credit-card", "credit card", "money", null, ["credit", "debit", "upi", "payment", "swipe", "transaction"]),
   def("house", "house", "money", null, ["house", "home", "rent", "property", "mortgage", "apartment"]),
 
   def("smartphone", "smartphone", "tech", null, ["phone", "smartphone", "mobile", "app", "whatsapp", "android", "iphone"]),
   def("laptop", "laptop", "tech", null, ["laptop", "computer", "software", "code", "coding", "program", "programming", "website", "browser"]),
   def("server", "server", "tech", null, ["server", "database", "datacenter", "datacentre", "backend", "hosting", "storage"]),
-  def("wifi", "wi-fi signal", "tech", null, ["wifi", "signal", "network", "internet", "wireless", "router", "online"]),
+  def("wifi", "wi-fi signal", "tech", null, ["wifi", "~signal", "network", "internet", "wireless", "router", "~online"]),
   def("shield-lock", "lock and shield", "tech", null, ["security", "secure", "safe", "safety", "lock", "password", "privacy", "protect*", "shield", "hack", "hacker", "scam", "fraud", "otp"]),
   def("chip", "microchip", "tech", null, ["chip", "microchip", "processor", "cpu", "gpu", "semiconductor", "silicon", "transistor", "circuit"]),
 
   def("atom", "atom", "science", null, ["atom", "atomic", "electron", "proton", "neutron", "nucleus", "molecule", "nuclear"]),
   def("dna", "DNA", "science", null, ["dna", "gene", "genetic", "genetics", "chromosome", "heredity", "mutation"]),
   def("heart", "heart", "science", null, ["heart", "blood", "heartbeat", "cardiac", "circulation"]),
-  def("brain", "brain", "science", null, ["brain", "mind", "memory", "memories", "neuron", "nerve", "thinking", "focus", "habit"]),
-  def("plant", "plant", "science", "leaf", ["plant", "leaf", "leaves", "tree", "seed", "photosynth*", "crop", "farm", "forest"]),
-  def("flask", "lab flask", "science", null, ["flask", "chemical", "chemistry", "experiment", "lab", "laboratory", "reaction", "acid"]),
+  def("brain", "brain", "science", null, ["brain", "~mind", "memory", "memories", "neuron", "nerve", "thinking", "~focus", "habit"]),
+  def("plant", "plant", "science", "leaf", ["plant", "leaf", "~leaves", "tree", "seed", "photosynth*", "crop", "farm", "forest"]),
+  def("flask", "lab flask", "science", null, ["flask", "chemical", "chemistry", "experiment", "lab", "laboratory", "~reaction", "acid"]),
   def("virus", "virus", "science", null, ["virus", "viruses", "bacteria", "germ", "infection", "disease", "vaccine", "immune", "immunity", "flu"]),
   def("magnet", "magnet", "science", null, ["magnet", "magnetic", "magnetism", "compass"]),
   def("lightbulb", "light bulb", "science", "bulb", ["idea", "bulb", "lightbulb", "electricity", "electric", "invention", "invent", "innovation", "insight"]),
 
-  def("clock", "clock", "places", "clock", ["clock", "time", "hour", "minute", "deadline", "timer", "duration", "late"]),
-  def("calendar", "calendar", "places", null, ["calendar", "date", "schedule", "month", "monthly", "week", "weekly", "weekend"]),
-  def("map-pin", "map pin", "places", null, ["map", "location", "place", "city", "cities", "address", "gps", "route", "direction", "travel"]),
+  def("clock", "clock", "places", "clock", ["clock", "~time", "hour", "minute", "deadline", "timer", "duration", "late"]),
+  def("calendar", "calendar", "places", null, ["calendar", "~date", "schedule", "~month", "~monthly", "~week", "~weekly", "weekend"]),
+  def("map-pin", "map pin", "places", null, ["map", "location", "~place", "city", "cities", "address", "gps", "route", "direction", "~travel"]),
   def("mountain", "mountain", "places", "mountain", ["mountain", "hill", "himalaya*", "peak", "summit", "everest", "altitude"]),
   def("factory", "factory", "places", null, ["factory", "factories", "industry", "industrial", "manufactur*", "pollution", "smoke", "emission", "carbon"]),
   def("truck", "delivery truck", "places", null, ["truck", "delivery", "deliver", "shipping", "transport", "logistics", "supply", "road", "highway", "vehicle"]),
 
   def("target", "target", "generic", null, ["target", "goal", "aim", "objective", "bullseye", "accuracy"]),
-  def("rocket", "rocket", "generic", null, ["rocket", "launch", "space", "isro", "nasa", "startup", "boost"]),
+  def("rocket", "rocket", "generic", null, ["rocket", "launch", "~space", "isro", "nasa", "startup", "boost"]),
   def("trophy", "trophy", "generic", "star", ["trophy", "winner", "winning", "champion", "success", "successful", "achievement", "award", "prize", "medal"]),
   def("question-mark", "question mark", "generic", "question", ["question", "mystery", "wonder", "curious", "curiosity", "puzzle", "quiz", "confus*"]),
-  def("checklist", "checklist", "generic", "check", ["checklist", "list", "steps", "tips", "rules", "todo", "tasks"]),
+  def("checklist", "checklist", "generic", "check", ["checklist", "~list", "~steps", "tips", "rules", "todo", "tasks"]),
 ];
 
 const BY_NAME = new Map<string, HeroDef>(HERO_CATALOG.map((d) => [d.name, d]));
@@ -142,8 +146,15 @@ export function normalizeHeroWord(text: string): string {
   return text.toLowerCase().normalize("NFC").replace(/[^\p{L}\p{M}\p{N}%]/gu, "");
 }
 
+/** Where a word comes from: spoken narration, or an on-screen object label (label-only keywords count). */
+export type HeroWordSource = "spoken" | "label";
+
 /** Length of the keyword that `word` matches (0 when it does not). `word` is already normalized. */
-function matchLength(word: string, keyword: string): number {
+function matchLength(word: string, keyword: string, source: HeroWordSource): number {
+  if (keyword.startsWith("~")) {
+    if (source === "spoken") return 0;
+    keyword = keyword.slice(1);
+  }
   if (keyword.endsWith("*")) {
     const stem = keyword.slice(0, -1);
     return word.startsWith(stem) ? stem.length : 0;
@@ -151,24 +162,24 @@ function matchLength(word: string, keyword: string): number {
   return ENDINGS.some((ending) => word === keyword + ending) ? keyword.length : 0;
 }
 
-/** The hero a single word names, if any (longest keyword wins, then catalog order). */
-export function heroForWord(word: string): HeroName | null {
+/** The hero a single word names, if any (longest keyword wins, then catalog order). Spoken by default. */
+export function heroForWord(word: string, source: HeroWordSource = "spoken"): HeroName | null {
   const w = normalizeHeroWord(word);
   if (w.length < 2 || NOT_HEROES.has(w)) return null;
   let best: { name: HeroName; length: number } | null = null;
   for (const hero of HERO_CATALOG) {
     for (const keyword of hero.keywords) {
-      const length = matchLength(w, keyword);
+      const length = matchLength(w, keyword, source);
       if (length > 0 && (!best || length > best.length)) best = { name: hero.name, length };
     }
   }
   return best?.name ?? null;
 }
 
-/** The first hero named in a text (label or narration), word by word, if any. */
-export function heroForText(text: string): HeroName | null {
+/** The first hero named in a text, word by word, if any. An object label by default; pass "spoken" for narration. */
+export function heroForText(text: string, source: HeroWordSource = "label"): HeroName | null {
   for (const word of text.split(/[\s()/,.;:!?"“”‘’—–-]+/u)) {
-    const hit = heroForWord(word);
+    const hit = heroForWord(word, source);
     if (hit) return hit;
   }
   return null;
@@ -201,32 +212,60 @@ export function sceneIcon(objects: readonly ObjectLike[]): IconName {
 }
 
 /**
- * The heroes a scene will show, in plain words, for the storyboard screen (no timing needed): each
- * block's planner pick, else the heroes its narration names, else one an object label names; at
- * most `max`. When nothing fits, the scene icon shown in a medallion ("bulb icon").
+ * The object a labeled diagram is about: the hero its diagram label (else its icon) names. The video
+ * shows it for every block without a planner pick, instead of switching on keywords.
+ */
+export function diagramSubject(objects: readonly ObjectLike[]): HeroName | null {
+  const diagram = objects.find((o) => o.kind === "diagram");
+  if (!diagram) return null;
+  return heroForText(diagram.label) ?? heroForIcon(isIconName(diagram.icon) ? diagram.icon : null);
+}
+
+/**
+ * The heroes a scene will show, in plain words, for the storyboard screen (no timing needed), by the
+ * same rules as the video's hero track (timing/heroes.ts): each block's planner pick (the scene icon
+ * for the planner's "none"), else for a labeled diagram its own object, else the heroes its narration
+ * names; else one an object label names; else the scene icon in a medallion ("bulb icon"). A
+ * takeaway shows one hero (its first planner pick, else the first one named). At most `max`.
  */
 export function storyboardHeroes(
-  scene: { narration: readonly { text: string; hero?: string | null | undefined }[]; objects: readonly ObjectLike[] },
+  scene: { type?: string; narration: readonly { text: string; hero?: string | null | undefined }[]; objects: readonly ObjectLike[] },
   max = 3,
 ): string[] {
-  const names: HeroName[] = [];
-  const add = (name: HeroName | null) => {
-    if (name && !names.includes(name)) names.push(name);
+  const icon = `${sceneIcon(scene.objects)} icon`;
+  const picked = (block: { hero?: string | null | undefined }) => block.hero === null || isHeroName(block.hero);
+  const pickTitle = (hero: string | null | undefined) => (isHeroName(hero) ? heroTitle(hero) : icon);
+  if (scene.type === "takeaway") {
+    const pick = scene.narration.find(picked);
+    if (pick) return [pickTitle(pick.hero)];
+  }
+  const subject = scene.type === "labeled-diagram" ? diagramSubject(scene.objects) : null;
+  const names: string[] = [];
+  const add = (title: string) => {
+    if (!names.includes(title)) names.push(title);
   };
   for (const block of scene.narration) {
-    if (isHeroName(block.hero)) add(block.hero);
-    else for (const word of block.text.split(/\s+/)) add(heroForWord(word));
+    if (picked(block)) add(pickTitle(block.hero));
+    else if (subject) add(heroTitle(subject));
+    else for (const word of block.text.split(/\s+/)) {
+      const hero = heroForWord(word);
+      if (hero) add(heroTitle(hero));
+    }
   }
-  if (!names.length) for (const o of scene.objects) add(heroForText(o.label));
-  if (!names.length) return [`${sceneIcon(scene.objects)} icon`];
-  const titles = names.slice(0, max).map(heroTitle);
+  if (!names.length) {
+    const fromLabel = scene.objects.map((o) => heroForText(o.label, "spoken")).find((h) => !!h);
+    if (fromLabel) add(heroTitle(fromLabel));
+  }
+  if (!names.length) return [icon];
+  if (scene.type === "takeaway") return names.slice(0, 1);
+  const titles = names.slice(0, max);
   return names.length > max ? [...titles.slice(0, -1), `${titles[titles.length - 1]}…`] : titles;
 }
 
 /** One line per hero for the planner prompt: name, what it shows, and the topics it suits. */
 export function heroPromptRows(): string[] {
   return HERO_CATALOG.map((d) => {
-    const hints = d.keywords.slice(0, 6).map((k) => k.replace(/\*$/, "")).join(", ");
+    const hints = d.keywords.slice(0, 6).map((k) => k.replace(/^~/, "").replace(/\*$/, "")).join(", ");
     return `- ${d.name}: ${d.title} (${hints})`;
   });
 }

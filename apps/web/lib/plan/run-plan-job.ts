@@ -62,7 +62,7 @@ export interface PlanJobStore {
 /** What one Gemini request of this job is about: the first prompt, the code-owned plan fields and the language. */
 export interface PreparedRequest {
   prompt: string;
-  owned: { ownerId: string; projectId: string; versionId: string; parentVersionId: string | null; language: Language; voicePreset: VoicePreset; sources: ReturnType<typeof ideaSources> };
+  owned: { ownerId: string; projectId: string; versionId: string; parentVersionId: string | null; language: Language; voicePreset: VoicePreset; sources: ReturnType<typeof ideaSources>; blocksWithoutHero?: readonly string[] };
   language: Language;
   /** Progress lines for this request (default: the job's `messages`). */
   messages?: PlanJobMessages;

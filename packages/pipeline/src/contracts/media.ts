@@ -151,7 +151,8 @@ export type TimelineEvent = z.infer<typeof TimelineEventSchema>;
  * One step of a scene's hero track (F22b): from `startFrame` on, the big object in the middle of
  * the screen is `hero`; null means "no hero fits", and the scene's `icon` is shown large in a
  * glowing medallion instead. `source` says where the choice came from: the planner's pick for the
- * narration block ("plan"), the free keyword fallback ("keyword"), or the icon medallion ("icon").
+ * narration block ("plan"; hero null when the planner said "none"), the free keyword fallback
+ * ("keyword"), or the icon medallion because nothing was named ("icon").
  * Computed by the timeline compiler (packages/pipeline/src/timing/heroes.ts).
  */
 export const HeroStepSchema = z.strictObject({

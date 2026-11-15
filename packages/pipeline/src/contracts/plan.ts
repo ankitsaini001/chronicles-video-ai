@@ -22,8 +22,10 @@ export const PLAN_SCHEMA_VERSION = 1;
  * - `display`: what captions show when it differs from `text`.
  * null means "same as text". The block itself is the explicit text/speech/display mapping.
  * - `hero`: the big object shown while this block is spoken (video style v4, F22b), from the hero
- *   catalog (packages/pipeline/src/planning/hero-catalog.ts). When absent, the timeline compiler
- *   picks one from keywords in the narration and labels, or shows the scene's icon in a medallion.
+ *   catalog (packages/pipeline/src/planning/hero-catalog.ts). null: the planner said no hero fits
+ *   ("none"), so the scene's icon is shown large in a medallion for this block (no keyword guess).
+ *   When absent (plans written before heroes existed, or a block whose wording the creator edited),
+ *   the timeline compiler picks one from keywords in the narration and labels, else the medallion.
  *   Optional (not nullable-with-default) on purpose, like `icon`: plans written before this field
  *   existed parse and hash exactly as before, so no schema version bump.
  */
@@ -34,6 +36,7 @@ export const NarrationBlockSchema = z.strictObject({
   display: z.string().trim().min(1).nullable().default(null),
   hero: z
     .enum(HERO_NAMES, { error: (issue) => `unknown hero ${JSON.stringify(issue.input)}; allowed heroes: ${HERO_NAMES.join(", ")}` })
+    .nullable()
     .optional(),
 });
 export type NarrationBlock = z.infer<typeof NarrationBlockSchema>;

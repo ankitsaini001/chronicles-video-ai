@@ -14,6 +14,7 @@ import {
   iconDuplicatesHero,
   ICON_NAMES,
   isHeroName,
+  blocksWithoutHero,
   planForRevision,
   plannerOutputJsonSchema,
   renderPlanReview,
@@ -47,7 +48,7 @@ describe("hero catalog", () => {
   it("never lists the same keyword for two heroes", () => {
     const seen = new Map<string, string>();
     for (const hero of HERO_CATALOG) {
-      for (const k of hero.keywords) {
+      for (const k of hero.keywords.map((k) => k.replace(/^~/, ""))) {
         expect(seen.get(k), `"${k}" is on ${seen.get(k)} and ${hero.name}`).toBeUndefined();
         seen.set(k, hero.name);
       }
@@ -99,6 +100,45 @@ describe("hero fallback matching (deterministic keywords)", () => {
     expect(heroForText("The key takeaway")).toBeNull();
   });
 
+  it.each([
+    ["time", "clock"],
+    ["monthly", "calendar"],
+    ["month", "calendar"],
+    ["place", "map-pin"],
+    ["travels", "map-pin"],
+    ["space", "rocket"],
+    ["drop", "drop"],
+    ["fresh", "drop"],
+    ["flows", "river"],
+    ["streams", "river"],
+    ["steps", "checklist"],
+    ["list", "checklist"],
+    ["mind", "brain"],
+    ["focus", "brain"],
+    ["account", "bank"],
+    ["branch", "bank"],
+    ["compound", "growth-chart"],
+    ["SIP", "growth-chart"],
+    ["leaves", "plant"],
+    ["waves", "ocean"],
+    ["signal", "wifi"],
+    ["online", "wifi"],
+    ["heat", "sun"],
+    ["reaction", "flask"],
+    ["formula", "calculator"],
+    ["cup", "chai-cup"],
+  ])("generic word %s is label-only: never a spoken cue, but names %s in an object label", (word, hero) => {
+    expect(heroForWord(word)).toBeNull();
+    expect(heroForWord(word, "label")).toBe(hero);
+  });
+
+  it("generic words count in labels (Fresh Water is a water drop) but not in narration; a card is not a credit card", () => {
+    expect(heroForText("Fresh Water")).toBe("drop");
+    expect(heroForText("Every month, and over time, the next steps add up", "spoken")).toBeNull();
+    expect(heroForText("Complete KYC with your PAN card")).toBeNull();
+    expect(heroForText("Credit card")).toBe("credit-card");
+  });
+
   it("maps icons to heroes and spots an icon that would duplicate the hero", () => {
     expect(heroForIcon("sun")).toBe("sun");
     expect(heroForIcon("coin")).toBe("coin-stack");
@@ -135,6 +175,22 @@ describe("hero in the plan contract", () => {
     }
   });
 
+  it("an old plan (no heroes) hashes exactly as before F22b", () => {
+    // Recorded with the pre-F22b code (commit 61c2e5e): heroes must never change an old plan's hash.
+    expect(hashPlan(PlanSchema.parse(loadFixture("water-cycle.plan.json")))).toBe("sha256:040c4f3be40dbef97b3df63939f24614d1c2918fa5b2c1f0f101123550b923fc");
+  });
+
+  it('accepts hero null (the planner said "none"): kept as null, a real change of the plan', () => {
+    const raw = loadFixture("water-cycle.plan.json");
+    const before = hashPlan(PlanSchema.parse(raw));
+    raw.scenes[0].narration[0].hero = null;
+    const result = validatePlan(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.scenes[0]!.narration[0]!.hero).toBeNull();
+    expect(hashPlan(result.plan)).not.toBe(before);
+  });
+
   it("accepts every catalog hero", () => {
     const raw = loadFixture("water-cycle.plan.json");
     for (const name of HERO_NAMES) {
@@ -152,7 +208,7 @@ describe("planner wiring", () => {
     expect(block.properties.hero.enum).toEqual([...HERO_NAMES, "none"]);
   });
 
-  it('"none" and null never reach the plan; a picked hero is kept', () => {
+  it('the planner\'s "none" (or null) is stored as hero null (the scene icon); a picked hero is kept', () => {
     const output = modelOutputFromFixture();
     output.scenes[0].narration[0].hero = "chai-cup";
     output.scenes[1].narration[0].hero = null;
@@ -161,7 +217,26 @@ describe("planner wiring", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.plan.scenes[0]!.narration[0]!.hero).toBe("chai-cup");
-    expect(result.plan.scenes.slice(1).flatMap((s) => s.narration).every((b) => !("hero" in b))).toBe(true);
+    expect(result.plan.scenes.slice(1).flatMap((s) => s.narration).every((b) => b.hero === null)).toBe(true);
+  });
+
+  it('a revision keeps "no hero at all" for blocks that had none before (old plans) and still say "none"', () => {
+    const base = loadFixture("water-cycle.plan.json"); // written before heroes existed
+    base.scenes[1].narration[0].hero = null; // the planner's "none" in a newer plan
+    const view = planForRevision(base) as any;
+    expect(view.scenes[1].narration[0].hero).toBe("none");
+    expect(view.scenes[2].narration[0].hero).toBe("none");
+    view.scenes[3].narration[0].hero = "rain-cloud"; // the revision picks a hero for one block
+    const without = blocksWithoutHero(base);
+    expect(without).not.toContain(base.scenes[1].narration[0].id);
+    const { plan } = assemblePlan(view, { ...OWNED, blocksWithoutHero: without });
+    const result = validatePlan(plan);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const blocks = result.plan.scenes.map((s) => s.narration[0]!);
+    expect("hero" in blocks[2]!).toBe(false); // unchanged old block: still no hero (keyword fallback)
+    expect(blocks[1]!.hero).toBeNull(); // an explicit "none" stays "none"
+    expect(blocks[3]!.hero).toBe("rain-cloud");
   });
 
   it("the system instruction lists the hero set and the rule; creator text stays inside its markers", () => {
@@ -192,11 +267,13 @@ describe("planner wiring", () => {
   it("the review page names each block's hero (picked, from keywords, or the scene icon)", () => {
     const raw = loadFixture("water-cycle.plan.json");
     raw.scenes[0].narration[0].hero = "chai-cup";
+    raw.scenes[1].narration[0].hero = null;
     const result = validatePlan(raw);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const html = renderPlanReview({ plan: result.plan, planHash: hashPlan(result.plan), stats: result.stats, runId: "a/b/v1", plannerModel: "m", generatedAt: "t", plannerNote: null, approveCommand: "x" });
     expect(html).toContain("<span>Hero:</span> chai cup");
     expect(html).toMatch(/Hero:<\/span> <span class="muted">[a-z ]+ \(from keywords\)/);
+    expect(html).toContain('Hero:</span> <span class="muted">scene icon (the planner picked none)');
   });
 });

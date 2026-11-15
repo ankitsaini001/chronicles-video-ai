@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { CaptionTrackSchema, PlanSchema, TimelineSchema } from "../packages/pipeline/src/contracts";
 import { hashPlan, sceneIcon, storyboardHeroes } from "../packages/pipeline/src/planning";
-import { compileTimeline, DEFAULT_CAPTION_LAYOUT, heroTrack, keyTermTest, synthesizeSceneAlignment } from "../packages/pipeline/src/timing";
+import { compileTimeline, DEFAULT_CAPTION_LAYOUT, HERO_MIN_HOLD_OTHER_GROUP, heroTrack, keyTermTest, synthesizeSceneAlignment, type HeroTrackInput } from "../packages/pipeline/src/timing";
 import { loadFixture } from "./helpers";
+import approvedWaterCycle from "./data/approved-water-cycle-heroes.json";
 
 function compile(raw: unknown) {
   const plan = PlanSchema.parse(raw);
@@ -97,6 +98,50 @@ describe("hero track (pure)", () => {
     expect(mixed.map((s) => [s.hero, s.source])).toEqual([["sun", "plan"], ["cloud", "keyword"]]);
   });
 
+  it('a block whose hero is null (the planner said "none") shows the scene icon medallion, with no keyword guess', () => {
+    const steps = heroTrack({
+      sceneType: "process-flow",
+      sceneStart: 0,
+      blocks: [
+        { narrationId: "a", hero: null, startFrame: 0, words: words("The sun heats the ocean and clouds form", 0) },
+        { narrationId: "b", startFrame: 200, words: words("Then rain falls", 200) },
+      ],
+      objects: [{ id: "n", kind: "node", label: "Sunlight", icon: "sun" }],
+      events: [{ target: "n", startFrame: 20 }],
+    });
+    expect(steps).toEqual([
+      { startFrame: 0, hero: null, icon: "sun", source: "plan" },
+      { startFrame: 210, hero: "rain-cloud", icon: "sun", source: "keyword" },
+    ]);
+  });
+
+  it("the opening: a spoken word gives way to an object of another family that follows soon (a cloud may still open before a rain cloud)", () => {
+    const base = { sceneType: "chart" as const, sceneStart: 0, objects: [{ id: "b", kind: "bar", label: "Bank deposit" }], events: [{ target: "b", startFrame: 40 }] };
+    // "rupees" (coins) is said first, but the bar about the bank comes 34 frames later: the scene opens on the bank
+    expect(heroTrack({ ...base, blocks: [{ narrationId: "a", startFrame: 0, words: [{ text: "rupees", frame: 6 }] }] }).map((s) => s.hero)).toEqual(["bank"]);
+    // a cloud opens, then turns into a rain cloud (same family)
+    const cloud = heroTrack({ ...base, objects: [{ id: "b", kind: "node", label: "Precipitation" }], blocks: [{ narrationId: "a", startFrame: 0, words: [{ text: "clouds", frame: 9 }] }], events: [{ target: "b", startFrame: 60 }] });
+    expect(cloud.map((s) => [s.startFrame, s.hero])).toEqual([[0, "cloud"], [60, "rain-cloud"]]);
+    // an object that comes later than the look-ahead does not replace the opening word
+    expect(heroTrack({ ...base, blocks: [{ narrationId: "a", startFrame: 0, words: [{ text: "rupees", frame: 6 }] }], events: [{ target: "b", startFrame: 120 }] }).map((s) => s.hero)).toEqual(["coin-stack", "bank"]);
+  });
+
+  it("a spoken word switches to a hero of another group only after the current one was on screen for 3 s", () => {
+    const track = (gap: number) =>
+      heroTrack({
+        sceneType: "process-flow",
+        sceneStart: 0,
+        blocks: [{ narrationId: "a", startFrame: 0, words: [{ text: "savings", frame: 4 }, { text: "rocket", frame: gap }] }],
+        objects: [],
+        events: [],
+      }).map((s) => s.hero);
+    expect(track(HERO_MIN_HOLD_OTHER_GROUP - 1)).toEqual(["piggy-bank"]); // money -> generic too soon
+    expect(track(HERO_MIN_HOLD_OTHER_GROUP)).toEqual(["piggy-bank", "rocket"]);
+    // within one group the usual 36-frame hold applies (ocean -> glacier, nature)
+    const sameGroup = heroTrack({ sceneType: "chart", sceneStart: 0, blocks: [{ narrationId: "a", startFrame: 0, words: [{ text: "ocean", frame: 4 }, { text: "glacier", frame: 50 }] }], objects: [], events: [] });
+    expect(sameGroup.map((s) => s.hero)).toEqual(["ocean", "glacier"]);
+  });
+
   it("a takeaway keeps one hero", () => {
     const steps = heroTrack({
       sceneType: "takeaway",
@@ -107,6 +152,28 @@ describe("hero track (pure)", () => {
     });
     expect(steps).toHaveLength(1);
     expect(steps[0]!.hero).toBe("globe");
+    // the planner's pick wins over a keyword hero that comes first
+    const picked = heroTrack({
+      sceneType: "takeaway",
+      sceneStart: 0,
+      blocks: [
+        { narrationId: "a", startFrame: 0, words: words("Earth recycles water", 0, 40) },
+        { narrationId: "b", hero: "drop", startFrame: 200, words: words("Every drop counts", 200) },
+      ],
+      objects: [],
+      events: [],
+    });
+    expect(picked).toEqual([{ startFrame: 0, hero: "drop", icon: "bulb", source: "plan" }]);
+  });
+
+  it("the approved water-cycle run keeps its hero sequence (recorded narration timing)", () => {
+    for (const scene of approvedWaterCycle.scenes) {
+      const input = {
+        ...scene,
+        blocks: scene.blocks.map((b) => ({ narrationId: b.narrationId, startFrame: b.startFrame, words: b.words.map(([text, frame]) => ({ text: String(text), frame: Number(frame) })) })),
+      } as unknown as HeroTrackInput;
+      expect(heroTrack(input).map((s) => [s.startFrame, s.hero]), scene.sceneId).toEqual(scene.expected);
+    }
   });
 
   it("the scene icon prefers icon objects, then the subject (diagram, headline, ...)", () => {
@@ -120,6 +187,17 @@ describe("hero track (pure)", () => {
     expect(storyboardHeroes({ narration: [{ text: "Sun, sea, clouds and rain" }], objects: [] }, 2)).toEqual(["sun", "ocean…"]);
     expect(storyboardHeroes({ narration: [{ text: "Here is the difference" }], objects: [{ kind: "column", label: "Savings account" }] })).toEqual(["piggy bank"]);
     expect(storyboardHeroes({ narration: [{ text: "Do this then that" }], objects: [{ kind: "step", label: "First", icon: "check" }] })).toEqual(["check icon"]);
+  });
+
+  it("the storyboard follows the video's rules: none -> scene icon, a diagram's own object, one takeaway hero, no generic words", () => {
+    expect(storyboardHeroes({ narration: [{ text: "The sun heats the sea", hero: null }, { text: "Then it rains" }], objects: [{ kind: "node", label: "Sunlight", icon: "sun" }] })).toEqual(["sun icon", "rain cloud"]);
+    const diagram = { type: "labeled-diagram", objects: [{ kind: "diagram", label: "Cloud" }, { kind: "part", label: "Tiny droplets" }] };
+    expect(storyboardHeroes({ ...diagram, narration: [{ text: "Vapour cools into droplets" }] })).toEqual(["cloud"]);
+    expect(storyboardHeroes({ ...diagram, narration: [{ text: "Vapour cools", hero: "sun" }, { text: "into droplets" }] })).toEqual(["sun", "cloud"]);
+    const takeaway = { type: "takeaway", objects: [] };
+    expect(storyboardHeroes({ ...takeaway, narration: [{ text: "Earth recycles water from oceans to clouds" }] })).toEqual(["globe"]);
+    expect(storyboardHeroes({ ...takeaway, narration: [{ text: "Earth recycles water" }, { text: "Every drop counts", hero: "drop" }] })).toEqual(["water drop"]);
+    expect(storyboardHeroes({ narration: [{ text: "Save every month, over time" }], objects: [] })).toEqual(["piggy bank"]);
   });
 });
 

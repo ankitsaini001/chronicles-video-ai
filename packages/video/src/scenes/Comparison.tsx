@@ -37,8 +37,8 @@ export function assignPoints(objects: readonly TimelineObject[]): [TimelineObjec
 
 /**
  * The hero of a column: the planner's pick for the narration where the column is first named, else
- * a hero its label names, else the hero on screen at that moment, else its icon in a medallion.
- * Two columns never show the same hero.
+ * a hero its label names, else the hero on screen at that moment, else its icon in a medallion (also
+ * when the planner said "none" for that narration). Two columns never show the same hero.
  */
 export function columnHeroes(ctx: Ctx, columns: readonly TimelineObject[]): HeroStep[] {
   const used = new Set<string>();
@@ -46,6 +46,7 @@ export function columnHeroes(ctx: Ctx, columns: readonly TimelineObject[]): Hero
     const at = firstCue(ctx, column);
     let step: HeroStep | undefined;
     for (const s of ctx.scene.heroes) if (s.startFrame <= Math.max(at, ctx.scene.startFrame)) step = s;
+    if (step?.source === "plan" && step.hero === null) return { startFrame: ctx.scene.startFrame, hero: null, icon: iconOf(column), source: "plan" };
     const picks = [step?.source === "plan" ? step.hero : null, heroForText(column.label), step?.hero ?? null];
     const hero = picks.find((h): h is NonNullable<typeof h> => !!h && !used.has(h)) ?? null;
     if (hero) used.add(hero);

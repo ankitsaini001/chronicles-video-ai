@@ -101,9 +101,10 @@ function sceneCard(scene: Scene, index: number, plan: Plan): string {
     })
     .join("");
 
-  function heroLine(block: { hero?: Parameters<typeof heroTitle>[0] | undefined; text: string }): string {
+  function heroLine(block: { hero?: Parameters<typeof heroTitle>[0] | null | undefined; text: string }): string {
     if (block.hero) return `<div class="alt"><span>Hero:</span> ${escapeHtml(heroTitle(block.hero))}</div>`;
-    const guess = heroForText(block.text);
+    if (block.hero === null) return `<div class="alt"><span>Hero:</span> <span class="muted">scene icon (the planner picked none)</span></div>`;
+    const guess = heroForText(block.text, "spoken");
     return `<div class="alt"><span>Hero:</span> <span class="muted">${guess ? `${escapeHtml(heroTitle(guess))} (from keywords)` : "scene icon (no hero picked)"}</span></div>`;
   }
 
