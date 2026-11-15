@@ -22,6 +22,11 @@ import { ObjectId } from "mongodb";
  *
  * Before ANY request it reads the environment of the server process on the port (Linux /proc) and
  * stops unless it has E2E_FAKE_GEMINI=1, MONGODB_DB=bytereel_test and INNGEST_DEV on port 8299.
+ *
+ * F23 NOTE: the "F20: approve" checks below describe F20's approve-only answer (200, job null). Since
+ * F23, D8 approves AND starts the video job (202), and on bytereel_test it needs the stand-in voice
+ * (E2E_FAKE_ELEVENLABS=1; the real voice is refused there, so no real characters can be spent: without
+ * it D8 answers 500). D8 is now checked by tools/e2e/f23-generate.ts.
  */
 
 const TEST_DB = "bytereel_test";
