@@ -12,6 +12,8 @@
     "./pipeline/music": "./src/pipeline/music.ts",
     "./pipeline/render": "./src/pipeline/render.ts",
     "./pipeline/render-fixture": "./src/pipeline/render-fixture.ts",
+    "./pipeline/render-protocol": "./src/pipeline/render-protocol.ts",
+    "./pipeline/speech": "./src/pipeline/speech.ts",
     "./planning": "./src/planning/index.ts",
     "./planning/hero-catalog": "./src/planning/hero-catalog.ts",
     "./planning/icon-catalog": "./src/planning/icon-catalog.ts",

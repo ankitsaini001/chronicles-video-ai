@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
-import { openBrowser, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
+import { openBrowser, renderMedia, renderStill, selectComposition, type CancelSignal } from "@remotion/renderer";
 import type { CaptionTrack, Timeline } from "../contracts";
 import { MUSIC_FILE, musicInputFor, synthMusicBed } from "./music";
 
@@ -52,6 +52,12 @@ export interface RenderJob {
   /** Frames rendered in parallel. Default: Remotion's (half the CPU threads). */
   concurrency?: number | null;
   onProgress?: (message: string) => void;
+  /** Called while rendering with the share of frames done (0–1), for a progress bar (F23). */
+  onFrameProgress?: (progress: number) => void;
+  /** Remotion's cancel signal (makeCancelSignal): stops a running render (F23 Cancel). */
+  cancelSignal?: CancelSignal;
+  /** Also save one frame as a JPEG thumbnail (F23: the hook frame for My videos), half size. */
+  thumbnail?: { frame: number; outputPath: string } | null;
 }
 
 export interface RenderReport {
@@ -60,6 +66,8 @@ export interface RenderReport {
   renderMs: number;
   stillsMs: number;
   previews: { id: string; frame: number; path: string }[];
+  /** The thumbnail JPEG, when one was asked for. */
+  thumbnailPath?: string | null;
 }
 
 export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
@@ -109,7 +117,9 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
         concurrency: job.concurrency ?? null,
         overwrite: true,
         logLevel: "error",
+        ...(job.cancelSignal ? { cancelSignal: job.cancelSignal } : {}),
         onProgress: ({ progress }) => {
+          job.onFrameProgress?.(progress);
           const percent = Math.floor(progress * 10) * 10;
           if (percent > lastReported) {
             lastReported = percent;
@@ -124,11 +134,30 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
       const previews: RenderReport["previews"] = [];
       for (const { id, frame } of job.previewFrames) {
         const output = path.join(job.previewDir, `${id}.png`);
-        await renderStill({ serveUrl, composition, inputProps, frame, output, imageFormat: "png", puppeteerInstance: browser, overwrite: true, logLevel: "error" });
+        await renderStill({ serveUrl, composition, inputProps, frame, output, imageFormat: "png", puppeteerInstance: browser, overwrite: true, logLevel: "error", ...(job.cancelSignal ? { cancelSignal: job.cancelSignal } : {}) });
         previews.push({ id, frame, path: output });
       }
       log(`Saved ${previews.length} preview frames.`);
-      return { musicMs, bundleMs, renderMs, stillsMs: Date.now() - started, previews };
+      let thumbnailPath: string | null = null;
+      if (job.thumbnail) {
+        const frame = Math.max(0, Math.min(job.thumbnail.frame, composition.durationInFrames - 1));
+        await renderStill({
+          serveUrl,
+          composition,
+          inputProps,
+          frame,
+          output: job.thumbnail.outputPath,
+          imageFormat: "jpeg",
+          jpegQuality: RENDER_SETTINGS.jpegQuality,
+          scale: 0.5,
+          puppeteerInstance: browser,
+          overwrite: true,
+          logLevel: "error",
+          ...(job.cancelSignal ? { cancelSignal: job.cancelSignal } : {}),
+        });
+        thumbnailPath = job.thumbnail.outputPath;
+      }
+      return { musicMs, bundleMs, renderMs, stillsMs: Date.now() - started, previews, thumbnailPath };
     } finally {
       await browser.close({ silent: true });
     }
