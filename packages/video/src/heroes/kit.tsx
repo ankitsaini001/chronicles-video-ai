@@ -220,8 +220,9 @@ export const Cloud: React.FC<{ x: number; y: number; s?: number; dark?: number; 
   );
   return (
     <g transform={`translate(${x} ${y + bob}) scale(${s})`} opacity={opacity}>
-      {glow > 0 && <Glow y={-10} r={240} ry={150} color={dark > 0.5 ? "cyan" : "gold"} opacity={glow * 0.55 * (1 - dark * 0.5)} />}
-      {glow > 0 && <g opacity={glow * 0.5 * (1 - dark * 0.5)} transform="translate(0 -5)">{shape(dark > 0.5 ? "#9AB4D6" : "#FFE7C2", 7)}</g>}
+      {glow > 0 && <Glow y={-10} r={250} ry={160} color={dark > 0.5 ? "cyan" : "gold"} opacity={glow * 0.6 * (1 - dark * 0.5)} />}
+      {glow > 0 && <g opacity={glow * 0.14 * (1 - dark * 0.5)} transform="translate(0 -5)">{shape(dark > 0.5 ? "#9AB4D6" : "#FFE7C2", 14)}</g>}
+      {glow > 0 && <g opacity={glow * 0.22 * (1 - dark * 0.5)} transform="translate(0 -4)">{shape(dark > 0.5 ? "#9AB4D6" : "#FFE7C2", 5)}</g>}
       <g opacity={1 - dark}>{shape("url(#h-cloud-light)")}</g>
       {dark > 0 && <g opacity={dark}>{shape("url(#h-cloud-dark)")}</g>}
     </g>

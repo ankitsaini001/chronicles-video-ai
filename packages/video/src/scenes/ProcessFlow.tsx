@@ -107,7 +107,8 @@ const StepRail: React.FC<{ ctx: Ctx; nodes: TimelineObject[]; arrows: (TimelineO
       {nodes.map((o, i) => {
         const t = popIn(f, o.revealFrame);
         if (t <= 0.001) return null;
-        const act = activeAmount(activeIds, o.id, f);
+        // the newest step stays lit while the arrow after it is being talked about
+        const act = Math.max(activeAmount(activeIds, o.id, f), i === revealed - 1 ? 0.6 : 0);
         // passed steps are filled amber; the newest step glows
         const done = i < revealed - 1;
         return (

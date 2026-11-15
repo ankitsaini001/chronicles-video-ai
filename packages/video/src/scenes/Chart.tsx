@@ -157,22 +157,26 @@ const Series: React.FC<{ ctx: Ctx; m: Model }> = ({ ctx, m }) => {
   const now = activeAt(acts, f);
   const nowObj = now ? list.find((o) => o.id === now.id) ?? null : null;
   const maxAbs = Math.max(1, ...list.map((o) => Math.abs(o.value ?? 0)));
-  const base = 1150;
-  const height = 300;
+  const base = 1185;
+  const height = 330;
   const left = 130;
   const right = 920;
   const step = (right - left) / list.length;
-  const barW = Math.min(150, step * 0.62);
-  const heroY = Math.max(600, m.titleBottom + 200);
+  const barW = Math.min(170, step * 0.62);
+  // the hero fills the middle until the chart starts, then moves up and makes room for it
+  const room = rise(f, Math.min(...list.map((o) => o.revealFrame)) - 14, 22);
+  const heroSize = 520 - 180 * room;
+  const heroY = Math.max(720, m.titleBottom + 300) * (1 - room) + Math.max(590, m.titleBottom + 200) * room;
   const xs = list.map((_, i) => left + step * (i + 0.5));
   const ys = list.map((o) => base - (Math.abs(o.value ?? 0) / maxAbs) * height * grow(f, o));
   const shown = list.filter((o) => f >= o.revealFrame).length;
-  const valueSize = Math.min(54, Math.floor(step / 3.2));
+  const valueSize = Math.min(56, Math.floor(step / 3.2));
+  const valueGap = line ? 30 : 10;
   return (
     <>
-      <HeroLayer steps={ctx.scene.heroes} cues={ctx.heroCues} frame={f} cx={540} cy={heroY} size={340} />
+      <HeroLayer steps={ctx.scene.heroes} cues={ctx.heroCues} frame={f} cx={540} cy={heroY} size={heroSize} />
       <svg width={1080} height={1920} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-        <line x1={left - 20} y1={base} x2={right + 10} y2={base} stroke="#F5A524" strokeWidth={4} opacity={0.5 * rise(f, ctx.scene.startFrame - 6, 12)} />
+        <line x1={left - 20} y1={base} x2={right + 10} y2={base} stroke="#F5A524" strokeWidth={4} opacity={0.5 * room} />
         {!line &&
           list.map((o, i) => {
             const act = activeAmount(acts, o.id, f);
@@ -204,7 +208,7 @@ const Series: React.FC<{ ctx: Ctx; m: Model }> = ({ ctx, m }) => {
       </svg>
       {list.map((o, i) =>
         f >= o.revealFrame ? (
-          <div key={o.id} style={{ position: "absolute", left: xs[i]! - step / 2, width: step, top: ys[i]! - valueSize * 1.25 - 8, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: valueSize, lineHeight: 1.2, color: now?.id === o.id ? C.gold : C.amberLight, fontVariantNumeric: "tabular-nums" }}>
+          <div key={o.id} style={{ position: "absolute", left: xs[i]! - step / 2, width: step, top: ys[i]! - valueSize * 1.25 - valueGap, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: valueSize, lineHeight: 1.2, color: now?.id === o.id ? C.gold : C.amberLight, fontVariantNumeric: "tabular-nums" }}>
             {formatNumber(Math.round((o.value ?? 0) * grow(f, o) * 10 ** m.format.decimals) / 10 ** m.format.decimals, m.format)}
           </div>
         ) : null,

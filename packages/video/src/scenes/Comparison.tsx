@@ -53,9 +53,10 @@ export function columnHeroes(ctx: Ctx, columns: readonly TimelineObject[]): Hero
   });
 }
 
+/** Two equal columns inside the safe zone (the right one ends left of the Reels buttons at x 940). */
 const COLS = [
-  { x: 105, width: 380 },
-  { x: 575, width: 365 },
+  { x: 75, width: 415 },
+  { x: 525, width: 415 },
 ] as const;
 
 export const Comparison: Pattern = {
@@ -76,7 +77,7 @@ export const Comparison: Pattern = {
       }
       return col;
     })();
-    const heroY = TOP + 210;
+    const heroY = TOP + 190;
     const vs = popIn(f, Math.max(...columns.map((c) => c.revealFrame)));
     return (
       <AbsoluteFill>
@@ -86,23 +87,23 @@ export const Comparison: Pattern = {
             const lit = activeColumn === i ? 1 : activeColumn === -1 ? 0.5 : 0;
             const col = COLS[i]!;
             const cx = col.x + col.width / 2;
-            const titleSize = fitSize(column.label, col.width, 2, 50, 38);
+            const titleSize = fitSize(column.label, col.width, 2, 54, 42);
             return (
               <div key={column.id} style={{ opacity: clamp01(t * 1.5) * (0.55 + 0.45 * Math.max(lit, activeColumn === -1 ? 1 : 0)) }}>
-                <HeroLayer steps={[heroes[i]!]} cues={ctx.heroCues} frame={f} cx={cx} cy={heroY} size={360} />
-                <div style={{ position: "absolute", left: col.x - 10, width: col.width + 20, top: heroY + 175, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: titleSize, lineHeight: 1.08, color: lit > 0.5 ? C.gold : C.text, textWrap: "balance" }}>
+                <HeroLayer steps={[heroes[i]!]} cues={ctx.heroCues} frame={f} cx={cx} cy={heroY} size={340} />
+                <div style={{ position: "absolute", left: col.x - 10, width: col.width + 20, top: heroY + 172, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: titleSize, lineHeight: 1.08, color: lit > 0.5 ? C.gold : C.text, textWrap: "balance" }}>
                   {column.label}
                 </div>
               </div>
             );
           })}
           {columns.length === 2 && vs > 0.001 && (
-            <div style={{ position: "absolute", left: 540 - 15 - 52, top: heroY - 52, width: 104, height: 104, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #F7B44A, #E8901A)", boxShadow: "0 0 30px rgba(245,165,36,0.6)", fontFamily: FONT, fontWeight: 800, fontSize: 44, color: "#1A1005", transform: `scale(${Math.min(1.1, vs)})` }}>
+            <div style={{ position: "absolute", left: 507 - 52, top: heroY - 52, width: 104, height: 104, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #F7B44A, #E8901A)", boxShadow: "0 0 30px rgba(245,165,36,0.6)", fontFamily: FONT, fontWeight: 800, fontSize: 44, color: "#1A1005", transform: `scale(${Math.min(1.1, vs)})` }}>
               VS
             </div>
           )}
           {points.map((list, i) => (
-            <PointList key={i} ctx={ctx} list={list.slice(0, 3)} col={COLS[i]!} top={heroY + 300} acts={acts} />
+            <PointList key={i} ctx={ctx} list={list.slice(0, 3)} col={COLS[i]!} top={heroY + 318} acts={acts} />
           ))}
         </CameraView>
       </AbsoluteFill>
@@ -113,7 +114,7 @@ export const Comparison: Pattern = {
 const PointList: React.FC<{ ctx: Ctx; list: TimelineObject[]; col: (typeof COLS)[number]; top: number; acts: Activation[] }> = ({ ctx, list, col, top, acts }) => {
   const f = ctx.frame;
   const space = 1270 - top;
-  const rowH = Math.min(150, (space - (list.length - 1) * 14) / Math.max(1, list.length));
+  const rowH = Math.min(160, (space - (list.length - 1) * 14) / Math.max(1, list.length));
   return (
     <>
       {list.map((p, i) => {
@@ -122,11 +123,11 @@ const PointList: React.FC<{ ctx: Ctx; list: TimelineObject[]; col: (typeof COLS)
         const act = activeAmount(acts, p.id, f);
         const mark = eventsOn(ctx, p.id).find((e) => e.action === "check" || e.action === "cross");
         const marked = mark ? pop(f, mark.startFrame, 260, 12) : 0;
-        const size = fitSize(p.label, col.width - 110, 3, 40, 32);
+        const size = fitSize(p.label, col.width - 100, rowH >= 140 ? 3 : 2, 46, 38);
         return (
           <div key={p.id} style={{ position: "absolute", left: col.x, width: col.width, top: top + i * (rowH + 14), height: rowH }}>
-            <Card t={t} active={Math.max(act, 0.6 * pulse(f, mark?.startFrame ?? -99, 30))} from={24} style={{ height: "100%", display: "flex", alignItems: "center", gap: 16, padding: "0 18px", boxSizing: "border-box" }}>
-              <svg width={62} height={62} viewBox="-31 -31 62 62" style={{ flex: "none" }}>
+            <Card t={t} active={Math.max(act, 0.6 * pulse(f, mark?.startFrame ?? -99, 30))} from={24} style={{ height: "100%", display: "flex", alignItems: "center", gap: 14, padding: "0 16px", boxSizing: "border-box" }}>
+              <svg width={56} height={56} viewBox="-31 -31 62 62" style={{ flex: "none" }}>
                 {mark ? (
                   <>
                     <circle r={27} fill={mark.action === "check" ? "#4FD1A0" : "#FF6B6B"} transform={`scale(${0.6 + 0.4 * Math.min(1.1, marked)})`} opacity={marked > 0.02 ? 1 : 0.25} />
