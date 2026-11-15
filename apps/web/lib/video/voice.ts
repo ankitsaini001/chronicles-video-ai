@@ -1,5 +1,5 @@
 import type { StoredPlan, VoiceEstimator } from "@bytereel/db";
-import { VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/config";
+import { VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/voice-env";
 import type { Language, Plan } from "@bytereel/pipeline/contracts";
 import { countCharacters, speechCacheKey, speechConfigFor, speechRequestFor, type SpeechConfig } from "@bytereel/pipeline/pipeline/speech";
 import { ElevenLabsSpeech, type SpeechProvider } from "@bytereel/pipeline/providers";

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import type { VoicePreset } from "../contracts";
+import { VOICE_ID_ENV_BY_PRESET } from "./voice-env";
 
 /**
  * Pipeline configuration (PIPELINE_DESIGN.md §10).
@@ -32,18 +33,9 @@ export const ENV_VARS: readonly EnvVarSpec[] = [
   { name: "ELEVENLABS_VOICE_ID_HINDI_FEMALE", secret: false, neededFor: "live-hindi-hinglish", description: "Voice for hindi-female and hinglish-female" },
 ];
 
-/**
- * Which env var holds the ElevenLabs voice ID for each voice preset.
- * There are no separate Hinglish voices: Hinglish presets use the Hindi voices.
- */
-export const VOICE_ID_ENV_BY_PRESET: Record<VoicePreset, string> = {
-  "indian-english-male": "ELEVENLABS_VOICE_ID_INDIAN_MALE",
-  "indian-english-female": "ELEVENLABS_VOICE_ID_INDIAN_FEMALE",
-  "hindi-male": "ELEVENLABS_VOICE_ID_HINDI_MALE",
-  "hindi-female": "ELEVENLABS_VOICE_ID_HINDI_FEMALE",
-  "hinglish-male": "ELEVENLABS_VOICE_ID_HINDI_MALE",
-  "hinglish-female": "ELEVENLABS_VOICE_ID_HINDI_FEMALE",
-};
+// Which env var holds the ElevenLabs voice ID for each voice preset: voice-env.ts (no file access,
+// so the web app can import it without tracing the project).
+export { VOICE_ID_ENV_BY_PRESET } from "./voice-env";
 
 /** The configured voice ID for a preset, or undefined when it is not set. */
 export function voiceIdFor(preset: VoicePreset, config: ConfigReport): string | undefined {

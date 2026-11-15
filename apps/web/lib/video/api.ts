@@ -1,5 +1,5 @@
 import { ENABLED_LANGUAGES, voicePresetFor, type VoiceEstimator } from "@bytereel/db";
-import { VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/config";
+import { VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/voice-env";
 import type { VoicePreset } from "@bytereel/pipeline/contracts";
 import { getInngest } from "../../inngest/client";
 import { storageFromEnv } from "./storage";

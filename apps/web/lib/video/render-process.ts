@@ -14,7 +14,7 @@ import type { RenderChildMessage, RenderJobResult, RenderJobSpec, RenderParentMe
 
 /** The repository root: the folder that holds packages/pipeline (the web app runs in apps/web). */
 export function projectRoot(start: string = process.cwd()): string {
-  let dir = path.resolve(start);
+  let dir = path.resolve(/*turbopackIgnore: true*/ start);
   for (;;) {
     if (existsSync(path.join(/*turbopackIgnore: true*/ dir, "packages", "pipeline", "package.json"))) return dir;
     const parent = path.dirname(dir);
@@ -59,7 +59,8 @@ export function startRenderProcess(spec: RenderJobSpec, options: { root: string;
   }
   const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: options.tmp };
   delete env.NODE_OPTIONS; // the web server's own Node flags are not for the renderer
-  const child = fork(script, [], {
+  // turbopackIgnore: the script is a separate program run with tsx, never part of the server bundle.
+  const child = fork(/*turbopackIgnore: true*/ script, [], {
     cwd: options.root,
     env,
     execArgv: ["--import", pathToFileURL(loader).href],
