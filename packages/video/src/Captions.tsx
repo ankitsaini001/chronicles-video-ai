@@ -1,4 +1,6 @@
 import type React from "react";
+import { useLayoutEffect, useRef } from "react";
+import { cancelRender } from "remotion";
 import type { CaptionTrack } from "@bytereel/pipeline/contracts";
 import { CAPTION_STYLE } from "@bytereel/pipeline/theme";
 import { pop } from "./motion";
@@ -9,21 +11,39 @@ import { C, FONT, LAYOUT } from "./theme";
  * 2 pre-broken lines), big and bold, with the word being spoken in an amber pill and key terms in
  * amber. Placed in the Reels safe zone: above the bottom band, left of the button column.
  * `skipBefore`: words before this frame are shown elsewhere (the hook's slam words), so a phrase
- * shows only its later words, and none at all when fewer than two are left.
+ * shows only its later words (even when only one is left).
+ *
+ * Safety net: the compiler breaks lines with a width ESTIMATE (timing/text-width.ts). Each line is
+ * measured here in the browser, and the render fails loudly if one is wider than the caption box,
+ * so a wrong estimate can never ship as text running into the Reels buttons.
  */
 export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore?: number }> = ({ track, frame, skipBefore = 0 }) => {
   const caption = track.captions.find((c) => frame >= c.startFrame && frame < c.endFrame);
+  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  useLayoutEffect(() => {
+    if (!caption) return;
+    lineRefs.current.forEach((el, i) => {
+      if (el && el.offsetWidth > LAYOUT.captionWidth + 0.5) {
+        cancelRender(
+          new Error(
+            `Caption "${caption.id}" line ${i + 1} ("${caption.lines[i]}") is ${el.offsetWidth}px wide; the caption box fits ${LAYOUT.captionWidth}px. ` +
+              "Lower CAPTION_STYLE.maxLineWidthPx or the caption font size.",
+          ),
+        );
+      }
+    });
+  }, [caption, frame]);
   if (!caption) return null;
   const words = caption.words.filter((w) => w.startFrame >= skipBefore);
-  if (words.length === 0 || (words.length < 2 && words.length < caption.words.length)) return null;
-  // the lines split the phrase's words in order
+  if (words.length === 0) return null;
+  // the lines split the phrase's words in order; each word keeps its index (for the next word's start)
   let index = 0;
   const lines = caption.lines
     .map((line) => {
       const count = line.split(" ").length;
-      const lineWords = caption.words.slice(index, index + count);
+      const lineWords = caption.words.slice(index, index + count).map((w, k) => ({ w, i: index + k }));
       index += count;
-      return lineWords.filter((w) => w.startFrame >= skipBefore);
+      return lineWords.filter(({ w }) => w.startFrame >= skipBefore);
     })
     .filter((l) => l.length > 0);
   const enter = pop(frame, Math.max(caption.startFrame, words[0]!.startFrame - 2), 320, 18);
@@ -44,10 +64,14 @@ export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore
         opacity: Math.min(1, enter * 1.6),
       }}
     >
-      {lines.map((line, i) => (
-        <div key={i} style={{ display: "flex", justifyContent: "center", gap: CAPTION_STYLE.wordGap, whiteSpace: "nowrap" }}>
-          {line.map((w) => {
-            const active = frame >= w.startFrame - 1 && frame < Math.max(w.endFrame, w.startFrame + 6);
+      {lines.map((line, li) => (
+        <div key={li} ref={(el) => void (lineRefs.current[li] = el)} style={{ display: "flex", justifyContent: "center", gap: CAPTION_STYLE.wordGap, whiteSpace: "nowrap" }}>
+          {line.map(({ w, i }) => {
+            // the pill stays at least 6 frames on a short word, but ends when the next word's pill starts (one pill at a
+            // time); the two pieces of a word broken across lines share their timing and light up together
+            const next = caption.words[i + 1];
+            const pillEnd = Math.min(Math.max(w.endFrame, w.startFrame + 6), next && next.startFrame > w.startFrame ? next.startFrame - 1 : Infinity);
+            const active = frame >= w.startFrame - 1 && frame < pillEnd;
             const spoken = frame >= w.startFrame - 1;
             const hit = pop(frame, w.startFrame - 1, 400, 20);
             return (

@@ -251,10 +251,20 @@ describe("compiled timeline v2 (heroes) and captions (3-5 word phrases with word
     const scene = { objects: [{ label: "Water vapour" }, { label: "Sunlight" }] } as never;
     expect(isKey(scene, "97%")).toBe(true);
     expect(isKey(scene, "vapour.")).toBe(true);
-    expect(isKey(scene, "Sun")).toBe(true);
+    expect(isKey(scene, "sunlight,")).toBe(true);
     expect(isKey(scene, "water")).toBe(false); // a topic word
     expect(isKey(scene, "the")).toBe(false);
     expect(isKey(scene, "ocean")).toBe(false);
+  });
+
+  it("key terms: short stems only match whole words (F22b review)", () => {
+    const isKey = keyTermTest({ topic: "How cities move people" });
+    const scene = { objects: [{ label: "Gas" }, { label: "Bus" }, { label: "Percentage" }, { label: "Evaporation" }] } as never;
+    expect(isKey(scene, "Gas")).toBe(true);
+    expect(isKey(scene, "Bus,")).toBe(true);
+    for (const word of ["gain", "game", "but", "build", "per", "Sun"]) expect(isKey(scene, word), word).toBe(false);
+    expect(isKey(scene, "percent")).toBe(true); // 4+ letters: a prefix of the label word
+    expect(isKey(scene, "evaporation.")).toBe(true);
   });
 
   it("is deterministic", () => {

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { spline, type Pt } from "../geometry";
 import { rise, seeded, wave } from "../motion";
 
@@ -337,8 +337,13 @@ const CONTINENTS: Pt[][] = [
   [{ x: 1.45, y: -0.45 }, { x: 1.62, y: -0.4 }, { x: 1.58, y: -0.22 }, { x: 1.46, y: -0.28 }, { x: 1.45, y: -0.45 }],
 ];
 
-/** A spinning globe: ocean, simple land masses scrolling across, ice caps, atmosphere glow. */
-export const Globe: React.FC<{ r: number; frame: number; spin?: number; id: string }> = ({ r, frame, spin = 0.004, id }) => {
+/**
+ * A spinning globe: ocean, simple land masses scrolling across, ice caps, atmosphere glow. Its clip
+ * radius changes per frame (the cue "kick"), so each globe has its own clip id: when two globes are
+ * on screen (a scene hand-over), neither borrows the other's clip.
+ */
+export const Globe: React.FC<{ r: number; frame: number; spin?: number }> = ({ r, frame, spin = 0.004 }) => {
+  const id = `globe-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const span = 2;
   const offset = (frame * spin) % span;
   return (

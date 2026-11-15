@@ -100,7 +100,7 @@ const DinosaurObject: React.FC<HeroProps> = ({ frame, since }) => {
 
 // ---------- globe ----------
 
-const GlobeObject: React.FC<HeroProps> = ({ frame, cues }) => <Globe r={235 * (1 + 0.04 * kickOf(frame, cues))} frame={frame} id="hero-globe" />;
+const GlobeObject: React.FC<HeroProps> = ({ frame, cues }) => <Globe r={235 * (1 + 0.04 * kickOf(frame, cues))} frame={frame} />;
 
 // ---------- ocean (a round window onto the sea) ----------
 

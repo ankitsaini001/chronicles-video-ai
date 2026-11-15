@@ -3,10 +3,16 @@ import { normalizeHeroWord } from "../planning/hero-catalog";
 
 /**
  * Key terms in captions (F22b, video style v4): words shown in amber. A caption word is a key term
- * when it is a number, or when it names something on screen in its scene: it shares a stem with a
- * word of one of the scene's object labels. Topic words ("water" in a water-cycle video) and short
- * function words are never key terms, so the amber stays rare and meaningful. Pure, deterministic.
+ * when it is a number, or when it names something on screen in its scene: it is a word of one of
+ * the scene's object labels (with or without a final "s"), or shares a stem of at least 4 letters
+ * with one ("evaporation" / "Evaporates"). Short stems only match whole words, so a "Gas" label
+ * never lights up "gain" and "Percentage" never lights up "per". Topic words ("water" in a
+ * water-cycle video) and short function words are never key terms, so the amber stays rare and
+ * meaningful. Pure, deterministic.
  */
+
+/** Shortest stem that may match the start of a longer word. */
+const MIN_PREFIX = 4;
 
 const STOPWORDS = new Set(
   "the a an of and or to in into is are was be by for from on at as that this it its our your you we with where does go what how why who will can just about not all".split(" "),
@@ -33,6 +39,9 @@ export function keyTermTest(plan: Pick<Plan, "topic">): (scene: Pick<Scene, "obj
       labelStems = scene.objects.flatMap((o) => stems(o.label, topic));
       cache.set(scene, labelStems);
     }
-    return labelStems.some((stem) => word.startsWith(stem) || (stem.startsWith(word) && word.length >= 3));
+    const bare = word.replace(/s$/, "");
+    return labelStems.some(
+      (stem) => bare === stem || (stem.length >= MIN_PREFIX && word.startsWith(stem)) || (word.length >= MIN_PREFIX && stem.startsWith(word)),
+    );
   };
 }
