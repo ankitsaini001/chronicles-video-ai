@@ -1,4 +1,4 @@
-import type { IconName } from "./icon-catalog";
+import { iconFor, isIconName, type IconName } from "./icon-catalog";
 
 /**
  * Hero object catalog (F22b, video style v4): the big illustrated OBJECT shown in the middle of the
@@ -174,15 +174,53 @@ export function heroForText(text: string): HeroName | null {
   return null;
 }
 
+/** Icons too general to stand for an object (a star is not a trophy, a glass is not a chai cup). */
+const LOOSE_ICONS = new Set<IconName>(["glass", "star", "check", "question"]);
+
 /** The hero that shows the same thing as an icon (for an object without a matching label). */
 export function heroForIcon(icon: IconName | null | undefined): HeroName | null {
-  if (!icon) return null;
+  if (!icon || LOOSE_ICONS.has(icon)) return null;
   return HERO_CATALOG.find((d) => d.icon === icon)?.name ?? null;
 }
 
 /** true when the icon shows the same thing as the hero (so it is hidden while the hero is on screen). */
 export function iconDuplicatesHero(icon: IconName | null | undefined, hero: HeroName | null | undefined): boolean {
   return !!icon && !!hero && heroDef(hero).icon === icon;
+}
+
+/** Kinds that best name a scene's subject, for the medallion icon (in order of preference). */
+const SUBJECT_KINDS = ["icon", "diagram", "headline", "axis", "column", "node", "milestone", "step", "part", "bullet"];
+
+type ObjectLike = { kind: string; label: string; icon?: string | null | undefined };
+
+/** The icon that best stands for a scene: shown large in a medallion when no hero fits. */
+export function sceneIcon(objects: readonly ObjectLike[]): IconName {
+  const object = SUBJECT_KINDS.map((kind) => objects.find((o) => o.kind === kind)).find((o) => !!o) ?? objects[0];
+  if (!object) return "bulb";
+  return iconFor({ icon: isIconName(object.icon) ? object.icon : null, label: object.label });
+}
+
+/**
+ * The heroes a scene will show, in plain words, for the storyboard screen (no timing needed): each
+ * block's planner pick, else the heroes its narration names, else one an object label names; at
+ * most `max`. When nothing fits, the scene icon shown in a medallion ("bulb icon").
+ */
+export function storyboardHeroes(
+  scene: { narration: readonly { text: string; hero?: string | null | undefined }[]; objects: readonly ObjectLike[] },
+  max = 3,
+): string[] {
+  const names: HeroName[] = [];
+  const add = (name: HeroName | null) => {
+    if (name && !names.includes(name)) names.push(name);
+  };
+  for (const block of scene.narration) {
+    if (isHeroName(block.hero)) add(block.hero);
+    else for (const word of block.text.split(/\s+/)) add(heroForWord(word));
+  }
+  if (!names.length) for (const o of scene.objects) add(heroForText(o.label));
+  if (!names.length) return [`${sceneIcon(scene.objects)} icon`];
+  const titles = names.slice(0, max).map(heroTitle);
+  return names.length > max ? [...titles.slice(0, -1), `${titles[titles.length - 1]}…`] : titles;
 }
 
 /** One line per hero for the planner prompt: name, what it shows, and the topics it suits. */

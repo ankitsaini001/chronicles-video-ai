@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "projectId": "fixture-sip-vs-fd",
+  "ownerId": "fixture-owner",
+  "versionId": "v1",
+  "parentVersionId": null,
+  "topic": "SIP or fixed deposit",
+  "audience": "Young earners in India who have started saving and are new to investing",
+  "learningObjective": "Compare a fixed deposit and a SIP in mutual funds: how each grows savings, the risk, and how to start a SIP",
+  "language": "en",
+  "voicePreset": "indian-english-female",
+  "sources": [
+    {
+      "id": "topic-notes",
+      "title": "Fixture notes",
+      "notes": "Compare a bank fixed deposit with a monthly SIP in a mutual fund for a beginner. Use rounded, illustrative numbers only and say returns are not guaranteed."
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-hook",
+      "type": "title-hook",
+      "narration": [
+        {
+          "id": "line-hook-question",
+          "text": "Should your monthly savings sit in a fixed deposit, or go into a SIP?",
+          "hero": "piggy-bank"
+        },
+        {
+          "id": "line-hook-answer",
+          "text": "Both can grow your money, but in very different ways."
+        }
+      ],
+      "objects": [
+        { "id": "hook-title", "kind": "headline", "label": "SIP or FD?", "icon": "question", "value": null },
+        { "id": "hook-sub", "kind": "subtitle", "label": "Where should your savings go?", "value": null }
+      ],
+      "events": [
+        { "id": "ev-hook-title", "anchor": { "narrationId": "line-hook-question", "phrase": "fixed deposit" }, "action": "appear", "target": "hook-title" },
+        { "id": "ev-hook-sub", "anchor": { "narrationId": "line-hook-answer", "phrase": "very different ways" }, "action": "appear", "target": "hook-sub" }
+      ]
+    },
+    {
+      "id": "scene-compare",
+      "type": "comparison",
+      "narration": [
+        {
+          "id": "line-compare-fd",
+          "text": "A fixed deposit pays a fixed interest rate, so you know exactly what you will get, and the risk is very low.",
+          "hero": "bank"
+        },
+        {
+          "id": "line-compare-sip",
+          "text": "A SIP puts a small amount into a mutual fund every month. Returns can be higher, but the value goes up and down.",
+          "hero": "growth-chart"
+        }
+      ],
+      "objects": [
+        { "id": "col-fd", "kind": "column", "label": "Fixed deposit", "icon": "bank", "value": null },
+        { "id": "pt-fixed", "kind": "point", "label": "Known, fixed returns", "value": null },
+        { "id": "pt-risk", "kind": "point", "label": "Very low risk", "value": null },
+        { "id": "col-sip", "kind": "column", "label": "SIP in mutual funds", "icon": "chart", "value": null },
+        { "id": "pt-higher", "kind": "point", "label": "Returns can be higher", "value": null },
+        { "id": "pt-swings", "kind": "point", "label": "Value goes up and down", "value": null }
+      ],
+      "events": [
+        { "id": "ev-col-fd", "anchor": { "narrationId": "line-compare-fd", "phrase": "A fixed deposit" }, "action": "appear", "target": "col-fd" },
+        { "id": "ev-pt-fixed", "anchor": { "narrationId": "line-compare-fd", "phrase": "know exactly" }, "action": "check", "target": "pt-fixed" },
+        { "id": "ev-pt-risk", "anchor": { "narrationId": "line-compare-fd", "phrase": "very low" }, "action": "check", "target": "pt-risk" },
+        { "id": "ev-col-sip", "anchor": { "narrationId": "line-compare-sip", "phrase": "A SIP puts" }, "action": "appear", "target": "col-sip" },
+        { "id": "ev-pt-higher", "anchor": { "narrationId": "line-compare-sip", "phrase": "can be higher" }, "action": "check", "target": "pt-higher" },
+        { "id": "ev-pt-swings", "anchor": { "narrationId": "line-compare-sip", "phrase": "goes up and down" }, "action": "cross", "target": "pt-swings" }
+      ]
+    },
+    {
+      "id": "scene-growth",
+      "type": "chart",
+      "narration": [
+        {
+          "id": "line-growth-setup",
+          "text": "Imagine saving the same amount every month for ten years. Your own savings are the same in both cases."
+        },
+        {
+          "id": "line-growth-result",
+          "text": "The fixed deposit grows them steadily, while the SIP may grow them more, with no promise."
+        }
+      ],
+      "objects": [
+        { "id": "chart-axis", "kind": "axis", "label": "After 10 years (₹ lakh)", "value": null },
+        { "id": "bar-own", "kind": "bar", "label": "Your own savings", "value": 6 },
+        { "id": "bar-fd", "kind": "bar", "label": "Fixed deposit", "value": 8.6 },
+        { "id": "bar-sip", "kind": "bar", "label": "SIP (not guaranteed)", "value": 11.6 }
+      ],
+      "events": [
+        { "id": "ev-bar-own", "anchor": { "narrationId": "line-growth-setup", "phrase": "Your own savings" }, "action": "grow", "target": "bar-own" },
+        { "id": "ev-bar-fd", "anchor": { "narrationId": "line-growth-result", "phrase": "grows them steadily" }, "action": "grow", "target": "bar-fd" },
+        { "id": "ev-bar-sip", "anchor": { "narrationId": "line-growth-result", "phrase": "may grow them more" }, "action": "grow", "target": "bar-sip" }
+      ]
+    },
+    {
+      "id": "scene-steps",
+      "type": "step-sequence",
+      "narration": [
+        {
+          "id": "line-steps-intro",
+          "text": "Starting a SIP takes four simple steps.",
+          "hero": "checklist"
+        },
+        {
+          "id": "line-steps-list",
+          "text": "First, finish your KYC with your PAN card. Next, pick a diversified fund. Then choose the amount and the date. Finally, let it run and review it once a year."
+        }
+      ],
+      "objects": [
+        { "id": "step-kyc", "kind": "step", "label": "Complete KYC with your PAN", "value": null },
+        { "id": "step-fund", "kind": "step", "label": "Pick a diversified fund", "value": null },
+        { "id": "step-amount", "kind": "step", "label": "Choose the amount and date", "value": null },
+        { "id": "step-run", "kind": "step", "label": "Let it run, review it yearly", "value": null }
+      ],
+      "events": [
+        { "id": "ev-step-kyc", "anchor": { "narrationId": "line-steps-list", "phrase": "finish your KYC" }, "action": "appear", "target": "step-kyc" },
+        { "id": "ev-step-fund", "anchor": { "narrationId": "line-steps-list", "phrase": "pick a diversified fund" }, "action": "appear", "target": "step-fund" },
+        { "id": "ev-step-amount", "anchor": { "narrationId": "line-steps-list", "phrase": "choose the amount" }, "action": "appear", "target": "step-amount" },
+        { "id": "ev-step-run", "anchor": { "narrationId": "line-steps-list", "phrase": "let it run" }, "action": "appear", "target": "step-run" },
+        { "id": "ev-step-done", "anchor": { "narrationId": "line-steps-list", "phrase": "once a year" }, "action": "complete", "target": "step-run" }
+      ]
+    },
+    {
+      "id": "scene-takeaway",
+      "type": "takeaway",
+      "narration": [
+        {
+          "id": "line-take-main",
+          "text": "Remember: a fixed deposit is for safety, and a SIP is for long-term growth. Many people keep their emergency money in an FD and invest the rest through a SIP."
+        }
+      ],
+      "objects": [
+        { "id": "take-head", "kind": "headline", "label": "Safety and growth", "value": null },
+        { "id": "take-fd", "kind": "bullet", "label": "FD: safe and steady", "value": null },
+        { "id": "take-sip", "kind": "bullet", "label": "SIP: growth over the years", "value": null }
+      ],
+      "events": [
+        { "id": "ev-take-head", "anchor": { "narrationId": "line-take-main", "phrase": "Remember" }, "action": "appear", "target": "take-head" },
+        { "id": "ev-take-fd", "anchor": { "narrationId": "line-take-main", "phrase": "for safety" }, "action": "highlight", "target": "take-fd" },
+        { "id": "ev-take-sip", "anchor": { "narrationId": "line-take-main", "phrase": "long-term growth" }, "action": "highlight", "target": "take-sip" }
+      ]
+    }
+  ],
+  "warnings": [
+    { "sceneId": "scene-growth", "message": "Illustrative numbers: about 7% for the FD and about 12% for the SIP; SIP returns are not guaranteed." }
+  ]
+}

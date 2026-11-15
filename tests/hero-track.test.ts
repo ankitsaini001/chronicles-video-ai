@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CaptionTrackSchema, PlanSchema, TimelineSchema } from "../packages/pipeline/src/contracts";
-import { hashPlan } from "../packages/pipeline/src/planning";
-import { compileTimeline, DEFAULT_CAPTION_LAYOUT, heroTrack, keyTermTest, sceneIcon, synthesizeSceneAlignment } from "../packages/pipeline/src/timing";
+import { hashPlan, sceneIcon, storyboardHeroes } from "../packages/pipeline/src/planning";
+import { compileTimeline, DEFAULT_CAPTION_LAYOUT, heroTrack, keyTermTest, synthesizeSceneAlignment } from "../packages/pipeline/src/timing";
 import { loadFixture } from "./helpers";
 
 function compile(raw: unknown) {
@@ -83,6 +83,20 @@ describe("hero track (pure)", () => {
     expect(none).toEqual([{ startFrame: 50, hero: null, icon: "check", source: "icon" }]);
   });
 
+  it("a labeled diagram keeps its own object as the hero when the planner picked none", () => {
+    const base = {
+      sceneType: "labeled-diagram" as const,
+      sceneStart: 0,
+      objects: [{ id: "d", kind: "diagram", label: "Cloud" }, { id: "p", kind: "part", label: "Tiny droplets" }],
+      events: [{ target: "p", startFrame: 60 }],
+    };
+    const words = [{ text: "vapour", frame: 10 }, { text: "droplets", frame: 60 }];
+    expect(heroTrack({ ...base, blocks: [{ narrationId: "a", startFrame: 0, words }] }).map((s) => s.hero)).toEqual(["cloud"]);
+    // a planner pick still wins for its block; the other block keeps the diagram's object
+    const mixed = heroTrack({ ...base, blocks: [{ narrationId: "a", hero: "sun", startFrame: 0, words: [] }, { narrationId: "b", startFrame: 100, words }] });
+    expect(mixed.map((s) => [s.hero, s.source])).toEqual([["sun", "plan"], ["cloud", "keyword"]]);
+  });
+
   it("a takeaway keeps one hero", () => {
     const steps = heroTrack({
       sceneType: "takeaway",
@@ -96,9 +110,16 @@ describe("hero track (pure)", () => {
   });
 
   it("the scene icon prefers icon objects, then the subject (diagram, headline, ...)", () => {
-    expect(sceneIcon([{ id: "a", kind: "node", label: "Sun" }, { id: "b", kind: "icon", label: "x", icon: "coin" }])).toBe("coin");
-    expect(sceneIcon([{ id: "a", kind: "part", label: "x" }, { id: "b", kind: "diagram", label: "Bank" }])).toBe("bank");
+    expect(sceneIcon([{ kind: "node", label: "Sun" }, { kind: "icon", label: "x", icon: "coin" }])).toBe("coin");
+    expect(sceneIcon([{ kind: "part", label: "x" }, { kind: "diagram", label: "Bank" }])).toBe("bank");
     expect(sceneIcon([])).toBe("bulb");
+  });
+
+  it("the storyboard names a scene's heroes: picks, else heroes the narration names, else the icon", () => {
+    expect(storyboardHeroes({ narration: [{ text: "Clouds form", hero: "chai-cup" }, { text: "The sun heats the sea" }], objects: [] })).toEqual(["chai cup", "sun", "ocean"]);
+    expect(storyboardHeroes({ narration: [{ text: "Sun, sea, clouds and rain" }], objects: [] }, 2)).toEqual(["sun", "ocean…"]);
+    expect(storyboardHeroes({ narration: [{ text: "Here is the difference" }], objects: [{ kind: "column", label: "Savings account" }] })).toEqual(["piggy bank"]);
+    expect(storyboardHeroes({ narration: [{ text: "Do this then that" }], objects: [{ kind: "step", label: "First", icon: "check" }] })).toEqual(["check icon"]);
   });
 });
 

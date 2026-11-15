@@ -8,7 +8,7 @@ import { PlanSchema, SceneAlignmentSchema } from "@bytereel/pipeline/contracts";
 import { hashPlan } from "@bytereel/pipeline/planning";
 import { COMPOSITION_ID, renderExplainer, RENDER_SETTINGS, VIDEO_ENTRY } from "@bytereel/pipeline/pipeline/render";
 import { MUSIC_FILE, musicInputFor, synthMusicBed } from "@bytereel/pipeline/pipeline/music";
-import { compileTimeline, DEFAULT_HOLDS } from "@bytereel/pipeline/timing";
+import { compileTimeline, DEFAULT_HOLDS, synthesizeSceneAlignment } from "@bytereel/pipeline/timing";
 
 /**
  * Re-render a recorded run in the current video style (F22b). FREE: no Gemini, no ElevenLabs. It
@@ -18,6 +18,7 @@ import { compileTimeline, DEFAULT_HOLDS } from "@bytereel/pipeline/timing";
  *
  *   npx tsx tools/video/rerender-run.ts --run <runDir> --out <file.mp4> [--sheet <file.png>]
  *        [--no-music] [--concurrency N] [--work <dir>]
+ *   Or a fixture plan with synthetic silent timing (no audio, no music): --fixture <plan.json> instead of --run.
  *   Benchmarks / quick looks (same settings, no MP4 checks):
  *        --frames 0-599          render only these frames
  *        --stills 30,470,960     only PNG stills (next to --out)
@@ -35,19 +36,22 @@ function arg(name: string): string | undefined {
 const flag = (name: string) => process.argv.includes(`--${name}`);
 
 async function main() {
+  const fixture = arg("fixture");
   const runDir = path.resolve(arg("run") ?? "");
   const out = path.resolve(arg("out") ?? "");
-  if (!arg("run") || !arg("out")) throw new Error("usage: --run <runDir> --out <file.mp4> [--sheet <file.png>]");
-  const work = path.resolve(arg("work") ?? path.join(runDir, ".rerender-tmp"));
-  const music = !flag("no-music");
+  if ((!arg("run") && !fixture) || !arg("out")) throw new Error("usage: --run <runDir> | --fixture <plan.json>, --out <file.mp4> [--sheet <file.png>]");
+  const work = path.resolve(arg("work") ?? (fixture ? `${out}.tmp` : path.join(runDir, ".rerender-tmp")));
+  const music = !flag("no-music") && !fixture;
   const concurrency = arg("concurrency") ? Number(arg("concurrency")) : null;
 
-  const plan = PlanSchema.parse(JSON.parse(await fs.readFile(path.join(runDir, "plan.json"), "utf8")));
-  const alignments = Object.fromEntries(
-    await Promise.all(plan.scenes.map(async (s) => [s.id, SceneAlignmentSchema.parse(JSON.parse(await fs.readFile(path.join(runDir, "alignment", `${s.id}.json`), "utf8")))] as const)),
-  );
+  const plan = PlanSchema.parse(JSON.parse(await fs.readFile(fixture ? path.resolve(fixture) : path.join(runDir, "plan.json"), "utf8")));
+  const alignments = fixture
+    ? Object.fromEntries(plan.scenes.map((s) => [s.id, synthesizeSceneAlignment(s, plan.language)]))
+    : Object.fromEntries(
+        await Promise.all(plan.scenes.map(async (s) => [s.id, SceneAlignmentSchema.parse(JSON.parse(await fs.readFile(path.join(runDir, "alignment", `${s.id}.json`), "utf8")))] as const)),
+      );
   const { timeline, captions } = compileTimeline({ plan, planHash: hashPlan(plan), alignments, holds: DEFAULT_HOLDS });
-  try {
+  if (!fixture) try {
     const stored = JSON.parse(await fs.readFile(path.join(runDir, "timeline.json"), "utf8")) as { totalFrames: number };
     if (stored.totalFrames !== timeline.totalFrames) throw new Error(`compiled ${timeline.totalFrames} frames but the run's timeline.json has ${stored.totalFrames}`);
   } catch (error) {
@@ -60,7 +64,7 @@ async function main() {
   const publicDir = path.join(work, "public");
   await fs.mkdir(path.join(publicDir, "audio"), { recursive: true });
   for (const scene of timeline.scenes) {
-    if (scene.audioKey) await fs.copyFile(path.join(runDir, scene.audioKey), path.join(publicDir, scene.audioKey));
+    if (scene.audioKey && !fixture) await fs.copyFile(path.join(runDir, scene.audioKey), path.join(publicDir, scene.audioKey));
   }
   await fs.mkdir(path.dirname(out), { recursive: true });
   const started = Date.now();

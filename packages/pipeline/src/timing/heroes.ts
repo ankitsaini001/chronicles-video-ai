@@ -1,6 +1,6 @@
 import type { HeroStep, SceneType } from "../contracts";
-import { heroForIcon, heroForText, heroForWord, type HeroName } from "../planning/hero-catalog";
-import { iconFor, type IconName } from "../planning/icon-catalog";
+import { heroForIcon, heroForText, heroForWord, sceneIcon, type HeroName } from "../planning/hero-catalog";
+import type { IconName } from "../planning/icon-catalog";
 
 /**
  * Hero track (F22b, video style v4): which big object is on screen when, for one scene. Pure and
@@ -12,7 +12,10 @@ import { iconFor, type IconName } from "../planning/icon-catalog";
  *   content object (its label, else its icon) is a STRONG cue; a spoken word that names a hero is
  *   a WEAK cue. A hero stays at least MIN_HOLD frames before a weak cue may replace it, a weak cue
  *   is skipped when a strong cue for another hero follows within LOOKAHEAD frames, and a strong
- *   cue within MIN_STRONG frames of the last change replaces that change instead of adding one.
+ *   cue within MIN_STRONG frames of the last change replaces that change instead of adding one, and
+ *   a weak cue never switches back to the hero shown just before within NO_RETURN frames (no flicker).
+ * - A labeled diagram is about one thing: a block without a pick shows the diagram's own object (the
+ *   hero its label or icon names), when there is one, instead of switching on keywords.
  * - The first hero is shown from the scene's first frame (never an empty screen).
  * - Nothing named at all: the first object label that names a hero, else the scene's icon large in
  *   a glowing medallion (hero null, `icon` set).
@@ -21,12 +24,12 @@ import { iconFor, type IconName } from "../planning/icon-catalog";
 
 export const HERO_MIN_HOLD = 36;
 export const HERO_MIN_STRONG = 20;
-export const HERO_LOOKAHEAD = 45;
+/** Longer than the sample's 45: an incidental word ("every month") no longer flashes a hero just before a planned one. */
+export const HERO_LOOKAHEAD = 75;
+export const HERO_NO_RETURN = 120;
 
 /** Object kinds whose events say "this thing is being talked about now". */
 const CONTENT_KINDS = new Set(["node", "part", "diagram", "column", "point", "milestone", "step", "bar", "line-point", "pie-slice", "counter", "icon"]);
-/** Kinds that best name the scene's subject, for the medallion icon. */
-const SUBJECT_KINDS = ["icon", "diagram", "headline", "axis", "column", "node", "milestone", "step", "part", "bullet"];
 
 export interface HeroTrackInput {
   sceneType: SceneType;
@@ -40,18 +43,21 @@ interface Candidate {
   frame: number;
   hero: HeroName;
   strong: boolean;
-  /** planner pick: holds for the whole block */
+  /** holds for the whole block (a planner pick, or a labeled diagram's own object) */
   pinned: boolean;
+  source: "plan" | "keyword";
 }
 
 export function heroTrack(input: HeroTrackInput): HeroStep[] {
   const { sceneStart, blocks, objects } = input;
   const candidates: Candidate[] = [];
+  const diagram = input.sceneType === "labeled-diagram" ? objects.find((o) => o.kind === "diagram") : undefined;
+  const subject = diagram ? (heroForText(diagram.label) ?? heroForIcon(diagram.icon)) : null;
   blocks.forEach((block, i) => {
     const from = i === 0 ? sceneStart : block.startFrame;
     const to = blocks[i + 1]?.startFrame ?? Infinity;
-    if (block.hero) {
-      candidates.push({ frame: from, hero: block.hero, strong: true, pinned: true });
+    if (block.hero || subject) {
+      candidates.push({ frame: from, hero: block.hero ?? subject!, strong: true, pinned: true, source: block.hero ? "plan" : "keyword" });
       return;
     }
     for (const event of input.events) {
@@ -59,11 +65,11 @@ export function heroTrack(input: HeroTrackInput): HeroStep[] {
       const target = objects.find((o) => o.id === event.target);
       if (!target || !CONTENT_KINDS.has(target.kind)) continue;
       const hero = heroForText(target.label) ?? heroForIcon(target.icon);
-      if (hero) candidates.push({ frame: event.startFrame, hero, strong: true, pinned: false });
+      if (hero) candidates.push({ frame: event.startFrame, hero, strong: true, pinned: false, source: "keyword" });
     }
     for (const word of block.words) {
       const hero = heroForWord(word.text);
-      if (hero) candidates.push({ frame: word.frame, hero, strong: false, pinned: false });
+      if (hero) candidates.push({ frame: word.frame, hero, strong: false, pinned: false, source: "keyword" });
     }
   });
   candidates.sort((a, b) => a.frame - b.frame || Number(b.pinned) - Number(a.pinned) || Number(b.strong) - Number(a.strong));
@@ -72,7 +78,7 @@ export function heroTrack(input: HeroTrackInput): HeroStep[] {
   const steps: Step[] = [];
   let lastHit = -Infinity;
   for (const c of candidates) {
-    const source = c.pinned ? "plan" : "keyword";
+    const source = c.source;
     const last = steps[steps.length - 1];
     if (!last) {
       steps.push({ startFrame: sceneStart, hero: c.hero, source });
@@ -94,6 +100,9 @@ export function heroTrack(input: HeroTrackInput): HeroStep[] {
       continue;
     }
     if (c.frame - lastHit < HERO_MIN_HOLD) continue;
+    // no flicker: a spoken word never switches back to the hero shown just before, soon after it left
+    const before = steps[steps.length - 2];
+    if (before && before.hero === c.hero && c.frame - last.startFrame < HERO_NO_RETURN) continue;
     if (candidates.some((o) => o.strong && o.hero !== c.hero && o.frame > c.frame && o.frame <= c.frame + HERO_LOOKAHEAD)) continue;
     steps.push({ startFrame: c.frame, hero: c.hero, source });
     lastHit = c.frame;
@@ -111,14 +120,4 @@ export function heroTrack(input: HeroTrackInput): HeroStep[] {
     if (hero) return [{ startFrame: sceneStart, hero, icon, source: "keyword" }];
   }
   return [{ startFrame: sceneStart, hero: null, icon, source: "icon" }];
-}
-
-/** The icon that best stands for the scene (the medallion picture when no hero fits). */
-export function sceneIcon(objects: HeroTrackInput["objects"]): IconName {
-  for (const kind of SUBJECT_KINDS) {
-    const object = objects.find((o) => o.kind === kind);
-    if (object) return iconFor({ icon: object.icon ?? null, label: object.label });
-  }
-  const first = objects[0];
-  return first ? iconFor({ icon: first.icon ?? null, label: first.label }) : "bulb";
 }
