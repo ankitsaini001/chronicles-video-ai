@@ -1,13 +1,13 @@
 import type React from "react";
-import { useMemo } from "react";
 import { AbsoluteFill } from "remotion";
 import { seeded, wave } from "./motion";
 import { C, LAYOUT } from "./theme";
 
 /**
- * The dark stage behind every scene: a warm black gradient with a slowly wandering amber glow and
- * a vignette (one element, plain CSS gradients), plus a few drifting light motes. Kept cheap on
- * purpose: no blur filters, and few particles (render time, F22b).
+ * The dark stage behind every scene: a warm black gradient with an amber glow and a vignette (one
+ * element, plain CSS gradients, the same on every frame), plus a few drifting light motes. Kept
+ * cheap on purpose: no blur filters, few particles, and a still background (a glow that moved or
+ * pulsed changed every pixel of every frame: about 10% bigger files, F22b measurements).
  */
 
 interface Mote {
@@ -35,18 +35,13 @@ const wrap = (v: number, max: number) => ((v % max) + max) % max;
 const FAR = makeMotes(11, 18, 1, 2.2);
 const MID = makeMotes(23, 6, 2.5, 3.6);
 
+const BACKGROUND = [
+  "radial-gradient(120% 80% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%)",
+  "radial-gradient(48% 34% at 62% 38%, rgba(245,165,36,0.2), transparent 72%)",
+  `linear-gradient(180deg, #120C08 0%, ${C.bg} 45%, ${C.bgDeep} 100%)`,
+].join(", ");
+
 export const Backdrop: React.FC<{ frame: number }> = ({ frame }) => {
-  const glowX = 62 + wave(frame, 240) * 12;
-  const glowY = 38 + wave(frame, 300, 0.4) * 8;
-  const background = useMemo(
-    () =>
-      [
-        "radial-gradient(120% 80% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%)",
-        `radial-gradient(48% 34% at ${glowX.toFixed(1)}% ${glowY.toFixed(1)}%, rgba(245,165,36,${(0.2 + 0.05 * wave(frame, 90)).toFixed(3)}), transparent 72%)`,
-        `linear-gradient(180deg, #120C08 0%, ${C.bg} 45%, ${C.bgDeep} 100%)`,
-      ].join(", "),
-    [frame, glowX, glowY],
-  );
   const layer = (motes: Mote[], drift: number, fill: string, dust: boolean) =>
     motes.map((m, i) => {
       const x = wrap(m.x + wave(frame, 180 + i * 7, m.phase) * 14, LAYOUT.width + 80) - 40;
@@ -55,7 +50,7 @@ export const Backdrop: React.FC<{ frame: number }> = ({ frame }) => {
       return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r={dust ? m.r : m.r * 2.4} fill={fill} opacity={(dust ? 0.55 * a : a).toFixed(2)} />;
     });
   return (
-    <AbsoluteFill style={{ background }}>
+    <AbsoluteFill style={{ background: BACKGROUND }}>
       <svg width={LAYOUT.width} height={LAYOUT.height} style={{ position: "absolute", inset: 0 }}>
         <defs>
           <radialGradient id="bd-mote">

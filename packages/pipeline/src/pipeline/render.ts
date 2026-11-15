@@ -17,12 +17,12 @@ export const VIDEO_ENTRY = path.resolve(import.meta.dirname, "../../../video/src
 export const COMPOSITION_ID = "Explainer";
 
 /**
- * Encoding settings, tuned for render time and file size on 2026-11-15 (F22b, see the feature file):
- * JPEG frames from the browser, H.264 at CRF 23 (visually the same as 18 on this dark style,
- * a third of the size).
+ * Encoding settings, tuned for render time and file size on 2026-11-15 (F22b, measurements in
+ * docs/features/F22b-video-style-v4.md): JPEG frames from the browser, H.264 at CRF 26, which looked
+ * the same as CRF 23 in full-size stills of this dark style at about 30% less file size.
  */
 export const RENDER_SETTINGS = {
-  crf: 23,
+  crf: 26,
   jpegQuality: 85,
   x264Preset: "medium",
   audioBitrate: "160k",
