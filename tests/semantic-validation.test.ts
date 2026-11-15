@@ -16,6 +16,28 @@ describe("valid fixture", () => {
   });
 });
 
+describe("caption words (F22b review)", () => {
+  it("a narration word too long for any caption line is a plan problem, before any voice is recorded", () => {
+    const raw = loadFixture("water-cycle.plan.json");
+    raw.scenes[5].narration[1].text += " Pneumonoultramicroscopicsilicovolcanoconiosis is rare.";
+    const issues = issuesFor(raw);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ sceneId: "scene-takeaway", path: "scenes[5].narration[1].text" });
+    expect(issues[0]!.message).toBe(
+      '"Pneumonoultramicroscopicsilicovolcanoconiosis" is too long to fit on a caption line. Use a shorter word, or a "display" form that breaks it up (for example with a space or a hyphen).',
+    );
+    // the captions show the display form, so a display form without the long word fixes it
+    raw.scenes[5].narration[1].display = raw.scenes[5].narration[1].text.replace("Pneumonoultramicroscopicsilicovolcanoconiosis", "This lung disease");
+    expect(validatePlan(raw).ok).toBe(true);
+  });
+
+  it("a word the captions can show a little smaller (or broken at a hyphen) is fine", () => {
+    const raw = loadFixture("water-cycle.plan.json");
+    raw.scenes[5].narration[1].text += " Telecommunications at www.instagram.com are state-of-the-art-telecommunications.";
+    expect(validatePlan(raw).ok).toBe(true);
+  });
+});
+
 describe("invalid fixtures produce one clear error each", () => {
   it("missing anchor phrase", () => {
     const issues = issuesFor(loadFixture("invalid-missing-anchor.plan.json"));

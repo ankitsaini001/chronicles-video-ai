@@ -226,6 +226,12 @@ export const CaptionSchema = z.strictObject({
    * Joined with single spaces they equal `text`, and the lines split them in order.
    */
   words: z.array(CaptionTrackWordSchema).min(1),
+  /**
+   * Only on a caption drawn smaller than the track's `fontSizePx`: a single word too wide for a line
+   * at the normal size, shrunk or broken at a hyphen, slash or dot (timing/captions.ts
+   * captionWordFit). Absent on every other caption, so other caption files are unchanged.
+   */
+  fontSizePx: z.number().positive().optional(),
 });
 export type Caption = z.infer<typeof CaptionSchema>;
 

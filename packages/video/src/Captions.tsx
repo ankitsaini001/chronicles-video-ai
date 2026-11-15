@@ -27,6 +27,8 @@ export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore
     })
     .filter((l) => l.length > 0);
   const enter = pop(frame, Math.max(caption.startFrame, words[0]!.startFrame - 2), 320, 18);
+  // smaller only for one word too wide for a line at the normal size (captions.json fontSizePx)
+  const fontSize = caption.fontSizePx ?? CAPTION_STYLE.fontSizePx;
   return (
     <div
       style={{
@@ -55,7 +57,7 @@ export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore
                   display: "inline-block",
                   fontFamily: FONT,
                   fontWeight: CAPTION_STYLE.fontWeight,
-                  fontSize: CAPTION_STYLE.fontSizePx,
+                  fontSize,
                   lineHeight: CAPTION_STYLE.lineHeight,
                   letterSpacing: "-0.01em",
                   padding: `0 ${CAPTION_STYLE.wordPaddingX}px`,

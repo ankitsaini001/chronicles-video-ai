@@ -16,7 +16,7 @@ import {
 } from "../contracts";
 import { CAPTION_STYLE, MOTION } from "../theme";
 import { localeFor, timeSceneBlocks, type TimedToken } from "./alignment";
-import { breakLines, groupPhrases, type CaptionLayout, type CaptionWord } from "./captions";
+import { breakLines, captionWordFit, groupPhrases, type CaptionLayout, type CaptionWord } from "./captions";
 import { AlignmentMappingError, CompileInputError, DurationOutOfRangeError } from "./errors";
 import {
   endFrameOf,
@@ -298,23 +298,23 @@ function sceneCaptions(
   const phrases = groupPhrases(words, layout);
   const starts = phrases.map((p) => sceneStart + startFrameOf(p[0]!.startSec));
   return phrases.map((phrase, index) => {
-    const lines = breakLines(phrase.map((w) => w.text), layout);
-    if (!lines) throw new Error(`internal: caption phrase does not fit in 2 lines in scene "${sceneId}"`);
     const naturalEnd = sceneStart + endFrameOf(phrase[phrase.length - 1]!.endSec) + CAPTION_LINGER_FRAMES;
     const nextStart = starts[index + 1] ?? sceneEnd;
     const startFrame = starts[index]!;
     const endFrame = Math.max(startFrame + 1, Math.min(naturalEnd, nextStart, sceneEnd));
-    return {
-      id: `${sceneId}-c${String(index + 1).padStart(2, "0")}`,
-      sceneId,
-      startFrame,
-      endFrame,
-      text: phrase.map((w) => w.text).join(" "),
-      lines: lines.map((line) => line.join(" ")),
-      words: phrase.map((w) => {
-        const wordStart = sceneStart + startFrameOf(w.startSec);
-        return { text: w.text, startFrame: wordStart, endFrame: Math.max(wordStart + 1, sceneStart + endFrameOf(w.endSec)), key: isKey(w.text) };
-      }),
+    const timed = (w: CaptionWord, text = w.text) => {
+      const wordStart = sceneStart + startFrameOf(w.startSec);
+      return { text, startFrame: wordStart, endFrame: Math.max(wordStart + 1, sceneStart + endFrameOf(w.endSec)), key: isKey(w.text) };
     };
+    const id = `${sceneId}-c${String(index + 1).padStart(2, "0")}`;
+    const lines = breakLines(phrase.map((w) => w.text), layout);
+    if (lines) {
+      return { id, sceneId, startFrame, endFrame, text: phrase.map((w) => w.text).join(" "), lines: lines.map((line) => line.join(" ")), words: phrase.map((w) => timed(w)) };
+    }
+    // one word too wide for a line at the normal size (groupPhrases put it alone): smaller, or broken in two
+    const fit = phrase.length === 1 ? captionWordFit(phrase[0]!.text, layout) : null;
+    if (!fit || fit.kind === "fits") throw new Error(`internal: caption phrase does not fit in 2 lines in scene "${sceneId}"`);
+    const pieces = fit.kind === "split" ? fit.pieces : [phrase[0]!.text];
+    return { id, sceneId, startFrame, endFrame, text: pieces.join(" "), lines: pieces, words: pieces.map((piece) => timed(phrase[0]!, piece)), fontSizePx: fit.fontSizePx };
   });
 }
