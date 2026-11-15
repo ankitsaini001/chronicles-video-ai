@@ -165,6 +165,21 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
     expect(base.plan.scenes[0]!.narration[0]!.text).not.toBe(text); // the base is never changed
   });
 
+  it("F22b: new words drop the planner's hero (the keyword fallback picks from them); unchanged words keep it", () => {
+    const base = versionDoc();
+    base.plan.scenes[0]!.narration[0]!.hero = "question-mark";
+    base.plan.scenes[0]!.narration[1]!.hero = null;
+    const text = `${base.plan.scenes[0]!.narration[0]!.text} Let's find out.`;
+    const edited = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text }] }));
+    expect(edited.validation.valid).toBe(true);
+    expect("hero" in edited.plan.scenes[0]!.narration[0]!).toBe(false);
+    expect(edited.plan.scenes[0]!.narration[1]!.hero).toBeNull(); // another block: untouched
+    // only the captions change (same words): the hero stays
+    const sameText = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: base.plan.scenes[0]!.narration[0]!.text, display: "Where does rain come from? And where does it go after it falls?" }] }));
+    expect(sameText.plan.scenes[0]!.narration[0]!.hero).toBe("question-mark");
+    expect(base.plan.scenes[0]!.narration[0]!.hero).toBe("question-mark"); // the base is never changed
+  });
+
   it("an edit that removes a cue is saved as invalid with the problem on that scene", () => {
     const built = buildPlanVersion(versionDoc(), ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: "Rain is interesting." }] }));
     expect(built.validation.valid).toBe(false);

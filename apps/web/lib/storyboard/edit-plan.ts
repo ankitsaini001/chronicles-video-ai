@@ -48,6 +48,8 @@ export function narrationChange(edit: { sceneId: string; blocks: readonly BlockE
     edit.blocks.forEach((change, i) => {
       const block = scene.narration.find((n) => n.id === change.narrationId);
       if (!block) throw new ProjectActionError("INVALID_INPUT", "Please reload the page and try again.", { issues: [{ path: `blocks[${i}].narrationId`, message: "is not a narration block of this scene" }] });
+      // F22b: the planner's hero was picked for the old words; new words get the free keyword fallback
+      if (change.text !== block.text) delete block.hero;
       block.text = change.text;
       if (change.speech !== undefined) block.speech = change.speech;
       if (change.display !== undefined) block.display = change.display;
