@@ -16,7 +16,8 @@ import {
 import { validPlan } from "./helpers";
 
 const words = (text: string): CaptionWord[] => text.split(" ").map((w, i) => ({ text: w, startSec: i * 0.4, endSec: i * 0.4 + 0.35 }));
-const layout = DEFAULT_CAPTION_LAYOUT;
+/** The line-breaking rules are tested at a fixed size, independent of the video style's caption size. */
+const layout = { fontSizePx: 50, maxLineWidthPx: 672 };
 const isNumber = (w: string | undefined) => !!w && /^\d/.test(w);
 const isUnit = (w: string | undefined) => !!w && /^(percent|rupees|crore|km)\b/.test(w);
 

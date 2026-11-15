@@ -53,18 +53,30 @@ export const CAPTION_ZONE = {
   bottom: CANVAS.height - SAFE_ZONE.bottom,
 } as const;
 
+/**
+ * Captions, video style v4 (F22b): short phrases of 3-5 words in big ExtraBold type; the word being
+ * spoken lights up in an amber pill and key terms are amber.
+ */
 export const CAPTION_STYLE = {
-  fontSizePx: 50,
-  fontWeight: 600,
-  lineHeight: 1.28,
-  paddingX: 34,
-  paddingY: 20,
+  fontSizePx: 66,
+  fontWeight: 800,
+  lineHeight: 1.18,
+  /** Horizontal padding of each word (room for the amber pill of the current word). */
+  wordPaddingX: 10,
+  /** Gap between words, instead of a space character. */
+  wordGap: 12,
+  /** The caption box: centred on this x (left of the Reels button column), bottom edge at `bottom`. */
+  centerX: 515,
+  boxWidth: 850,
+  bottom: 1495,
   /**
-   * Usable text width per line for the compiler. The box is centred on the canvas and may be
-   * 2 × (CAPTION_ZONE.right − 540) = 800 px wide (732 px of text); 672 px leaves a safety margin
-   * for the width estimate.
+   * Usable text width per line for the compiler's estimate (Inter SemiBold widths + 4%). ExtraBold
+   * is about 7% wider and each word adds 2 × 10 px of padding: 650 px of estimate leaves room for
+   * five words inside the 850 px box.
    */
-  maxLineWidthPx: 672,
+  maxLineWidthPx: 650,
+  minWords: 3,
+  maxWords: 5,
 } as const;
 
 /** Motion timings in frames (30 fps). */

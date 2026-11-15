@@ -4,7 +4,8 @@ import { estimateTextWidth } from "./text-width";
 /**
  * Caption phrase grouping and line breaking (PIPELINE_DESIGN.md §7).
  *
- * - Captions are phrases (no word-by-word effects), at most 2 lines.
+ * - Captions are phrases of at most 2 lines. Video style v4 (F22b) uses short phrases of 3-5 words
+ *   (`minWords`/`maxWords`); the renderer highlights the word being spoken inside the phrase.
  * - Phrases end at sentence ends, and at clause punctuation once they are long enough.
  * - Line width is decided with the deterministic width estimate (see text-width.ts).
  * - A number is never separated from its unit (line or phrase), e.g. "97 percent".
@@ -20,6 +21,10 @@ export interface CaptionWord {
 export interface CaptionLayout {
   fontSizePx: number;
   maxLineWidthPx: number;
+  /** Hard limit of words per phrase (no limit when absent). */
+  maxWords?: number;
+  /** Soft minimum: shorter phrases cost extra unless the sentence itself is shorter. */
+  minWords?: number;
 }
 
 const SENTENCE_END = /[.?!।]["')\]]?$/u;
@@ -73,6 +78,7 @@ function bestLineLayout(words: readonly string[], layout: CaptionLayout): LineLa
 }
 
 function fits(words: readonly CaptionWord[], layout: CaptionLayout): boolean {
+  if (layout.maxWords !== undefined && words.length > layout.maxWords) return false;
   return bestLineLayout(words.map((w) => w.text), layout) !== null;
 }
 
@@ -128,6 +134,7 @@ function splitSentence(words: readonly CaptionWord[], layout: CaptionLayout): Ca
     best[end] = { cost: Infinity, from: -1 };
     for (let start = end - 1; start >= 0; start--) {
       const phrase = words.slice(start, end);
+      if (layout.maxWords !== undefined && phrase.length > layout.maxWords) break;
       const lines = bestLineLayout(phrase.map((w) => w.text), layout);
       if (!lines) break; // longer phrases will not fit either
       if (end < n && keepsTogether(words[end - 1]!.text, words[end]!.text, layout)) continue;
@@ -135,6 +142,7 @@ function splitSentence(words: readonly CaptionWord[], layout: CaptionLayout): Ca
       let cost = best[start]!.cost + PHRASE_COST + (1 - fill) * (1 - fill) * 400 + lines.penalty;
       if (end < n) cost += breakCost(words[end - 1]!.text);
       if (phrase.length === 1 && n > 1) cost += 2000;
+      else if (layout.minWords !== undefined && phrase.length < layout.minWords && n >= layout.minWords) cost += 900;
       if (cost < best[end]!.cost) best[end] = { cost, from: start };
     }
   }
