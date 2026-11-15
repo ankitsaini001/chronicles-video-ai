@@ -8,7 +8,7 @@ import { Captions, CaptionScrim } from "./Captions";
 import { loadPackagedFonts } from "./fonts";
 import { rise } from "./motion";
 import { PATTERNS } from "./scenes";
-import { hookCaptionStart } from "./scenes/Hook";
+import { hookCaptionStart } from "./hook-words";
 import { sceneHeroCues, type Ctx } from "./scenes/shared";
 import { FONT, LAYOUT } from "./theme";
 import { LightWipe, ProgressBar } from "./ui";
@@ -49,7 +49,7 @@ export const Explainer: React.FC<ExplainerProps> = ({ timeline, captions, music 
   const cuesByScene = useMemo(() => new Map(scenes.map((s) => [s.sceneId, sceneHeroCues(s, wordsByScene.get(s.sceneId) ?? [])])), [scenes, wordsByScene]);
   const lastSpeech = useMemo(() => Math.max(0, ...captions.captions.map((c) => c.words[c.words.length - 1]?.endFrame ?? c.endFrame)), [captions]);
   const first = scenes[0];
-  const skipBefore = first && first.type === "title-hook" ? hookCaptionStart({ words: wordsByScene.get(first.sceneId) ?? [] }) : 0;
+  const skipBefore = first && first.type === "title-hook" ? hookCaptionStart(wordsByScene.get(first.sceneId) ?? []) : 0;
 
   return (
     <AbsoluteFill style={{ background: "#0B0806", fontFamily: FONT, overflow: "hidden" }}>

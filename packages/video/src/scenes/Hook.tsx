@@ -2,28 +2,20 @@ import type { CaptionTrackWord } from "@bytereel/pipeline/contracts";
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { hookSlam } from "../hook-words";
 import { HOOK_SUBTITLE_WIDTH } from "../layout";
 import { clamp01, fall, glide, popIn, rise } from "../motion";
 import { C, FONT, GRADIENTS } from "../theme";
 import { fitSize, Flash, SlamWord, textLines, Title } from "../ui";
-import { heroCamera, ofKind, TOP, type Ctx, type Pattern } from "./shared";
+import { heroCamera, ofKind, TOP, type Pattern } from "./shared";
 
 /**
- * Title / hook: the picture and the question from frame 1. The first words of the narration (up to
- * 3) slam in big over the hero within the first few frames; then the headline (gold title) and the
- * subtitle pill take over.
+ * Title / hook: the picture and the question from frame 1. When the narration opens with a natural
+ * short unit (up to 3 words: "Did you know…", "Ever wondered why?"), those words slam in big over the
+ * hero within the first few frames, then the headline (gold title) and the subtitle pill take over.
+ * Otherwise (no cut-off fragments such as "Should your monthly…") the title is there from frame 1.
+ * The slam rule: hook-words.ts.
  */
-
-/** The opening words that slam in: up to the first punctuation, at most 3 words. */
-export function hookSlam(words: readonly CaptionTrackWord[]): { slam: CaptionTrackWord[]; end: number } {
-  const slam: CaptionTrackWord[] = [];
-  for (const word of words) {
-    slam.push(word);
-    if (slam.length >= 3 || /[.,?!;:]$/.test(word.text)) break;
-  }
-  const next = words[slam.length];
-  return { slam, end: next ? next.startFrame : (slam[slam.length - 1]?.endFrame ?? 0) + 6 };
-}
 
 /** Slam font size: big, but the longest word must fit the safe width on its own line. */
 const slamSize = (slam: CaptionTrackWord[]) => Math.min(132, Math.floor(900 / (0.62 * Math.max(4, ...slam.map((w) => w.text.length)) + 0.4)));
@@ -38,6 +30,7 @@ export const Hook: Pattern = {
   View: ({ ctx, cam }) => {
     const f = ctx.frame;
     const { slam, end } = hookSlam(ctx.words);
+    const hasSlam = slam.length > 0;
     const headline = ofKind(ctx, "headline")[0];
     const subtitle = ofKind(ctx, "subtitle")[0];
     // the slam stays at least 1.2 s so picture + question share the first second
@@ -45,13 +38,14 @@ export const Hook: Pattern = {
     const out = glide(f, outAt, 8);
     const lastSlam = slam[slam.length - 1];
     const needsDots = lastSlam && !/[.,?!…]$/.test(lastSlam.text);
-    const titleAt = headline ? Math.max(headline.revealFrame, outAt + 6) : 0;
+    // without slam words the title (the hook's short question) is on screen from the first frame
+    const titleAt = headline ? (hasSlam ? Math.max(headline.revealFrame, outAt + 6) : ctx.scene.startFrame) : 0;
     const titleT = headline ? popIn(f, titleAt) : 0;
     const titleSize = headline ? fitSize(headline.label, 900, 3, 82, 60) : 0;
     const titleBottom = headline ? TOP + 10 + textLines(headline.label, titleSize) * titleSize * 1.08 : TOP;
     const heroSize = 600;
     // below the title and the slam words (some hero art reaches a little above its box, e.g. a rain cloud)
-    const slamBottom = TOP + textLines(slam.map((w) => w.text).join(" "), slamSize(slam), 940) * slamSize(slam) * 1.02;
+    const slamBottom = hasSlam ? TOP + textLines(slam.map((w) => w.text).join(" "), slamSize(slam), 940) * slamSize(slam) * 1.02 : TOP;
     const heroY = Math.max(860, titleBottom + 30 + heroSize / 2 - 30, slamBottom + heroSize / 2 + 30);
     // the pill (padding 2 × 36) stays left of the Reels buttons
     const subSize = subtitle ? fitSize(subtitle.label, HOOK_SUBTITLE_WIDTH - 72, 2, 50, 38) : 0;
@@ -75,7 +69,7 @@ export const Hook: Pattern = {
           )}
         </CameraView>
         <Flash amount={0.3 * fall(f, ctx.scene.startFrame, 12)} />
-        {out < 1 && (
+        {hasSlam && out < 1 && (
           <div style={{ position: "absolute", left: 70, width: 940, top: TOP, display: "flex", flexWrap: "wrap", justifyContent: "center", alignItems: "baseline", transform: `scale(${1 + out * 0.4}) translateY(${-out * 40}px)`, opacity: 1 - out }}>
             {slam.map((w, i) => (
               // the whole question is on screen within the first few frames, even when it is said slowly
@@ -87,8 +81,3 @@ export const Hook: Pattern = {
     );
   },
 };
-
-/** Words the captions skip because the hook shows them big (frames before the slam ends). */
-export function hookCaptionStart(ctx: Pick<Ctx, "words">): number {
-  return hookSlam(ctx.words).end;
-}
