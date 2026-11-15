@@ -1,13 +1,15 @@
+import { storyboardHeroes } from "@bytereel/pipeline/planning/hero-catalog";
+
 // What the storyboard screen shows for each scene (F16; PRD §6.2): the pattern badge, a plain
-// "Visual:" line, and the notes (AI warnings, validation warnings, and, for a version that fails
+// "Visual:" line (with the scene's hero objects, F22b), and the notes (AI warnings, validation warnings, and, for a version that fails
 // the checks, the problems to fix). Built ONLY from the saved plan, never by an AI call, so it is
 // instant, free and always matches the plan that will be rendered. Safe for the browser.
 
 export type SceneLike = {
   id: string;
   type: string;
-  narration: { id: string; text: string; speech?: string | null; display?: string | null }[];
-  objects: { id: string; kind: string; label: string; value?: number | null }[];
+  narration: { id: string; text: string; speech?: string | null; display?: string | null; hero?: string | null }[];
+  objects: { id: string; kind: string; label: string; value?: number | null; icon?: string | null }[];
 };
 
 export type Issue = { sceneId: string | null; path: string; message: string };
@@ -35,18 +37,19 @@ function labelsOf(scene: SceneLike, ...kinds: string[]): string[] {
 }
 
 /**
- * "Process: Sunlight → Atmosphere → Your eyes". The pattern name, then the on-screen labels in the
- * way the pattern shows them: a flow, timeline or steps with arrows; a comparison with "vs"; a
- * diagram as the thing and its parts; a chart with its numbers; a hook or takeaway as its headline
- * and lines. Anything else: the labels in order.
+ * "Hero: sun, cloud · Process: Sunlight → Atmosphere → Your eyes". The big hero objects of the
+ * video (video style v4: the planner's picks, else the ones the narration names, else the scene
+ * icon), then the pattern name and the on-screen labels in the way the pattern shows them: a flow,
+ * timeline or steps with arrows; a comparison with "vs"; a diagram as the thing and its parts; a
+ * chart with its numbers; a hook or takeaway as its headline and lines. Anything else: the labels.
  */
 export function visualLine(scene: SceneLike): string {
-  const { pattern, detail } = visualParts(scene);
-  return detail ? `${pattern}: ${detail}` : pattern;
+  const { hero, pattern, detail } = visualParts(scene);
+  return `Hero: ${hero} · ${detail ? `${pattern}: ${detail}` : pattern}`;
 }
 
-/** The two halves of the visual line: the pattern name (English) and the labels (plan language). */
-export function visualParts(scene: SceneLike): { pattern: string; detail: string } {
+/** The parts of the visual line: the heroes and the pattern name (English), the labels (plan language). */
+export function visualParts(scene: SceneLike): { hero: string; pattern: string; detail: string } {
   const pattern = patternLabel(scene.type);
   let parts = "";
   switch (scene.type) {
@@ -82,7 +85,7 @@ export function visualParts(scene: SceneLike): { pattern: string; detail: string
       break;
   }
   if (!parts) parts = scene.objects.filter((o) => o.kind !== "arrow" && o.kind !== "particles").map((o) => o.label.trim()).filter(Boolean).join(", ");
-  return { pattern, detail: parts };
+  return { hero: storyboardHeroes(scene).join(", "), pattern, detail: parts };
 }
 
 function formatNumber(value: number): string {

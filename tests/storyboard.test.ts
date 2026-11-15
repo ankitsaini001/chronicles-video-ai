@@ -101,12 +101,12 @@ describe("F16 storyboard screen pieces", () => {
   const scene = (id: string) => plan.scenes.find((s) => s.id === id)!;
 
   it("builds the Visual line from the plan's objects (no AI)", () => {
-    expect(visualLine(scene("scene-hook"))).toBe("Hook: The Water Cycle · Where does rain come from?");
-    expect(visualLine(scene("scene-evaporation"))).toBe("Process: Oceans, lakes, rivers → Water vapour");
-    expect(visualLine(scene("scene-condensation"))).toBe("Diagram: Cloud (Colder air, Tiny water droplets)");
-    expect(visualLine(scene("scene-earth-water"))).toMatch(/^Chart: Oceans 97, Ice 2, Fresh water 1$/);
-    expect(visualLine(scene("scene-takeaway"))).toBe("Takeaway: Remember the loop · Evaporation and condensation · Precipitation and collection");
-    expect(visualLine({ id: "x", type: "comparison", narration: [], objects: [{ id: "a", kind: "column", label: "Stocks" }, { id: "b", kind: "column", label: "Mutual funds" }] })).toBe("Comparison: Stocks vs Mutual funds");
+    expect(visualLine(scene("scene-hook"))).toBe("Hero: rain cloud · Hook: The Water Cycle · Where does rain come from?");
+    expect(visualLine(scene("scene-evaporation"))).toBe("Hero: sun, ocean, river… · Process: Oceans, lakes, rivers → Water vapour");
+    expect(visualLine(scene("scene-condensation"))).toMatch(/^Hero: [a-z ,…]+ · Diagram: Cloud \(Colder air, Tiny water droplets\)$/);
+    expect(visualLine(scene("scene-earth-water"))).toMatch(/^Hero: [a-z ,…]+ · Chart: Oceans 97, Ice 2, Fresh water 1$/);
+    expect(visualLine(scene("scene-takeaway"))).toMatch(/^Hero: [a-z ,…]+ · Takeaway: Remember the loop · Evaporation and condensation · Precipitation and collection$/);
+    expect(visualLine({ id: "x", type: "comparison", narration: [], objects: [{ id: "a", kind: "column", label: "Stocks" }, { id: "b", kind: "column", label: "Mutual funds" }] })).toBe("Hero: growth chart · Comparison: Stocks vs Mutual funds");
     expect(sceneNumber(0)).toBe("Scene 01");
   });
 

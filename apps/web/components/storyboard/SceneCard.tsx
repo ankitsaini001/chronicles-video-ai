@@ -3,8 +3,8 @@ import { patternLabel, sceneNumber, visualParts, type NoteItem, type SceneLike }
 import { Note } from "./Note";
 
 // One scene on the storyboard (Stitch "Step 2 Storyboard"): "SCENE 01", the motion pattern badge,
-// a "Changed" tag after a change, the narration, the plain "Visual:" line (built from the plan's
-// objects, lib/storyboard/view.ts) and the scene's notes. `action` is the card's top-right button
+// a "Changed" tag after a change, the narration, the plain "Visual:" line (the hero objects and the
+// plan's on-screen labels, lib/storyboard/view.ts) and the scene's notes. `action` is the card's top-right button
 // (Edit, F17); `editor` replaces the narration while it is being edited.
 
 type SceneCardProps = {
@@ -45,7 +45,7 @@ export function SceneCard({ index, scene, lang, changed, notes, action, editor }
       )}
       <p className="text-xs leading-relaxed break-words text-muted">
         <span className="mr-1.5 font-mono text-[10px] tracking-wider text-amber-light uppercase">Visual:</span>
-        {visual.pattern}
+        Hero: {visual.hero} · {visual.pattern}
         {visual.detail && (
           <>
             {": "}
