@@ -3,14 +3,16 @@ import { existsSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { killProcessTree } from "@bytereel/pipeline/pipeline/process-tree";
 import type { RenderChildMessage, RenderJobResult, RenderJobSpec, RenderParentMessage, RenderPhase } from "@bytereel/pipeline/pipeline/render-protocol";
 
 // Rendering on this computer (F23, founder 2026-11-15; Vercel Sandbox is decided at go-live, F38):
 // the generate worker starts packages/pipeline/src/pipeline/render-child.ts in its own Node process
 // (with tsx), hands it the job over Node's IPC channel, relays its progress, and can cancel it.
 // - Stopping (Cancel, or the 20-minute limit): a "cancel" message first (Remotion's cancel signal);
-//   if it hasn't stopped within 20 s, its whole process group is killed (the child runs detached, so
-//   Chrome and ffmpeg, which it starts, are in its group and go too).
+//   if it hasn't stopped within 20 s, its whole process tree is killed: the child (detached, so it
+//   leads its own group, with ffmpeg in it) and everything below it, including Chrome, which puts
+//   itself in a group of its own (killProcessTree).
 // - The result resolves exactly once, when the process is gone (exit) or can't be used (error).
 // - Environment: only what rendering needs (renderChildEnv): no database, voice, storage, login or
 //   AI secrets reach the child or Chrome.
@@ -88,7 +90,7 @@ export function startRenderProcess(
   const maxMs = options.maxMs ?? RENDER_MAX_MS;
   const graceMs = options.graceMs ?? CANCEL_GRACE_MS;
   // turbopackIgnore: the script is a separate program run with tsx, never part of the server bundle.
-  // detached: the child leads its own process group, so killing the group also stops Chrome and ffmpeg.
+  // detached: the child leads its own process group (killed with everything below it when stopping).
   const child = fork(/*turbopackIgnore: true*/ script, [], {
     cwd: options.root,
     env: renderChildEnv(process.env, options.tmp),
@@ -99,14 +101,9 @@ export function startRenderProcess(
   });
   let stopping: "cancelled" | "timed-out" | null = null;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Kill the child's whole process group (the child, Chrome, ffmpeg); nothing left is fine. */
+  /** Kill the child, everything below it (Chrome, ffmpeg) and their process groups; nothing left is fine. */
   const killGroup = () => {
-    if (child.pid === undefined) return;
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      // the group is already gone
-    }
+    if (child.pid !== undefined) killProcessTree(child.pid);
   };
   /** Ask the renderer to stop (Remotion's cancel signal); kill its group if it hasn't stopped in time. */
   const stop = (why: "cancelled" | "timed-out") => {

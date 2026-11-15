@@ -11,6 +11,7 @@
     "./contracts": "./src/contracts/index.ts",
     "./pipeline": "./src/pipeline/index.ts",
     "./pipeline/music": "./src/pipeline/music.ts",
+    "./pipeline/process-tree": "./src/pipeline/process-tree.ts",
     "./pipeline/render": "./src/pipeline/render.ts",
     "./pipeline/render-fixture": "./src/pipeline/render-fixture.ts",
     "./pipeline/render-protocol": "./src/pipeline/render-protocol.ts",

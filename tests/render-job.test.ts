@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FakeElevenLabsSpeech, silentMp3 } from "../apps/web/lib/video/fake-elevenlabs";
 import { ensureProjectTmp, isInside, projectRoot, renderChildEnv, startRenderProcess } from "../apps/web/lib/video/render-process";
+import { descendantsOf } from "../packages/pipeline/src/pipeline/process-tree";
 import { fakeVoiceProblem, voiceEstimatorFor, voiceSetupFromEnv, VoiceNotConfiguredError } from "../apps/web/lib/video/voice";
 import type { Plan } from "../packages/pipeline/src/contracts";
 import { hashPlan } from "../packages/pipeline/src/planning";
@@ -279,8 +280,9 @@ describe("the render child process (code review, findings 11 and 12)", () => {
   });
 
   /**
-   * A stand-in render child (the real worker side, a fake renderer): it starts a grandchild (like
-   * Chrome), writes the ids and its environment's names, notes a "cancel" but keeps running.
+   * A stand-in render child (the real worker side, a fake renderer): it starts two grandchildren (one
+   * in its group like ffmpeg, one detached in its own group like Chrome), writes the ids and its
+   * environment's names, notes a "cancel" but keeps running.
    */
   async function fakeChildRoot(dir: string) {
     const root = path.join(dir, "root");
@@ -291,9 +293,11 @@ describe("the render child process (code review, findings 11 and 12)", () => {
       `import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 const out = process.env.TMPDIR as string;
+// Like ffmpeg: in the child's process group. Like Chrome: detached, in a process group of its own.
 const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+const chrome = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
 process.on("message", (m: { type?: string }) => { if (m?.type === "cancel") writeFileSync(out + "/cancel-received", "yes"); });
-writeFileSync(out + "/pids.json", JSON.stringify({ child: process.pid, grandchild: grandchild.pid, env: Object.keys(process.env) }));
+writeFileSync(out + "/pids.json", JSON.stringify({ child: process.pid, grandchild: grandchild.pid, chrome: chrome.pid, env: Object.keys(process.env) }));
 setInterval(() => {}, 1000);
 `,
     );
@@ -315,7 +319,7 @@ setInterval(() => {}, 1000);
     return check();
   }
 
-  it("Cancel: 'cancel' is sent first; a renderer that doesn't stop is killed WITH its process group (Chrome, ffmpeg)", async () => {
+  it("Cancel: 'cancel' is sent first; a renderer that doesn't stop is killed with everything below it (Chrome in its own group, ffmpeg)", async () => {
     await withTempDir(async (dir) => {
       const { root, tmp } = await fakeChildRoot(dir);
       const saved = process.env.MONGODB_URI;
@@ -323,13 +327,13 @@ setInterval(() => {}, 1000);
       try {
         const run = startRenderProcess({} as RenderJobSpec, { root, tmp, onProgress: () => undefined, graceMs: 300 });
         expect(await until(() => existsSync(path.join(tmp, "pids.json")))).toBe(true);
-        const ids = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number; grandchild: number; env: string[] };
+        const ids = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number; grandchild: number; chrome: number; env: string[] };
         expect(ids.env).not.toContain("MONGODB_URI");
         expect(ids.env).toContain("TMPDIR");
         run.cancel();
         expect(await run.result).toEqual({ status: "cancelled" });
         expect(existsSync(path.join(tmp, "cancel-received"))).toBe(true);
-        expect(await until(() => !alive(ids.grandchild) && !alive(ids.child))).toBe(true);
+        expect(await until(() => !alive(ids.grandchild) && !alive(ids.chrome) && !alive(ids.child))).toBe(true);
       } finally {
         if (saved === undefined) delete process.env.MONGODB_URI;
         else process.env.MONGODB_URI = saved;
@@ -342,12 +346,24 @@ setInterval(() => {}, 1000);
       const { root, tmp } = await fakeChildRoot(dir);
       const run = startRenderProcess({} as RenderJobSpec, { root, tmp, onProgress: () => undefined, maxMs: 4_000, graceMs: 300 });
       expect(await until(() => existsSync(path.join(tmp, "pids.json")))).toBe(true);
-      const ids = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number; grandchild: number };
+      const ids = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number; grandchild: number; chrome: number };
       const result = await run.result;
       expect(result).toMatchObject({ status: "failed", stage: "render" });
       expect(result.status === "failed" && result.detail).toMatch(/took longer than/);
       expect(existsSync(path.join(tmp, "cancel-received"))).toBe(true);
-      expect(await until(() => !alive(ids.grandchild) && !alive(ids.child))).toBe(true);
+      expect(await until(() => !alive(ids.grandchild) && !alive(ids.chrome) && !alive(ids.child))).toBe(true);
     });
   }, 30_000);
+
+  it("the process tree: every descendant, with the groups they lead (pure)", () => {
+    const table = [
+      { pid: 10, ppid: 1, pgid: 10 }, // the render child (detached)
+      { pid: 11, ppid: 10, pgid: 10 }, // ffmpeg
+      { pid: 12, ppid: 10, pgid: 12 }, // chrome, its own group
+      { pid: 13, ppid: 12, pgid: 12 }, // a chrome helper
+      { pid: 20, ppid: 1, pgid: 20 }, // someone else
+    ];
+    expect(descendantsOf(10, table).map((r) => r.pid).sort()).toEqual([11, 12, 13]);
+    expect(descendantsOf(10, null)).toEqual([]);
+  });
 });

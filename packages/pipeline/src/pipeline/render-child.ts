@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeCancelSignal } from "@remotion/renderer";
+import { killProcessTree } from "./process-tree";
 import { runRenderJob } from "./render-job";
 import type { RenderChildMessage, RenderJobResult, RenderParentMessage, RenderPhase } from "./render-protocol";
 
@@ -11,8 +12,9 @@ import type { RenderChildMessage, RenderJobResult, RenderParentMessage, RenderPh
  *   worker → { type: "start", spec }   then optionally   { type: "cancel" }
  *   child  → { type: "progress", phase, percent } …   then   { type: "result", result }
  * It renders one video from local files (render-job.ts) and exits. The worker starts it detached (its
- * own process group, so a kill also stops Chrome and ffmpeg) with only the environment rendering
- * needs (no secrets). A failure's `detail` (with its stack) goes to the worker's server log only.
+ * own process group) with only the environment rendering needs (no secrets), and stops it by killing
+ * its whole process tree (process-tree.ts: Chrome runs in a group of its own). A failure's `detail`
+ * (with its stack) goes to the worker's server log only.
  *
  * Temporary files: Remotion and Chrome use the process temp folder (TMPDIR), not the job's work
  * folder. The worker starts this process with TMPDIR=<project>/runs/.tmp; as a second guard, this
@@ -72,17 +74,13 @@ process.on("message", (message: RenderParentMessage) => {
   }
 });
 
-// The worker went away (crash, restart): stop rendering for nobody. This process leads its own
-// process group (the worker starts it detached), so after a short grace the whole group goes,
-// including any Chrome or ffmpeg left running.
+// The worker went away (crash, restart): stop rendering for nobody. After a short grace everything
+// this process started (Chrome in its own group, ffmpeg) is killed, then it exits.
 process.on("disconnect", () => {
   cancelled = true;
   cancel();
   setTimeout(() => {
-    try {
-      process.kill(-process.pid, "SIGKILL");
-    } catch {
-      process.exit(1);
-    }
+    killProcessTree(process.pid);
+    process.exit(1);
   }, 5000).unref();
 });
