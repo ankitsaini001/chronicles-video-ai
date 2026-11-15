@@ -6,7 +6,7 @@ import type { ProjectSummaryResource } from "@bytereel/db";
 export type CardTone = "progress" | "warning" | "success" | "danger" | "muted";
 export type CardStatus = { label: string; tone: CardTone };
 
-type StatusInput = Pick<ProjectSummaryResource, "state" | "activeJobType" | "storyboardApproved">;
+type StatusInput = Pick<ProjectSummaryResource, "state" | "activeJobType" | "storyboardApproved"> & Partial<Pick<ProjectSummaryResource, "activeJobState">>;
 
 /** A plain-language status for the card's pill. "…" = work is running right now. */
 export function cardStatus(p: StatusInput): CardStatus {
@@ -21,7 +21,8 @@ export function cardStatus(p: StatusInput): CardStatus {
       if (p.activeJobType === "revise") return { label: "Updating storyboard…", tone: "progress" };
       return p.storyboardApproved ? { label: "Approved", tone: "success" } : { label: "Storyboard ready", tone: "warning" };
     case "generating":
-      return { label: "Making video…", tone: "progress" };
+      // F23: only one video is made at a time; a video still waiting for its turn says so.
+      return p.activeJobState === "queued" ? { label: "Waiting to start…", tone: "progress" } : { label: "Making video…", tone: "progress" };
     case "generate_failed":
       return { label: "Video failed", tone: "danger" };
     case "video_ready":
@@ -39,9 +40,11 @@ export function cardStatus(p: StatusInput): CardStatus {
   }
 }
 
-/** Where a card opens: the storyboard screen once a storyboard is ready, else the project page. */
+/** Where a card opens: the storyboard screen, the video step (F23), else the project page. */
 export function projectHref(p: Pick<ProjectSummaryResource, "id" | "state">): string {
-  return p.state === "storyboard_ready" ? `/projects/${p.id}/storyboard` : `/projects/${p.id}`;
+  if (p.state === "storyboard_ready") return `/projects/${p.id}/storyboard`;
+  if (p.state === "generating" || p.state === "generate_failed" || p.state === "video_ready") return `/projects/${p.id}/video`;
+  return `/projects/${p.id}`;
 }
 
 /** Can the card offer Rename / Archive? Same rule as the server's allowedActions (no job running). */
@@ -89,7 +92,7 @@ export function titleInitial(title: string): string {
   return first ? first.toLocaleUpperCase("en") : "?";
 }
 
-/** Placeholder thumbnail background per language (warm Ember Gold tints), until real thumbnails exist (F23). */
+/** Placeholder thumbnail background per language (warm Ember Gold tints), for projects without a video yet. */
 export const PLACEHOLDER_BACKGROUNDS = {
   en: "linear-gradient(160deg, #4a2c10 0%, #1e1208 55%, #120c07 100%)",
   hi: "linear-gradient(160deg, #4a1c26 0%, #1e0c10 55%, #120c07 100%)",

@@ -16,6 +16,7 @@ import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
 import { assertPlanJobsReady, toApiProblem } from "@/lib/plan/api";
 import { refreshJob, sendPlanEvent } from "@/lib/plan/jobs";
+import { thumbnailLink } from "@/lib/video/storage";
 import { pageQuery } from "@/lib/storyboard/api";
 
 // C1 GET /api/v1/projects (docs/API.md C1, F21): "My videos". Only the signed-in user's projects,
@@ -36,7 +37,8 @@ export const GET = apiRoute({
     const tab = rawTab !== null && isLibraryTab(rawTab) ? rawTab : null;
     try {
       // The stuck-job rule on each card's active job, like C3 (writes only when a job is stuck).
-      return await listProjects(db, user.id, { tab, limit: page.limit, cursor: page.cursor }, (job) => refreshJob(db, job));
+      // F23: each card's video thumbnail as a 15-minute private link (only the owner's own renders).
+      return await listProjects(db, user.id, { tab, limit: page.limit, cursor: page.cursor }, (job) => refreshJob(db, job), thumbnailLink);
     } catch (error) {
       if (error instanceof InvalidCursorError) throw new ApiProblem(400, "INVALID_INPUT", error.message, { issues: [{ path: "cursor", message: "invalid cursor" }] });
       throw error;
