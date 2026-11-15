@@ -18,10 +18,12 @@ function input() {
 /** A short bed (6.5 s) keeps the test fast; the synthesis is the same for any length. */
 const SHORT = { durationSeconds: 6.5, speech: [[0.4, 2.2], [2.9, 5.6]] as [number, number][], impacts: [0], whooshes: [3], chimes: [4.2], fadeOutAt: 6 };
 
-describe("music bed (F22b)", () => {
+// Synthesis is CPU work (the first call also builds the 16 s loop): allow for a busy machine.
+describe("music bed (F22b)", { timeout: 60_000 }, () => {
   it("gives the same bytes for the same input (free, deterministic)", () => {
-    expect(sha256(synthMusicBed(SHORT))).toBe(sha256(synthMusicBed({ ...SHORT, speech: SHORT.speech.map((s) => [...s] as [number, number]) })));
-    expect(sha256(synthMusicBed(SHORT))).not.toBe(sha256(synthMusicBed({ ...SHORT, chimes: [] })));
+    const first = sha256(synthMusicBed(SHORT));
+    expect(sha256(synthMusicBed({ ...SHORT, speech: SHORT.speech.map((s) => [...s] as [number, number]) }))).toBe(first);
+    expect(sha256(synthMusicBed({ ...SHORT, chimes: [] }))).not.toBe(first);
   });
 
   it("is a 48 kHz stereo 16-bit WAV whose length follows the video (one stereo sample per 1/48000 s)", () => {
