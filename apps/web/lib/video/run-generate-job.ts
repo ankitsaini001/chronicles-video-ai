@@ -325,10 +325,14 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     if (begun.cancelRequested) return end("cancelled");
 
     // F22b MUST: the process temp folder must be inside the project before the first render.
-    const { tmp, changed } = ensureProjectTmp(deps.root);
-    if (changed) log("warn", `Video job ${event.jobId}: TMPDIR was outside the project; set to ${path.relative(deps.root, tmp)}`);
+    const { tmp: processTmp, changed } = ensureProjectTmp(deps.root);
+    if (changed) log("warn", `Video job ${event.jobId}: TMPDIR was outside the project; set to ${path.relative(deps.root, processTmp)}`);
     const workDir = path.join(deps.root, "runs", ".tmp", "generate", renderId.toHexString());
     if (!isInside(deps.root, workDir)) throw new Error("the render work folder must be inside the project");
+    // The render process gets its OWN temp folder inside the work folder: Remotion and Chrome put
+    // their work there (and leave it behind after a cancel), so removing the work folder cleans all.
+    const tmp = path.join(workDir, "tmp");
+    await mkdir(tmp, { recursive: true });
     const files = deps.files();
     try {
       // The narration, checked against the SHA-256 saved when it was recorded.
