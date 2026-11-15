@@ -280,6 +280,8 @@ async function main(): Promise<void> {
   const render2 = await db.collection("renders").findOne({ _id: oid(st.currentRenderId) });
   await verifyInR2("R2: P2's video files", [render2!.mp4Key, render2!.thumbnailKey, render2!.timelineKey, render2!.captionsKey, render2!.qaKey], { [render2!.mp4Key]: render2!.mp4Sha256 });
   check("each render attempt had its own renderId (the cancelled one wrote no video)", render2!._id.toHexString() !== renderingId);
+  const editedReady = await db.collection("speechArtifacts").findOne({ ownerId: a.id, sceneId: busyScene.id, status: "ready", paidByJobId: oid(p2Job2) });
+  await verifyInR2("R2: the edited scene's narration (recorded after Try again)", editedReady ? [editedReady.audioKey, editedReady.alignmentKey, editedReady.normalizedAlignmentKey] : ["missing"]);
 
   // ---------- the limits, in order ----------
   const p3 = await newStoryboard(a.cookie, "What is evaporation?");

@@ -428,7 +428,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `state` | enum | `draft`, `planning`, `plan_failed`, `storyboard_ready`, `generating`, `generate_failed`, `video_ready`, `scheduled`, `publishing`, `published`, `publish_failed`, `archived` (ARCHITECTURE §7.2) | Yes |
 | `currentPlanVersionId` | ObjectId? → `planVersions` | The storyboard version on screen | No |
 | `approvedPlanVersionId` | ObjectId? → `planVersions` | The version with a valid approval #1; reset to null by any storyboard change | No |
-| `currentRenderId` | ObjectId? → `renders` | "The video" (latest successful render) | No |
+| `currentRenderId` | ObjectId? → `renders` | "The video" (latest successful render). **F23:** kept when a storyboard change (D3/D4/D5/D7) moves the project back to `storyboard_ready`, and while a new video is made or fails: the older video stays until a new one is ready | No |
 | `activeJobId` | ObjectId? → `jobs` | The one job running for this project, or null | No |
 | `stateVersion` | int ≥ 1 | +1 on every change. Stops two browser tabs from overwriting each other (`STALE_VERSION`, §7.3) | Auto |
 | `planRequestCount` | int 0–limit | How many of the **20 plan + revision requests** this project has used: +1 per plan job attempt that sends a Gemini request (C2's job, each E2 retry; F15) and per accepted revision (D5). Increased in the same transaction, and only if still below the limit (Q7) | Auto |
@@ -442,6 +442,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - **Since F15:** C2 saves a new project in state `planning` with `planRequestCount: 0` and its queued `plan` job (API.md C2). Projects saved by F12 before F15 stay in state `draft` with `planRequestCount: 0` and no job. Code: `packages/db/src/projects.ts`, `packages/db/src/plan-jobs.ts`.
 - **`planRequestCount` is enforced since F15:** a plan job attempt adds 1 when it sends its FIRST Gemini request (in the same transaction that counts the request on the job, only while below 20; `reservePlanRequest`). A job that never reached Gemini, or a Try again that reuses a saved answer, adds nothing. At 20, E2 answers `429` and a job that reaches Gemini fails with `QUOTA_EXCEEDED` (API.md E2, §10.1).
 - At most **one active job** per project: `activeJobId` is set with a conditional update ("only if it is currently null").
+- **F23 (founder decision, 2026-11-15): the video after a storyboard change.** D3 (narration edit), D4 (voice), D5 (a revision that succeeds) and D7 (undo/restore) set `state = storyboard_ready` and leave `currentRenderId` as it is: the old video stays "the video", shown on its My videos card with an "Older version" note (its render's `planVersionId` is no longer `currentPlanVersionId`), until a new `generate` job succeeds and points `currentRenderId` to the new render. A failed or cancelled video job leaves it untouched too. D8 on a version that already has a video points `currentRenderId` back to that render (`video_ready`).
 - Every change needs the caller's `stateVersion`; a mismatch changes nothing.
 
 **Indexes**
@@ -496,11 +497,15 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | `idempotencyKey` | string, unique, **required** | Stops duplicate jobs from double-clicks. One format per job type (Q6): `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}`, `pubjob:{postId}`. Also used as the Inngest event id of the first attempt | Yes |
 | `inputHash` | string (64 hex) | **Plan jobs (F15):** sha256 of the idea the job plans from (type, text, picked brainstorm choice, language, voice). An E2 retry after an Edit idea updates it and the key. **Revise jobs (F18):** sha256 of base version, scope, scene and message | Plan, revise |
 | `event` | `{ id, sentAt, lastTriedAt }` | **F15:** the Inngest event that starts the current attempt (`id` = the key, or `{jobId}:retry:{attempt}`), when it was handed to Inngest and when that was last tried (for the stuck-job rule, API.md §8.5) | Yes |
+| `voice` | `{ cacheKeys: string[], characters }`? | **Generate jobs (F23):** the recordings this job reserved voice characters for, and how many in total (a retry never counts a recording twice) | Generate |
+| `render` | `{ renderId, startedAt }`? | **Generate jobs (F23):** the render attempt in progress; every attempt gets a NEW `renderId` (its own R2 folder); cleared when the job ends | Generate |
 | `planner` | `{ attempt, inputHash, planVersionId, requests, answers[] }`? | **Plan and revise jobs (F15, F18): the checkpoint.** `requests` = Gemini requests made in this attempt (counted before sending, at most 4); `answers` = each answer as soon as it arrives `{ n (1 first, 2 repair), text, model, finishReason, usage, valid, issueCount }`; `planVersionId` = the id the saved version gets. A re-run step or a retry for the same idea reuses a saved answer instead of asking again | Plan |
 | `queuedAt` | date | When the job last became `queued` (C2 or E2), for the stuck-job rule | Yes |
 | `inngestRunId` | string? | Link to the run in the Inngest dashboard (for debugging) | No |
 | `cancelRequestedAt` | date? | Set when the creator presses Cancel; the job stops between steps | No |
 | `createdAt`, `updatedAt`, `startedAt`, `finishedAt` | date | Timestamps | Auto |
+
+**Generate jobs (F23):** key `gen:{planVersionId}`, `inputRef.planVersionId`, `inputHash` = the version's plan hash (hex). Stages `approve` → `speech` → `compile` → `render` → `validate`; progress "Waiting to start…" (queued), "Recording narration · scene N of M", "Timing animations…", "Adding captions…", "Rendering · N%", "Checking the video…", "Saving your video…", "Your video is ready.". `result.renderId` on success. Code: `packages/db/src/generate-jobs.ts`.
 
 **Rules:** every job **must** have an `idempotencyKey` (a missing key would count as `null` in the unique index, so only one such job could ever exist). Only one active job per project (`projects.activeJobId`). A retry keeps the same job, adds 1 to `attempt`, and skips finished stages (no repeated paid calls). Jobs never create approvals. **F15:** every write of the background function is conditional on "still running this attempt", so a late write of an older attempt or of a job the stuck-job rule already failed changes nothing. `planner.answers[].text` is the model's answer (the storyboard JSON, not what the creator typed) and stays on the job. **Created in F15** (`packages/db/src/jobs.ts`, `plan-jobs.ts`).
 
@@ -695,7 +700,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 | Field | Type | Meaning | Req |
 |---|---|---|---|
 | `_id`, `ownerId` | ObjectId | Record id; whose count | Auto |
-| `kind` | `videos` \| `projects` \| `voiceChars` \| `brainstorms` | What is counted (`brainstorms`: C7 requests, F14) | Yes |
+| `kind` | `videos` \| `projects` \| `voiceChars` \| `brainstorms` \| `appVoiceChars` | What is counted (`brainstorms`: C7 requests, F14; `appVoiceChars`: the app-wide voice guard, F23) | Yes |
 | `period` | string | The day (`"2026-11-13"`) for `videos`/`projects`/`brainstorms`, the month (`"2026-11"`) for `voiceChars`, **in the user's timezone** | Yes |
 | `count` | int | Used so far in this period (characters for `voiceChars`) | Yes |
 | `expiresAt` | date | A week after the period ends; old counters then delete themselves | Yes |
@@ -706,6 +711,7 @@ Your own entry, added in F07 before any admin exists, looks like this (Q14): `{ 
 - **`brainstorms` (F14, 30 per day):** C7 saves nothing else, so there is no transaction: one atomic update "add 1 where `count < 30`, create the counter if missing" (`packages/db/src/brainstorm.ts`, `countBrainstormWithinLimit`). At the limit the filter matches nothing and the insert hits the unique index (E11000) = full, nothing added; two first brainstorms of the day at the same moment can also hit E11000, and the retry then adds to the new counter. Counted before the AI call; a busy or refused answer still counts. The 10 per hour are a `rateLimits` counter (4.6).
 - Code: `packages/db/src/usage-counters.ts` (`addUsageWithinLimit` adds 1, and if that goes over the limit the caller throws so the transaction rolls the +1 back; two clicks at the same moment write the same counter, so MongoDB makes one of them wait and retry, and it sees the new count).
 - The **20 plan + revision requests per project** are not here: they are `projects.planRequestCount` (4.8), because they never reset.
+- **F23, videos and voice characters (counted and enforced):** `videos` +1 inside D8's transaction when it accepts a NEW video job (3 a day). `voiceChars` (3,000 a month, the creator's month) and the **app-wide guard** `appVoiceChars` (9,000 a month for the whole app, `APP_VOICE_CHARACTERS_PER_MONTH`; ONE counter with `ownerId` = `000000000000000000000000`, which no user has, and `period` = the UTC month) are increased together, in ONE transaction, when the video job reserves the characters of all the narration it still has to record, BEFORE its first ElevenLabs call (`reserveVoice`); a provider retry is reserved again. Never refunded. D8/E2 only read them (the check before starting). Code: `packages/db/src/generate-jobs.ts`.
 
 **Indexes:** unique `{ ownerId: 1, kind: 1, period: 1 }`; TTL on `expiresAt` (`expireAfterSeconds: 0`).
 **Warning:** the daily limits (projects and brainstorms) rely on the unique index. Without it, two first requests of the day can create two counters and each count from 0, so the limit can be passed. Apply the F12 indexes before using the app (`npm run db -- indexes --feature F12 --apply`).
@@ -857,6 +863,11 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 - **Reuse never crosses owners**: Priya's clip is never used in another user's video, even with identical text.
 - A **retry after a failed recording updates the same document** (`status: failed` → `pending` → `ready`) instead of adding a new one: the unique `{ ownerId, cacheKey }` index allows only one document per recording setup.
 
+**As built (F23): the speech lock** (ARCHITECTURE §9; `packages/db/src/speech-artifacts.ts`). Extra fields: `claim { jobId, attempt, at }` (who is recording it now; null otherwise), `response` (the provider's answer: request, both alignments, audio SHA-256, characters; saved BEFORE the files are uploaded, cleared when `ready`), `audioSha256` (checked when the audio is downloaded for a render), `paidByJobId`, `error { message, at }`, `updatedAt`, `readyAt`. `durationMs` comes from the alignment (the decoded length is measured again at every render). `cacheKey` is `sha256:<hex>` (its hex part is in the R2 keys).
+1. The worker claims the document with a conditional insert (`$setOnInsert` with `upsert` on `{ ownerId, cacheKey }`) BEFORE any ElevenLabs call. Found `ready` → reused (free). A fresh claim of ANOTHER job → the step tries again in 60 s (never a second payment). Its own job's claim (a re-run of the step, or a Try again), a `failed` one or a claim older than 10 minutes → taken over (`updatedAt` guards the takeover).
+2. After the call: the answer is saved here; then `audio.mp3`, `alignment.json` (the full answer) and `alignment.normalized.json` go to R2 create-only; then `status: ready`.
+3. A re-run that finds a saved answer whose audio is already in R2 (same SHA-256) reuses it: no second call. If the audio never reached R2, the scene is recorded again.
+
 **Indexes:** unique `{ ownerId, cacheKey }`: one clip per owner per exact recording setup.
 
 #### 4.19 `renders`
@@ -906,6 +917,8 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `createdAt`, `readyAt` | date | Started; finished | Auto |
 
 **Rules:** the R2 key layout is built by code from ids only, never from user or AI input. Only `ready` renders can be played, downloaded or published.
+
+**As built (F23)** (`packages/db/src/renders.ts`, written by `completeGenerateJob` in `generate-jobs.ts`): a render document is inserted **only when the video is ready**, in the same transaction that points the project's `currentRenderId` to it, so `status` is always `ready` and failed or cancelled attempts never take a video number (the attempt in progress is `jobs.render.renderId`; every attempt gets a new `renderId`, i.e. its own R2 folder). Extra field `qaKey` (the MP4 checks in R2). `previewFrameKeys: []` (no preview frames yet). `metrics { renderMs, bundleMs, bytes, durationMs, frames }` (no `sandboxMs`: rendered on this computer, F23 decision 3). `renderInputHash` = sha256 of the plan hash, the recordings and the music switch (reusing an identical render by it comes later). `mp4Sha256` is also saved on the R2 object; publishing (F30) must check it before sending the video to Instagram.
 
 **Indexes**
 - unique `{ projectId, renderNumber }`: no two "video 2"s in a project.
@@ -1376,10 +1389,10 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `idempotencyKeys` | `createdAt` TTL (`expireAfterSeconds: 86400`) | No | Forget clicks after a day | API §6 + Q2 |
 | `usageCounters` | `{ ownerId, kind, period }` | Yes | One counter per user, kind and day/month | Q2/Q7 |
 | `usageCounters` | `expiresAt` TTL (`expireAfterSeconds: 0`) | No | Old counters delete themselves | Q2 |
-| `speechArtifacts` | `{ ownerId, cacheKey }` | Yes | One recording per exact setup per owner; enables reuse | ARCH §8.7 |
-| `renders` | `{ projectId, renderNumber }` | Yes | No duplicate video numbers | ARCH §8.8 |
-| `renders` | `{ ownerId, projectId }` | No | Owner-scoped list | ARCH §8.8 |
-| `renders` | `{ ownerId, renderInputHash }` | No | Reuse an identical earlier render | ARCH §8.8 |
+| `speechArtifacts` | `{ ownerId, cacheKey }` | Yes | One recording per exact setup per owner; enables reuse. **F23: the speech lock relies on it** (`ownerId_cacheKey_unique`) | ARCH §8.7 |
+| `renders` | `{ projectId, renderNumber }` | Yes | No duplicate video numbers (`projectId_renderNumber_unique`, F23) | ARCH §8.8 |
+| `renders` | `{ ownerId, projectId }` | No | Owner-scoped list (`ownerId_projectId`, F23) | ARCH §8.8 |
+| `renders` | `{ ownerId, renderInputHash }` | No | Reuse an identical earlier render. Not created yet (no reuse by hash in F23) | ARCH §8.8 |
 | `instagramConnections` | `ownerId` | Yes | One connection per user | ARCH §8.11 |
 | `instagramConnections` | `igUserId` where `status = active` (partial) | Yes | One ByteReel user per Instagram account | ARCH §8.11 |
 | `instagramConnections` | `{ status, tokenExpiresAt }` | No | Daily token refresh | ARCH §8.11 |
@@ -1475,7 +1488,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F20 | `storyboardApprovals`, `auditLogs` (no generate job and no videos counter yet: F23). Indexes: `npm run db -- indexes --feature F20 --apply` |
 | F21 | Archived projects (`state: "archived"`, `archivedAt`, `stateBeforeArchive`; no new collection). Index: `npm run db -- indexes --feature F21 --apply` |
 | F22 | Nothing in MongoDB: your R2 bucket `reel-app-dev` (one test file in `healthcheck/`) |
-| F23 | `speechArtifacts`, `renders` (files in R2) |
+| F23 | `speechArtifacts`, `renders` (files in R2: `users/{ownerId}/speech/…`, `users/{ownerId}/projects/{projectId}/renders/{renderId}/…`); `jobs` of type `generate`; `usageCounters` kinds `videos`, `voiceChars` and the one app-wide `appVoiceChars` counter. Indexes: `npm run db -- indexes --feature F23 --apply` (before making the first video: the speech lock needs the unique one) |
 | F25 | `captionOverrides` |
 | F27 | `settings`; the remaining limits in `usageCounters` (videos, voice characters) start being enforced (projects/day is enforced since F12, `projects.planRequestCount` since F15) |
 | F28 | `instagramConnections` |
