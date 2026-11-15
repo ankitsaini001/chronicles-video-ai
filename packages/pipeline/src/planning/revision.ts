@@ -1,6 +1,6 @@
 import type { Language, VoicePreset } from "../contracts";
 import { PLAN_LIMITS } from "./component-catalog";
-import { CODE_OWNED_PLAN_FIELDS, NO_ICON } from "./planner-output";
+import { CODE_OWNED_PLAN_FIELDS, NO_HERO, NO_ICON } from "./planner-output";
 import { neutralizeMarkers, wordTarget } from "./prompts";
 
 /**
@@ -25,14 +25,17 @@ export interface RevisionRequest {
 
 /**
  * The current plan as the model writes it: without the code-owned fields (ids of owner, project and
- * version, language, voice, sources) and with an icon (or "none") on every object, like the
- * planner's own output.
+ * version, language, voice, sources), with an icon (or "none") on every object and a hero (or
+ * "none") on every narration block, like the planner's own output.
  */
 export function planForRevision(plan: Record<string, unknown>): Record<string, unknown> {
   const view: Record<string, unknown> = structuredClone(plan);
   for (const field of CODE_OWNED_PLAN_FIELDS) delete view[field];
-  const scenes = Array.isArray(view.scenes) ? (view.scenes as { objects?: Record<string, unknown>[] }[]) : [];
-  for (const scene of scenes) for (const object of scene.objects ?? []) object.icon ??= NO_ICON;
+  const scenes = Array.isArray(view.scenes) ? (view.scenes as { objects?: Record<string, unknown>[]; narration?: Record<string, unknown>[] }[]) : [];
+  for (const scene of scenes) {
+    for (const object of scene.objects ?? []) object.icon ??= NO_ICON;
+    for (const block of scene.narration ?? []) block.hero ??= NO_HERO;
+  }
   return view;
 }
 

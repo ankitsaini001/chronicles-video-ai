@@ -8,6 +8,7 @@ import {
   buildSystemInstruction,
   CODE_OWNED_PLAN_FIELDS,
   hashPlan,
+  HERO_NAMES,
   parseTopicFile,
   plannerOutputJsonSchema,
   PlannerOutputSchema,
@@ -58,7 +59,8 @@ describe("planner-output schema", () => {
     expect(scene.required).toEqual(["id", "type", "narration", "objects", "events"]);
     const narration = scene.properties.narration.items;
     expect(narration.properties.speech.type).toEqual(["string", "null"]);
-    expect(narration.required).toEqual(["id", "text", "speech", "display"]);
+    expect(narration.required).toEqual(["id", "text", "speech", "display", "hero"]);
+    expect(narration.properties.hero.enum).toEqual([...HERO_NAMES, "none"]);
     const object = scene.properties.objects.items;
     expect(object.properties.kind.enum).toContain("particles");
     expect(object.properties.value.type).toEqual(["number", "null"]);

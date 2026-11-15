@@ -5,6 +5,7 @@ export * from "./validate-plan";
 export * from "./plan-hash";
 export * from "./approval";
 export * from "./icon-catalog";
+export * from "./hero-catalog";
 export * from "./topic-file";
 export * from "./planner-output";
 export * from "./prompts";

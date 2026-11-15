@@ -13,10 +13,13 @@ import {
   type VoicePreset,
 } from "../contracts";
 import { COMPONENT_CATALOG } from "./component-catalog";
+import { HERO_NAMES } from "./hero-catalog";
 import { ICON_NAMES } from "./icon-catalog";
 
 /** Planner-only icon value meaning "no icon" (dropped by assemblePlan; plans never contain it). */
 export const NO_ICON = "none";
+/** Planner-only hero value meaning "no hero object fits" (dropped by assemblePlan; plans never contain it). */
+export const NO_HERO = "none";
 
 /**
  * Planner-output contract (PIPELINE_DESIGN.md §5): the part of a plan the MODEL writes.
@@ -70,6 +73,9 @@ const PlannerNarrationSchema = NarrationBlockSchema.extend({
   text: NarrationBlockSchema.shape.text.describe("Approved narration wording, spoken and shown as captions."),
   speech: NarrationBlockSchema.shape.speech.describe("Pronunciation hint sent to text-to-speech when it must differ from text; otherwise null."),
   display: NarrationBlockSchema.shape.display.describe("Caption text when it must differ from text; otherwise null."),
+  hero: z
+    .enum([...HERO_NAMES, NO_HERO])
+    .describe(`The big object shown in the middle of the screen while this block is spoken, from the hero catalog; "${NO_HERO}" when no hero fits (the scene's icon is shown instead).`),
 });
 
 const PlannerObjectSchema = VisualObjectSchema.extend({
@@ -213,6 +219,7 @@ export function assemblePlan(modelOutput: unknown, owned: CodeOwnedPlanFields): 
     }
   }
   normalizeIcons(body);
+  normalizeHeroes(body);
   const plan = {
     schemaVersion: PLAN_SCHEMA_VERSION,
     ownerId: owned.ownerId,
@@ -225,6 +232,21 @@ export function assemblePlan(modelOutput: unknown, owned: CodeOwnedPlanFields): 
     ...body,
   };
   return { plan, ignoredFields };
+}
+
+/** The planner says "none" (or null) for "no hero"; the plan contract simply leaves `hero` out. */
+function normalizeHeroes(body: Record<string, unknown>): void {
+  if (!Array.isArray(body.scenes)) return;
+  for (const scene of body.scenes) {
+    const blocks = (scene as { narration?: unknown } | null)?.narration;
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks) {
+      if (block && typeof block === "object" && Object.hasOwn(block, "hero")) {
+        const record = block as Record<string, unknown>;
+        if (record.hero === NO_HERO || record.hero === null || record.hero === undefined) delete record.hero;
+      }
+    }
+  }
 }
 
 /** The planner says "none" (or null) for "no icon"; the plan contract simply leaves `icon` out. */

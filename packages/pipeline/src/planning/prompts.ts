@@ -1,7 +1,8 @@
 import type { Language, VoicePreset } from "../contracts";
 import { COMPONENT_CATALOG, PLAN_LIMITS, SCENE_LIMITS, WORDS_PER_MINUTE } from "./component-catalog";
+import { heroPromptRows } from "./hero-catalog";
 import { ICON_KEYWORDS, ICON_NAMES } from "./icon-catalog";
-import { NO_ICON } from "./planner-output";
+import { NO_HERO, NO_ICON } from "./planner-output";
 import type { TopicFile } from "./topic-file";
 import { formatIssue, type ValidationIssue } from "./validation-issue";
 
@@ -79,6 +80,19 @@ export function iconDescription(): string {
   ].join("\n");
 }
 
+export function heroDescription(): string {
+  return [
+    `Every narration block has a "hero": the ONE big object drawn in the middle of the screen while that block is spoken`,
+    `(one hero per sentence). Pick the object that shows what the block talks about, by meaning, from this list, or "${NO_HERO}"`,
+    "when nothing fits (the scene's icon is then shown large instead). The hints after each name show what it suits:",
+    ...heroPromptRows(),
+    "",
+    "Pick a hero that helps the explanation and never one that misleads (no dinosaur in a money video). Neighbouring blocks",
+    "may share a hero. When a scene talks about several things in turn, split its narration into blocks (one or two",
+    "sentences each) so every block gets the hero that fits it.",
+  ].join("\n");
+}
+
 export function buildSystemInstruction(language: Language): string {
   const target = wordTarget(language);
   return `You are the storyboard planner for ByteReel, which turns a topic into a ${PLAN_LIMITS.targetMinSeconds}-${PLAN_LIMITS.targetMaxSeconds} second vertical educational explainer video with minimal motion graphics, narration and captions.
@@ -104,6 +118,7 @@ Return ONE JSON object that matches the response schema. Application code assign
 - IDs: lowercase letters, digits and dashes only (e.g. "scene-evaporation", "line-evap-heat", "ev-sun-appear"). Scene IDs and narration IDs are unique across the whole plan; object and event IDs are unique within their scene.
 - "speech": null unless a word needs a pronunciation hint for text-to-speech. "display": null unless captions must differ from the text.
 - "label": short human-readable on-screen text; "icon": a picture name from the icon set (or "${NO_ICON}"), never inside the label.
+- "hero" (on each narration block): the big object from the hero set below (or "${NO_HERO}").
 - "value": a number only for chart kinds (bar, line-point, pie-slice, counter); null for every other kind.
 
 ## Events (how visuals sync with speech)
@@ -116,6 +131,9 @@ ${catalogDescription()}
 
 ## Icon set
 ${iconDescription()}
+
+## Hero set
+${heroDescription()}
 
 ## Language
 ${LANGUAGE_GUIDANCE[language]}`;

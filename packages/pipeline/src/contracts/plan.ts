@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HERO_NAMES } from "../planning/hero-catalog";
 import { ICON_NAMES } from "../planning/icon-catalog";
 import { LanguageSchema, SafeIdSchema, SCENE_TYPES, VoicePresetSchema } from "./common";
 
@@ -20,12 +21,20 @@ export const PLAN_SCHEMA_VERSION = 1;
  *   (numbers, acronyms, Hinglish words written in Devanagari for better pronunciation).
  * - `display`: what captions show when it differs from `text`.
  * null means "same as text". The block itself is the explicit text/speech/display mapping.
+ * - `hero`: the big object shown while this block is spoken (video style v4, F22b), from the hero
+ *   catalog (packages/pipeline/src/planning/hero-catalog.ts). When absent, the timeline compiler
+ *   picks one from keywords in the narration and labels, or shows the scene's icon in a medallion.
+ *   Optional (not nullable-with-default) on purpose, like `icon`: plans written before this field
+ *   existed parse and hash exactly as before, so no schema version bump.
  */
 export const NarrationBlockSchema = z.strictObject({
   id: SafeIdSchema,
   text: z.string().trim().min(1, "narration text cannot be empty"),
   speech: z.string().trim().min(1).nullable().default(null),
   display: z.string().trim().min(1).nullable().default(null),
+  hero: z
+    .enum(HERO_NAMES, { error: (issue) => `unknown hero ${JSON.stringify(issue.input)}; allowed heroes: ${HERO_NAMES.join(", ")}` })
+    .optional(),
 });
 export type NarrationBlock = z.infer<typeof NarrationBlockSchema>;
 
