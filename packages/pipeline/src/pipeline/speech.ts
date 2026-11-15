@@ -1,6 +1,3 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import {
   SceneAlignmentSchema,
   type Plan,
@@ -187,18 +184,6 @@ export function buildSceneAlignment(input: {
   });
   timeSceneBlocks(scene, alignment, plan.language); // throws if the text cannot be mapped with certainty
   return alignment;
-}
-
-/** Probe audio bytes by writing them to a temp file (used for cached audio before it is in the run). */
-export async function probeAudioBytes(audio: Uint8Array, probe: (file: string) => Promise<AudioProbe>): Promise<AudioProbe> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "bytereel-audio-"));
-  try {
-    const file = path.join(dir, "scene.mp3");
-    await fs.writeFile(file, audio);
-    return await probe(file);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
 }
 
 export class SpeechBudgetError extends ProviderError {

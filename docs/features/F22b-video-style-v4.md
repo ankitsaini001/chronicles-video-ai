@@ -100,9 +100,10 @@ Nothing here costs money or calls Gemini/ElevenLabs.
    `internet-journey`; contact sheets: `runs/f22b-work/sheets/<name>-sheet.png`.
 3. See the whole hero library: `runs/f22b-work/gallery-all/page-1-f40.png` … `page-4-f40.png`.
 4. To make them again yourself:
-   - `npx tsx tools/video/rerender-run.ts --run runs/local-dev/how-the-water-cycle-works-85b912/v1 --out <file.mp4> --sheet <file.png>`
+   - `npm run video:rerender -- --run runs/local-dev/how-the-water-cycle-works-85b912/v1 --out <file.mp4> --sheet <file.png>`
    - `npm run pipeline -- render-fixture --file fixtures/sip-vs-fd.plan.json --force`
-   - `npx tsx tools/video/hero-gallery.ts --out <folder>`
+   - `npm run video:heroes -- --out <folder>`
+   - These npm scripts keep every temporary file inside the project (`runs/.tmp`), never in `/tmp`.
 
 ## How we test it (done when all are ticked)
 - [x] Unit tests: hero contract and validation, fallback matching, backward compatibility (old plan renders), planner wiring, hero track, captions, storyboard line

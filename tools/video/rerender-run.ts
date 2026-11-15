@@ -1,3 +1,5 @@
+// First: keep Remotion's and Chrome's temporary files inside the project (runs/.tmp), never in /tmp.
+import "../project-tmp";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -16,14 +18,15 @@ import { compileTimeline, DEFAULT_HOLDS, synthesizeSceneAlignment } from "@byter
  * (never changes them), compiles a fresh timeline (deterministic: same frames as the original), and
  * renders with the real render stage (packages/pipeline/src/pipeline/render.ts).
  *
- *   npx tsx tools/video/rerender-run.ts --run <runDir> --out <file.mp4> [--sheet <file.png>]
+ *   npm run video:rerender -- --run <runDir> --out <file.mp4> [--sheet <file.png>]
  *        [--no-music] [--concurrency N] [--work <dir>]
  *   Or a fixture plan with synthetic silent timing (no audio, no music): --fixture <plan.json> instead of --run.
  *   Benchmarks / quick looks (same settings, no MP4 checks):
  *        --frames 0-599          render only these frames
  *        --stills 30,470,960     only PNG stills (next to --out)
  *
- * Temporary files go to --work (default: <run>/.rerender-tmp, inside the git-ignored runs/ folder).
+ * Temporary files go to --work (default: <run>/.rerender-tmp, inside the git-ignored runs/ folder);
+ * Remotion's and Chrome's own temporary files go to runs/.tmp (tools/project-tmp.ts).
  */
 
 const exec = promisify(execFile);

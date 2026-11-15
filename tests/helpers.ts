@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { PlanSchema, type Plan } from "../packages/pipeline/src/contracts";
 
@@ -16,8 +15,15 @@ export function validPlan(): Plan {
   return PlanSchema.parse(loadFixture("water-cycle.plan.json"));
 }
 
+/**
+ * Temporary folders for tests live inside the project, in the git-ignored runs/.tmp/tests (never the
+ * system temp folder, which is shared on the founder's machine). Each is removed after its test.
+ */
+export const TEST_TMP = path.join(import.meta.dirname, "..", "runs", ".tmp", "tests");
+
 export async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "bytereel-test-"));
+  await mkdir(TEST_TMP, { recursive: true });
+  const dir = await mkdtemp(path.join(TEST_TMP, "bytereel-test-"));
   try {
     return await fn(dir);
   } finally {

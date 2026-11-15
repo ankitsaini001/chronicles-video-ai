@@ -3,12 +3,18 @@
 // checkout). The restarted server only inherits what was in the environment at start-up, so the
 // values must be loaded before Next starts, not only from next.config.ts.
 // (Node's --env-file flag can't be used: Next passes it on in NODE_OPTIONS, where Node refuses it.)
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 const rootEnvFile = path.resolve(import.meta.dirname, "../../../.env");
 if (existsSync(rootEnvFile)) process.loadEnvFile(rootEnvFile);
+
+// F22b review: temporary files stay inside the project (the git-ignored runs/.tmp), never in /tmp,
+// which is shared on this machine. The server and the jobs it runs (Remotion and Chrome use the
+// process temp folder for their own work) inherit this. Takes effect when `npm run dev` starts.
+process.env.TMPDIR = path.resolve(import.meta.dirname, "../../../runs/.tmp");
+mkdirSync(process.env.TMPDIR, { recursive: true });
 
 // F15: background jobs run on the local Inngest Dev Server (`npm run inngest`) in dev mode. Dev mode
 // is never assumed by the app (apps/web/inngest/client.ts); `npm run dev` asks for it here, so no

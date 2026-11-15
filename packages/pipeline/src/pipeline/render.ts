@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { openBrowser, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
@@ -43,8 +42,13 @@ export interface RenderJob {
   publicDir?: string | null;
   /** Add the generated music bed (needs `publicDir`). Default false. */
   music?: boolean;
-  /** Folder for temporary files (the Remotion bundle). Default: the system temp folder. */
-  workDir?: string;
+  /**
+   * Folder for this render's temporary files (the Remotion bundle), inside the project. Required:
+   * nothing may go to the system temp folder (shared on the founder's machine). Remotion and Chrome
+   * also use the process temp folder (TMPDIR) for their own work, so every process that renders
+   * sets TMPDIR inside the project too (tools/project-tmp.ts, the npm scripts, apps/web/scripts/dev.mjs).
+   */
+  workDir: string;
   /** Frames rendered in parallel. Default: Remotion's (half the CPU threads). */
   concurrency?: number | null;
   onProgress?: (message: string) => void;
@@ -63,8 +67,8 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
   const music = job.music ?? false;
   if (music && !job.publicDir) throw new Error("the music bed needs a public folder");
   const inputProps = { timeline: job.timeline, captions: job.captions, music };
-  await fs.mkdir(job.workDir ?? os.tmpdir(), { recursive: true });
-  const bundleDir = await fs.mkdtemp(path.join(job.workDir ?? os.tmpdir(), "bytereel-bundle-"));
+  await fs.mkdir(job.workDir, { recursive: true });
+  const bundleDir = await fs.mkdtemp(path.join(job.workDir, "bytereel-bundle-"));
 
   try {
     let started = Date.now();

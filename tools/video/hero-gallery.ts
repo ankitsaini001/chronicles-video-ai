@@ -1,3 +1,5 @@
+// First: keep Remotion's and Chrome's temporary files inside the project (runs/.tmp), never in /tmp.
+import "../project-tmp";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
@@ -9,9 +11,10 @@ import { VIDEO_ENTRY } from "@bytereel/pipeline/pipeline/render";
  * Review the hero object library (F22b): renders the HeroGallery composition (3 x 4 grid of heroes,
  * animated) as PNG stills. Free and local.
  *
- *   npx tsx tools/video/hero-gallery.ts --out <dir> [--names sun,cloud,...] [--frames 10,40,100]
+ *   npm run video:heroes -- --out <dir> [--names sun,cloud,...] [--frames 10,40,100]
  *
- * Without --names it renders every page of the library. Temporary files go next to --out.
+ * Without --names it renders every page of the library. The bundle goes next to --out; Remotion's
+ * and Chrome's own temporary files go to runs/.tmp (tools/project-tmp.ts).
  */
 
 function arg(name: string): string | undefined {
