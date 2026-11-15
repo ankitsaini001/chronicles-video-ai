@@ -11,13 +11,21 @@ import {
   GENERATE_ERRORS,
   generateJobKey,
   isGenerateJobStuck,
+  markSpeechReady,
   newGenerateJob,
   newPlanJob,
+  planVoiceReservation,
+  planVoiceSend,
   ProjectActionError,
+  reserveVoiceSend,
+  savedAudioOf,
+  saveSpeechResponse,
   SPEECH_LOCK_STALE_MS,
   startGenerateAttempt,
+  voiceCredits,
   voiceLimitError,
   voiceLimitProblem,
+  voicePeriodOf,
   voiceStillNeeded,
   type GenerateJobContext,
   type JobDocument,
@@ -32,13 +40,27 @@ import { type Db, ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
 import { VIDEO_CONCURRENCY } from "../apps/web/inngest/client";
 import { cardStatus, projectHref } from "../apps/web/lib/dashboard/cards";
+import { FakeElevenLabsSpeech } from "../apps/web/lib/video/fake-elevenlabs";
 import type { RenderRun } from "../apps/web/lib/video/render-process";
-import { renderPhaseProgress, runGenerateJob, speechFailureCode, type FileStore, type GenerateJobStore } from "../apps/web/lib/video/run-generate-job";
+import {
+  renderPhaseProgress,
+  runGenerateJob,
+  SPEECH_BUSY_MAX_WAITS,
+  SPEECH_BUSY_WAIT_MS,
+  speechFailureCode,
+  type FileStore,
+  type GenerateJobDeps,
+  type GenerateJobStore,
+} from "../apps/web/lib/video/run-generate-job";
 import { videoSteps, waitingText } from "../apps/web/lib/video/steps";
-import { voiceSetupFromEnv } from "../apps/web/lib/video/voice";
-import type { RenderJobResult, RenderJobSpec } from "../packages/pipeline/src/pipeline/render-protocol";
-import { ProviderError } from "../packages/pipeline/src/providers";
+import { voiceSetupFromEnv, type VoiceSetup } from "../apps/web/lib/video/voice";
+import { countCharacters, speechConfigFor } from "../packages/pipeline/src/pipeline/speech";
+import type { RenderJobResult, RenderJobSpec, RenderPhase } from "../packages/pipeline/src/pipeline/render-protocol";
+import { ElevenLabsSpeech, ProviderError, type SpeechCallOptions, type SpeechRequest } from "../packages/pipeline/src/providers";
 import { validPlan, withTempDir } from "./helpers";
+
+/** The stand-in voice is allowed only on a local test server with the test database (never a real call). */
+const STAND_IN_ENV = { E2E_FAKE_ELEVENLABS: "1", MONGODB_DB: "bytereel_test", MONGODB_URI: "mongodb+srv://tester:not-a-password@cluster0.example.mongodb.net/", BETTER_AUTH_URL: "http://localhost:3232" };
 
 // F23 "Generate the video": the limits and their order, the app-wide voice guard, the speech lock,
 // the one-at-a-time queue and its stuck-job rule, the language switch, allowedActions, the state
@@ -201,7 +223,7 @@ describe("D8 limits, in order: language → videos/day → voice characters (cre
   });
 
   it("a failed or cancelled job of this version is queued again (attempt + 1): no videos/day count", async () => {
-    const failed = generateJob({ state: "cancelled", attempt: 2, voice: { cacheKeys: [voice(versionDoc().plan)[0]!.cacheKey], characters: 100 } });
+    const failed = generateJob({ state: "cancelled", attempt: 2, voice: { cacheKeys: [voice(versionDoc().plan)[0]!.cacheKey], characters: 100, sentKeys: [], period: voicePeriodOf("Asia/Kolkata", NOW) } });
     const { db, calls, names } = fakeDb({
       "projects.findOne": () => projectDoc({ approvedPlanVersionId: V1 }),
       "planVersions.findOne": () => versionDoc(),
@@ -217,6 +239,30 @@ describe("D8 limits, in order: language → videos/day → voice characters (cre
     expect(out.job).toMatchObject({ state: "queued", attempt: 3, event: { id: `${failed._id.toHexString()}:retry:3` } });
     expect(names()).not.toContain("usageCounters.findOneAndUpdate");
     expect(calls.filter((c) => c.name === "jobs.insertOne")).toHaveLength(0);
+  });
+
+  it("a reservation from LAST month covers nothing now: everything still needed is checked again", async () => {
+    const lastMonth = new Date("2026-10-20T05:00:00.000Z");
+    const failed = generateJob({ state: "cancelled", attempt: 2, voice: { cacheKeys: [voice(versionDoc().plan)[0]!.cacheKey], characters: 100, sentKeys: [], period: voicePeriodOf("Asia/Kolkata", lastMonth) } });
+    const { db } = fakeDb({
+      "projects.findOne": () => projectDoc({ approvedPlanVersionId: V1 }),
+      "planVersions.findOne": () => versionDoc(),
+      "jobs.findOne": () => failed,
+      "speechArtifacts.find": () => [],
+      "usageCounters.findOne": (filter: { kind: string }) => ({ count: filter.kind === "voiceChars" ? 2500 : 0 }),
+    });
+    const error = await refusal(approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone: "Asia/Kolkata", body, voice, respond: () => ({ status: 202, body: {} }), now: NOW }));
+    expect(error.details).toMatchObject({ quota: "voice_characters_per_month", needed: 600 });
+  });
+
+  it("like E2: a job that failed with an error that can't be retried is not queued again ('edit your storyboard')", async () => {
+    const failed = generateJob({ state: "failed", error: { code: "PROVIDER_UNAVAILABLE", message: "", retryable: false } });
+    const { db, names } = fakeDb({ "projects.findOne": () => projectDoc({ approvedPlanVersionId: V1 }), "planVersions.findOne": () => versionDoc(), "jobs.findOne": () => failed });
+    const error = await refusal(approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone: "UTC", body, voice, respond: () => ({ status: 202, body: {} }), now: NOW }));
+    expect(error).toMatchObject({ code: "INVALID_STATE", message: "This step can't be retried. Please edit your storyboard instead." });
+    expect(names().some((n) => n.startsWith("usageCounters") || n === "jobs.findOneAndUpdate")).toBe(false);
+    expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null, null, { latestGenerateJob: failed })).not.toContain("generate_video");
+    expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null, null, { latestGenerateJob: { ...failed, error: { code: "RENDER_FAILED", message: "", retryable: true } } })).toContain("generate_video");
   });
 
   it("a version that already has a video: no job, no limits; the project points back to it (video_ready)", async () => {
@@ -294,13 +340,54 @@ describe("the speech lock (speechArtifacts)", () => {
     expect((await claimSpeech(busy.db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, setup, now: NOW })).kind).toBe("busy");
   });
 
-  it("taken over: a failed one, this same job's own claim (re-run or retry), or an abandoned claim", () => {
+  it("taken over: a failed one, this same job's claim WITH a saved answer, or an abandoned claim", () => {
     const other = new ObjectId();
-    expect(canTakeOverSpeech({ status: "failed", claim: null }, JOB, NOW)).toBe(true);
-    expect(canTakeOverSpeech({ status: "pending", claim: { jobId: JOB, attempt: 1, at: NOW } }, JOB, NOW)).toBe(true);
-    expect(canTakeOverSpeech({ status: "pending", claim: { jobId: other, attempt: 1, at: NOW } }, JOB, NOW)).toBe(false);
-    expect(canTakeOverSpeech({ status: "pending", claim: { jobId: other, attempt: 1, at: new Date(NOW.getTime() - SPEECH_LOCK_STALE_MS) } }, JOB, NOW)).toBe(true);
-    expect(canTakeOverSpeech({ status: "ready", claim: null }, JOB, NOW)).toBe(false);
+    const answer = { audioSha256: "sha256:x", charactersSent: 10 };
+    const fresh = { jobId: JOB, attempt: 1, at: NOW };
+    const old = { jobId: JOB, attempt: 1, at: new Date(NOW.getTime() - SPEECH_LOCK_STALE_MS) };
+    expect(canTakeOverSpeech({ status: "failed", claim: null, response: null }, JOB, NOW)).toBe(true);
+    expect(canTakeOverSpeech({ status: "failed", claim: null, response: answer }, other, NOW)).toBe(true);
+    expect(canTakeOverSpeech({ status: "pending", claim: fresh, response: answer }, JOB, NOW)).toBe(true);
+    expect(canTakeOverSpeech({ status: "pending", claim: { ...fresh, jobId: other }, response: null }, JOB, NOW)).toBe(false);
+    expect(canTakeOverSpeech({ status: "pending", claim: { ...fresh, jobId: other }, response: answer }, JOB, NOW)).toBe(false);
+    expect(canTakeOverSpeech({ status: "pending", claim: { ...old, jobId: other }, response: null }, JOB, NOW)).toBe(true);
+    expect(canTakeOverSpeech({ status: "ready", claim: null, response: null }, JOB, NOW)).toBe(false);
+  });
+
+  it("the same job's FRESH claim without a saved answer is not taken over (its first run may still be calling ElevenLabs); stale, it is", () => {
+    expect(canTakeOverSpeech({ status: "pending", claim: { jobId: JOB, attempt: 1, at: NOW }, response: null }, JOB, NOW)).toBe(false);
+    expect(canTakeOverSpeech({ status: "pending", claim: { jobId: JOB, attempt: 1, at: new Date(NOW.getTime() - SPEECH_LOCK_STALE_MS) }, response: null }, JOB, NOW)).toBe(true);
+    // The stale time outlasts the longest request in flight: 3 tries × 120 s + 2 waits × 60 s = 8 min.
+    expect(SPEECH_LOCK_STALE_MS).toBeGreaterThan(3 * 120_000 + 2 * 60_000);
+  });
+
+  it("the paid answer and its audio bytes are saved in ONE write; ready removes the bytes", async () => {
+    const writes: any[] = [];
+    const { db } = fakeDb({ "speechArtifacts.updateOne": (filter: unknown, update: unknown) => (writes.push({ filter, update }), { matchedCount: 1 }) });
+    const audio = new Uint8Array([1, 2, 3]);
+    expect(await saveSpeechResponse(db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, response: { audioSha256: "sha256:x", charactersSent: 10 }, audio, durationMs: 900, now: NOW })).toBe(true);
+    expect(writes[0].filter).toMatchObject({ status: "pending", "claim.jobId": JOB, "claim.attempt": 1 });
+    expect(writes[0].update.$set).toMatchObject({ response: { audioSha256: "sha256:x" }, audioSha256: "sha256:x", paidByJobId: JOB });
+    expect(savedAudioOf({ audio: writes[0].update.$set.audio })).toEqual(audio);
+    expect(await markSpeechReady(db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, now: NOW })).toBe(true);
+    expect(writes[1].update.$unset).toEqual({ audio: "" });
+    expect(writes[1].update.$set).toMatchObject({ status: "ready", response: null });
+  });
+
+  it("a job that ends releases its pending claims (answers and bytes kept), so no other job waits for them", async () => {
+    const job = generateJob({ state: "running" });
+    const released: any[] = [];
+    const { db } = fakeDb({
+      "jobs.findOne": () => job,
+      "jobs.updateOne": () => ({}),
+      "projects.updateOne": () => ({}),
+      "speechArtifacts.updateMany": (filter: unknown, update: unknown) => void released.push({ filter, update }),
+    });
+    expect(await endGenerateJob(db, { jobId: job._id, attempt: 1, outcome: "failed", code: "INTERNAL", now: NOW })).toBe(true);
+    expect(released[0].filter).toEqual({ ownerId: OWNER, status: "pending", "claim.jobId": job._id });
+    expect(released[0].update.$set).toMatchObject({ status: "failed", claim: null });
+    expect(released[0].update.$set).not.toHaveProperty("response");
+    expect(released[0].update).not.toHaveProperty("$unset");
   });
 });
 
@@ -334,6 +421,7 @@ describe("one video at a time: the queue and its stuck-job rule", () => {
       "jobs.findOne": () => job,
       "jobs.updateOne": (_f: unknown, u: unknown) => void writes.push(u),
       "projects.updateOne": (_f: unknown, u: unknown) => void writes.push(u),
+      "speechArtifacts.updateMany": () => ({}),
     });
     await checkStuckJob(db, job, NOW);
     expect(writes[0].$set).toMatchObject({ state: "cancelled" });
@@ -388,6 +476,7 @@ describe("the worker refuses a switched-off language before any voice call", () 
       "projects.findOne": () => projectDoc({ language: "hi", state: "generating", activeJobId: job._id, approvedPlanVersionId: V1 }),
       "jobs.updateOne": (_f: unknown, u: unknown) => void writes.push(u),
       "projects.updateOne": (_f: unknown, u: unknown) => void writes.push(u),
+      "speechArtifacts.updateMany": () => ({}),
     });
     expect(await startGenerateAttempt(db, { jobId: job._id.toHexString(), attempt: 1, now: NOW })).toBeNull();
     expect(writes[0].$set).toMatchObject({ state: "failed", error: { code: "LANGUAGE_UNAVAILABLE", retryable: false } });
@@ -403,6 +492,7 @@ describe("how a video job ends (the older video is always kept)", () => {
       "jobs.findOne": () => job,
       "jobs.updateOne": (_f: unknown, u: unknown) => void (writes.job = u),
       "projects.updateOne": (_f: unknown, u: unknown) => void (writes.project = u),
+      "speechArtifacts.updateMany": () => ({}),
     });
     expect(await endGenerateJob(db, { jobId: job._id, attempt: 1, outcome, ...extra, now: NOW })).toBe(true);
     expect(writes.project.$set).not.toHaveProperty("currentRenderId");
@@ -473,12 +563,19 @@ describe("Step 3 screen and My videos cards", () => {
 
 const sha = (data: Uint8Array | string) => `sha256:${createHash("sha256").update(data).digest("hex")}`;
 
-function fakeFiles(): FileStore & { objects: Map<string, Uint8Array> } {
+type PutFailure = (key: string) => Error | null;
+
+function fakeFiles(failPut: PutFailure = () => null): FileStore & { objects: Map<string, Uint8Array>; puts: string[] } {
   const objects = new Map<string, Uint8Array>();
+  const puts: string[] = [];
   return {
     objects,
+    puts,
     checkBucket: async () => undefined,
     put: async (key, data, options) => {
+      puts.push(key);
+      const failure = failPut(key);
+      if (failure) throw failure;
       const bytes = typeof data === "string" ? new Uint8Array(Buffer.from(data)) : data;
       if (options?.createOnly && objects.has(key)) throw new StorageError("put", "already_exists", 412);
       objects.set(key, bytes);
@@ -489,75 +586,169 @@ function fakeFiles(): FileStore & { objects: Map<string, Uint8Array> } {
   };
 }
 
+/** The same objects, a new store (a later run). */
+function fakeFilesFrom(files: ReturnType<typeof fakeFiles>): ReturnType<typeof fakeFiles> {
+  const copy = fakeFiles();
+  for (const [k, v] of files.objects) copy.objects.set(k, v);
+  return copy;
+}
+
 type Events = string[];
 
-function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; reserve?: "ok" | "quota" | "ceiling"; ready?: Map<string, SpeechArtifactDocument> } = {}) {
+/**
+ * An in-memory store with the REAL rules where it matters: the speech lock (canTakeOverSpeech), the
+ * voice counting (planVoiceReservation / planVoiceSend, in the creator's month), and a job's end
+ * releasing its pending claims. One job; run it again with a higher attempt for "Try again".
+ */
+function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; reserve?: "ok" | "quota" | "ceiling"; ready?: Map<string, SpeechArtifactDocument>; busyClaims?: number } = {}) {
   const job = generateJob({ state: "running" });
   const project = projectDoc({ state: "generating", activeJobId: job._id, approvedPlanVersionId: V1 });
-  const ctx: GenerateJobContext = { job, project, version: versionDoc() };
   const speech = options.ready ?? new Map<string, SpeechArtifactDocument>();
+  const state = {
+    voice: job.voice ?? null,
+    counted: 0,
+    /** One entry per request the worker counted before sending (its cache key). */
+    sends: [] as string[],
+    usage: [] as { status: string; outcome: string | null; characters: number }[],
+    ends: [] as Parameters<GenerateJobStore["end"]>[0][],
+    speechFailures: [] as string[],
+    progress: [] as Parameters<GenerateJobStore["progress"]>[0][],
+    busyLeft: options.busyClaims ?? 0,
+  };
   let cancelRequested = false;
+  const ctx = (): GenerateJobContext => ({ job: { ...job, voice: state.voice, cancelRequestedAt: cancelRequested ? NOW : null }, project, version: versionDoc() });
+  const period = () => voicePeriodOf("Asia/Kolkata", new Date());
   const store: GenerateJobStore = {
-    start: async () => (events.push("start"), ctx),
-    load: async () => ({ ...ctx, job: { ...job, cancelRequestedAt: cancelRequested ? NOW : null } }),
+    start: async () => (events.push("start"), ctx()),
+    load: async () => ctx(),
     timezone: async () => "Asia/Kolkata",
     readySpeech: async (_o, keys) => keys.flatMap((k) => (speech.get(k)?.status === "ready" ? [speech.get(k)!] : [])),
-    reserveVoice: async (input) => (events.push(`reserve:${input.extra ? "extra" : input.items.length}`), options.reserve ?? "ok"),
+    paidSpeechKeys: async (_o, keys) => keys.filter((k) => speech.get(k)?.status === "ready" || (speech.get(k)?.response && savedAudioOf(speech.get(k)!))),
+    reserveVoice: async (input) => {
+      events.push(`reserve:${input.items.length}`);
+      if (options.reserve && options.reserve !== "ok") return options.reserve;
+      const planned = planVoiceReservation(state.voice, input.items, period());
+      state.counted += planned.total;
+      state.voice = planned.next;
+      return "ok";
+    },
+    reserveVoiceSend: async (input) => {
+      const planned = planVoiceSend(state.voice, input.item, period());
+      state.sends.push(input.item.cacheKey);
+      state.counted += planned.count;
+      state.voice = planned.next;
+      return "ok";
+    },
+    reserveUsage: async (input) => {
+      const row = { status: "reserved", outcome: null as string | null, characters: input.characters };
+      state.usage.push(row);
+      return row;
+    },
+    finishUsage: async (handle, input) => void Object.assign(handle as object, { status: input.status, outcome: input.outcome, characters: input.characters }),
     claimSpeech: async (input) => {
       const existing = speech.get(input.cacheKey);
-      if (existing?.status === "ready") return { kind: "ready", doc: existing };
-      const doc = (existing ?? { _id: new ObjectId(), cacheKey: input.cacheKey, ...input.setup, status: "pending", response: null, audioSha256: null }) as SpeechArtifactDocument;
-      speech.set(input.cacheKey, doc);
+      const claim = { jobId: input.jobId, attempt: input.attempt, at: new Date() };
+      if (state.busyLeft > 0) {
+        state.busyLeft--;
+        events.push("busy");
+        return { kind: "busy", doc: existing ?? ({} as SpeechArtifactDocument) };
+      }
+      if (!existing) {
+        const doc = { _id: new ObjectId(), ownerId: input.ownerId, cacheKey: input.cacheKey, ...input.setup, status: "pending", claim, response: null, audio: null, audioSha256: null } as unknown as SpeechArtifactDocument;
+        speech.set(input.cacheKey, doc);
+        events.push("claim");
+        return { kind: "claimed", doc };
+      }
+      if (existing.status === "ready") return { kind: "ready", doc: existing };
+      if (!canTakeOverSpeech(existing, input.jobId, new Date())) {
+        events.push("busy");
+        return { kind: "busy", doc: existing };
+      }
+      Object.assign(existing, { status: "pending", claim, error: null });
       events.push("claim");
-      return { kind: "claimed", doc };
+      return { kind: "claimed", doc: existing };
     },
     saveSpeechResponse: async (input) => {
       const doc = speech.get(input.cacheKey)!;
-      doc.response = input.response;
-      doc.audioSha256 = input.response.audioSha256;
+      Object.assign(doc, { response: input.response, audio: input.audio, audioSha256: input.response.audioSha256 });
       events.push("save-answer");
       return true;
     },
     markSpeechReady: async (input) => {
-      speech.get(input.cacheKey)!.status = "ready";
+      Object.assign(speech.get(input.cacheKey)!, { status: "ready", claim: null, response: null, audio: null });
       events.push("ready");
       return true;
     },
-    markSpeechFailed: async (input) => void (speech.get(input.cacheKey)!.status = "failed", events.push("speech-failed")),
-    progress: async () => {
+    markSpeechFailed: async (input) => {
+      const doc = speech.get(input.cacheKey);
+      if (doc?.status === "pending" && doc.claim?.jobId.equals(input.jobId)) Object.assign(doc, { status: "failed", claim: null });
+      state.speechFailures.push(input.message);
+      events.push("speech-failed");
+    },
+    progress: async (input) => {
+      state.progress.push(input);
       if (options.cancelAt === "progress") cancelRequested = true;
       return { cancelRequested };
     },
     beginRender: async () => (events.push("begin-render"), { cancelRequested: options.cancelAt === "render" }),
     complete: async (input) => (events.push(`complete:${input.render.keys.mp4.split("/").pop()}`), true),
-    end: async (input) => (events.push(`end:${input.outcome}:${input.code ?? ""}`), true),
+    end: async (input) => {
+      events.push(`end:${input.outcome}:${input.code ?? ""}`);
+      state.ends.push(input);
+      // endGenerateJob releases the job's pending claims (answers and bytes kept).
+      for (const doc of speech.values()) if (doc.status === "pending" && doc.claim?.jobId.equals(input.jobId)) Object.assign(doc, { status: "failed", claim: null });
+      return true;
+    },
   };
-  return { store, speech, ctx };
+  return { store, speech, state, jobId: job._id.toHexString() };
 }
 
-function voiceWith(provider: { calls: number; fail?: Error }) {
-  const setup = voiceSetupFromEnv({ E2E_FAKE_ELEVENLABS: "1", MONGODB_DB: "bytereel_test", BETTER_AUTH_URL: "http://localhost:3232" });
+/** A counting stand-in voice: one request per synthesize call, counted (beforeAttempt) before it "sends". */
+function voiceWith(provider: { calls: number; texts?: string[]; fail?: Error }) {
+  const setup = voiceSetupFromEnv(STAND_IN_ENV);
   if (!setup.ok) throw new Error(setup.problem);
   return () => ({
     ...setup,
     provider: () => ({
       name: "test",
-      synthesize: async (request: Parameters<ReturnType<typeof setup.provider>["synthesize"]>[0], options?: Parameters<ReturnType<typeof setup.provider>["synthesize"]>[1]) => {
-        provider.calls++;
+      synthesize: async (request: SpeechRequest, options?: SpeechCallOptions) => {
         await options?.beforeAttempt?.(1);
+        provider.calls++;
+        provider.texts?.push(request.text);
         if (provider.fail) throw provider.fail;
-        return setup.provider("en").synthesize(request);
+        return new FakeElevenLabsSpeech("en").synthesize(request);
       },
     }),
   });
 }
 
-function fakeRenderer(events: Events, result: (spec: RenderJobSpec) => Promise<RenderJobResult>, seen: { spec?: RenderJobSpec; tmp?: string; cancelled?: boolean } = {}) {
-  return (spec: RenderJobSpec, options: { tmp: string; onProgress: (phase: "rendering", percent: number) => void }): RenderRun => {
+/**
+ * The REAL ElevenLabs adapter (ElevenLabsSpeech, its retries and response checks) over a scripted
+ * fetch: no network at all. Each script entry answers one HTTP request; then every answer is good.
+ */
+function scriptedElevenLabs(script: ("ok" | "timeout" | "busy" | "bad-json" | "quota")[], model: { id: string } = { id: "eleven_test_v1" }) {
+  const requests: { model: string; text: string }[] = [];
+  const fetchFn = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { text: string; model_id: string };
+    requests.push({ model: body.model_id, text: body.text });
+    const next = script.shift() ?? "ok";
+    if (next === "timeout") throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    if (next === "busy") return new Response(JSON.stringify({ detail: { status: "system_busy", message: "busy" } }), { status: 503 });
+    if (next === "quota") return new Response(JSON.stringify({ detail: { status: "quota_exceeded", message: "This request exceeds your quota of 10000." } }), { status: 401 });
+    if (next === "bad-json") return new Response("{not json", { status: 200 });
+    const fake = await new FakeElevenLabsSpeech("en").synthesize({ text: body.text } as SpeechRequest);
+    return new Response(JSON.stringify({ audio_base64: Buffer.from(fake.audio).toString("base64"), alignment: fake.alignment, normalized_alignment: fake.normalizedAlignment }), { status: 200 });
+  }) as typeof fetch;
+  const voice = (): VoiceSetup => ({ ok: true, fake: false, configFor: (plan) => speechConfigFor(plan, "TestVoice0001", model.id), provider: () => new ElevenLabsSpeech("not-a-real-key", fetchFn) });
+  return { requests, voice, model };
+}
+
+function fakeRenderer(events: Events, result: (spec: RenderJobSpec) => Promise<RenderJobResult>, seen: { spec?: RenderJobSpec; tmp?: string; cancelled?: boolean } = {}, progress: [RenderPhase, number][] = [["rendering", 10]]) {
+  return (spec: RenderJobSpec, options: { tmp: string; onProgress: (phase: RenderPhase, percent: number) => void }): RenderRun => {
     seen.spec = spec;
     seen.tmp = options.tmp;
     events.push("render");
-    options.onProgress("rendering", 10);
+    for (const [phase, percent] of progress) options.onProgress(phase, percent);
     return { result: result(spec), cancel: () => void ((seen.cancelled = true), events.push("render-cancel")) };
   };
 }
@@ -570,14 +761,44 @@ async function readyResult(spec: RenderJobSpec): Promise<RenderJobResult> {
   return { status: "ready", files, qa: { sha256: sha("video bytes"), ok: true } as never, durationMs: 70000, frames: 2100, renderMs: 1, bundleMs: 1 };
 }
 
-const steps = { run: <T>(_id: string, fn: () => Promise<T>) => fn() };
-const retryLater = (message: string) => new Error(`retry later: ${message}`);
+/** Steps run once (no Inngest retries); waits are recorded, not waited. */
+function plainSteps() {
+  const sleeps: string[] = [];
+  return { sleeps, run: <T>(_id: string, fn: () => Promise<T>) => fn(), sleep: async (id: string) => void sleeps.push(id) };
+}
+/** Like Inngest: a step that throws is run again, up to `retries` more times; then the error reaches the job. */
+function retryingSteps(retries = 3) {
+  const runs = new Map<string, number>();
+  const sleeps: string[] = [];
+  return {
+    runs,
+    sleeps,
+    run: async <T>(id: string, fn: () => Promise<T>): Promise<T> => {
+      for (let i = 0; ; i++) {
+        runs.set(id, (runs.get(id) ?? 0) + 1);
+        try {
+          return await fn();
+        } catch (error) {
+          if (i >= retries) throw error;
+        }
+      }
+    },
+    sleep: async (id: string) => void sleeps.push(id),
+  };
+}
+
+/** One file store for the whole run (every step sees the same files). */
+const sameFiles = (files: FileStore) => () => files;
+const quiet = { log: process.env.DEBUG_F23 ? (level: string, message: string) => console.log(level, message) : () => undefined, sleep: async () => undefined };
+const scenesOf = () => validPlan().scenes.length;
+const run = (bundle: { store: GenerateJobStore; jobId: string }, deps: Omit<GenerateJobDeps, "store" | "root"> & { root: string }, options: { attempt?: number; step?: ReturnType<typeof plainSteps> | ReturnType<typeof retryingSteps> } = {}) =>
+  runGenerateJob({ event: { jobId: bundle.jobId, attempt: options.attempt ?? 1 }, runId: null, step: options.step ?? plainSteps() }, { ...quiet, ...deps, store: bundle.store });
 
 describe("the worker (start → reserve-voice → speech per scene → render)", () => {
-  it("records each scene once (lock claimed, answer saved BEFORE the upload), renders, uploads create-only, saves the video", async () => {
+  it("records each scene once (lock claimed, answer + bytes saved BEFORE the upload), renders, uploads create-only, saves the video", async () => {
     await withTempDir(async (root) => {
       const events: Events = [];
-      const { store } = fakeStore(events);
+      const bundle = fakeStore(events);
       const files = fakeFiles();
       const provider = { calls: 0 };
       const seen: { spec?: RenderJobSpec; tmp?: string } = {};
@@ -589,21 +810,24 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
       await mkdir(recent, { recursive: true });
       const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60_000);
       await utimes(stale, sevenHoursAgo, sevenHoursAgo);
-      const outcome = await runGenerateJob(
-        { event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps },
-        { store, files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult, seen) as never, root, retryLater, log: () => undefined, heartbeatMs: 10 },
-      );
+      const outcome = await run(bundle, { files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult, seen) as never, root, heartbeatMs: 10 });
       expect(outcome).toBe("done");
-      const scenes = validPlan().scenes.length;
+      const scenes = scenesOf();
       expect(provider.calls).toBe(scenes);
       expect(events.slice(0, 2)).toEqual(["start", `reserve:${scenes}`]);
       expect(events.slice(2, 6)).toEqual(["claim", "save-answer", "ready", "claim"]);
       expect(events.at(-1)).toBe("complete:output.mp4");
+      // Every request was counted before it was sent, and used the up-front reservation (nothing extra).
+      expect(bundle.state.sends).toHaveLength(scenes);
+      expect(bundle.state.voice?.cacheKeys).toEqual([]);
+      expect(bundle.state.voice?.sentKeys).toHaveLength(scenes);
       // Narration: audio + both timing files per recording; the video: mp4, thumbnail, timeline, captions, qa.
       const keys = [...files.objects.keys()];
       expect(keys.filter((k) => k.includes("/speech/"))).toHaveLength(scenes * 3);
       expect(keys.filter((k) => k.includes("/renders/")).map((k) => k.split("/").pop()).sort()).toEqual(["captions.json", "output.mp4", "qa.json", "thumbnail.jpg", "timeline.json"]);
       expect(new Set(keys.filter((k) => k.includes("/renders/")).map((k) => k.split("/")[5])).size).toBe(1);
+      // Ready recordings don't keep their bytes.
+      expect([...bundle.speech.values()].every((d) => d.status === "ready" && !savedAudioOf(d))).toBe(true);
       // The render ran in its own folder inside the project, with its own temp folder there; both are gone now.
       expect(seen.spec!.workDir.startsWith(path.join(root, "runs", ".tmp", "generate"))).toBe(true);
       expect(seen.tmp).toBe(path.join(seen.spec!.workDir, "tmp"));
@@ -618,12 +842,12 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
     await withTempDir(async (root) => {
       const first: Events = [];
       const files = fakeFiles();
-      const { store, speech } = fakeStore(first);
-      await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { store, files: () => files, voice: voiceWith({ calls: 0 }), render: fakeRenderer(first, readyResult) as never, root, retryLater, log: () => undefined });
+      const bundle = fakeStore(first);
+      await run(bundle, { files: () => files, voice: voiceWith({ calls: 0 }), render: fakeRenderer(first, readyResult) as never, root });
       const again: Events = [];
       const provider = { calls: 0 };
-      const { store: store2 } = fakeStore(again, { ready: speech });
-      const outcome = await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 2 }, runId: null, step: steps }, { store: store2, files: () => fakeFilesFrom(files), voice: voiceWith(provider), render: fakeRenderer(again, readyResult) as never, root, retryLater, log: () => undefined });
+      const second = fakeStore(again, { ready: bundle.speech });
+      const outcome = await run(second, { files: () => fakeFilesFrom(files), voice: voiceWith(provider), render: fakeRenderer(again, readyResult) as never, root }, { attempt: 2 });
       expect(outcome).toBe("done");
       expect(provider.calls).toBe(0);
       expect(again).toContain("reserve:0");
@@ -636,8 +860,7 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
       for (const [reserve, code] of [["quota", "QUOTA_EXCEEDED"], ["ceiling", "SPEND_CEILING"]] as const) {
         const events: Events = [];
         const provider = { calls: 0 };
-        const { store } = fakeStore(events, { reserve });
-        const outcome = await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { store, files: () => fakeFiles(), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root, retryLater, log: () => undefined });
+        const outcome = await run(fakeStore(events, { reserve }), { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root });
         expect(outcome).toBe("failed");
         expect(provider.calls).toBe(0);
         expect(events.at(-1)).toBe(`end:failed:${code}`);
@@ -645,42 +868,50 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
     });
   });
 
-  it("a busy voice service → PROVIDER_BUSY (retryable); a refused voice → PROVIDER_UNAVAILABLE", async () => {
+  it("a busy voice service → PROVIDER_BUSY (retryable); a refused voice → PROVIDER_UNAVAILABLE; only a fixed line is stored", async () => {
     await withTempDir(async (root) => {
       const cases = [
-        [new ProviderError({ provider: "elevenlabs", kind: "transient", message: "busy" }), "PROVIDER_BUSY"],
-        [new ProviderError({ provider: "elevenlabs", kind: "account-restricted", message: "402" }), "PROVIDER_UNAVAILABLE"],
+        [new ProviderError({ provider: "elevenlabs", kind: "transient", message: "raw provider text 503" }), "PROVIDER_BUSY"],
+        [new ProviderError({ provider: "elevenlabs", kind: "account-restricted", message: "raw provider text 402" }), "PROVIDER_UNAVAILABLE"],
       ] as const;
       for (const [fail, code] of cases) {
         const events: Events = [];
-        const { store } = fakeStore(events);
-        const outcome = await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { store, files: () => fakeFiles(), voice: voiceWith({ calls: 0, fail }), render: fakeRenderer(events, readyResult) as never, root, retryLater, log: () => undefined });
+        const bundle = fakeStore(events);
+        const outcome = await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith({ calls: 0, fail }), render: fakeRenderer(events, readyResult) as never, root });
         expect(outcome).toBe("failed");
         expect(events).toContain("speech-failed");
         expect(events.at(-1)).toBe(`end:failed:${code}`);
         expect(speechFailureCode(fail)).toBe(code);
+        // The provider's own text goes to the server log only, never to the job or the lock.
+        expect(JSON.stringify(bundle.state.ends)).not.toContain("raw provider text");
+        expect(bundle.state.speechFailures.join()).not.toContain("raw provider text");
       }
       expect(GENERATE_ERRORS.PROVIDER_BUSY.retryable).toBe(true);
       expect(GENERATE_ERRORS.PROVIDER_UNAVAILABLE.retryable).toBe(false);
     });
   });
 
+  it("ElevenLabs' own monthly limit → 'Voice limit reached this month.' (retryable); a long rate-limit wait is just busy", () => {
+    expect(speechFailureCode(new ProviderError({ provider: "elevenlabs", kind: "quota", status: 401, message: "quota_exceeded" }))).toBe("SPEND_CEILING");
+    expect(GENERATE_ERRORS.SPEND_CEILING).toEqual({ message: "Voice limit reached this month.", retryable: true });
+    expect(speechFailureCode(new ProviderError({ provider: "elevenlabs", kind: "quota", status: 429, message: "asked to wait 300 s" }))).toBe("PROVIDER_BUSY");
+  });
+
   it("a paid answer saved by an earlier run whose audio reached R2 is reused: no second call", async () => {
     await withTempDir(async (root) => {
       const events: Events = [];
       const files = fakeFiles();
-      const { store, speech } = fakeStore(events);
+      const bundle = fakeStore(events);
       const provider = { calls: 0 };
       // Run once to get real answers, then make every recording "pending with a saved answer" again.
-      await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { store, files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root, retryLater, log: () => undefined });
+      await run(bundle, { files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root });
       const paid = provider.calls;
-      for (const doc of speech.values()) {
+      for (const doc of bundle.speech.values()) {
         doc.status = "pending";
-        doc.response = (doc.response ?? JSON.parse(Buffer.from(files.objects.get(doc.alignmentKey)!).toString())) as never;
+        doc.response = JSON.parse(Buffer.from(files.objects.get(doc.alignmentKey)!).toString()) as never;
       }
       for (const key of [...files.objects.keys()]) if (!key.endsWith("audio.mp3")) files.objects.delete(key);
-      const { store: again } = fakeStore([], { ready: speech });
-      await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 2 }, runId: null, step: steps }, { store: again, files: () => files, voice: voiceWith(provider), render: fakeRenderer([], readyResult) as never, root, retryLater, log: () => undefined });
+      await run(fakeStore([], { ready: bundle.speech }), { files: () => files, voice: voiceWith(provider), render: fakeRenderer([], readyResult) as never, root }, { attempt: 2 });
       expect(provider.calls).toBe(paid);
     });
   });
@@ -688,29 +919,25 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
   it("Cancel: before the render it never starts; during the render the renderer is stopped", async () => {
     await withTempDir(async (root) => {
       const before: Events = [];
-      const { store } = fakeStore(before, { cancelAt: "render" });
-      expect(await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { store, files: () => fakeFiles(), voice: voiceWith({ calls: 0 }), render: fakeRenderer(before, readyResult) as never, root, retryLater, log: () => undefined })).toBe("cancelled");
+      expect(await run(fakeStore(before, { cancelAt: "render" }), { files: sameFiles(fakeFiles()), voice: voiceWith({ calls: 0 }), render: fakeRenderer(before, readyResult) as never, root })).toBe("cancelled");
       expect(before).not.toContain("render");
 
       const during: Events = [];
       const seen: { cancelled?: boolean } = {};
       const files = fakeFiles();
-      const { store: store2 } = fakeStore(during, {});
+      const bundle = fakeStore(during, {});
       let release: (r: RenderJobResult) => void = () => undefined;
       const renderer = fakeRenderer(during, () => new Promise<RenderJobResult>((resolve) => (release = resolve)), seen);
-      const running = runGenerateJob(
-        { event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps },
+      const running = run(
+        { ...bundle, store: { ...bundle.store, progress: async () => ({ cancelRequested: during.includes("render") }) } },
         {
-          store: { ...store2, progress: async () => ({ cancelRequested: during.includes("render") }) },
           files: () => files,
           voice: voiceWith({ calls: 0 }),
           render: ((spec: RenderJobSpec, o: never) => {
-            const run = renderer(spec, o);
-            return { ...run, cancel: () => (run.cancel(), release({ status: "cancelled" })) };
+            const r = renderer(spec, o);
+            return { ...r, cancel: () => (r.cancel(), release({ status: "cancelled" })) };
           }) as never,
           root,
-          retryLater,
-          log: () => undefined,
           heartbeatMs: 5,
         },
       );
@@ -720,27 +947,287 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
     });
   });
 
-  it("the storyboard must change (too long / unclear words) → needs_input; a render error → RENDER_FAILED", async () => {
+  it("the storyboard must change (too long / unclear words) → needs_input; a render error → RENDER_FAILED; only fixed lines are stored", async () => {
     await withTempDir(async (root) => {
-      const run = async (result: RenderJobResult) => {
+      const attemptWith = async (result: RenderJobResult) => {
         const events: Events = [];
-        const { store } = fakeStore(events);
-        const files = fakeFiles();
-        await runGenerateJob({ event: { jobId: generateJob()._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { store, files: () => files, voice: voiceWith({ calls: 0 }), render: fakeRenderer(events, async () => result) as never, root, retryLater, log: () => undefined });
-        return events.at(-1);
+        const bundle = fakeStore(events);
+        await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith({ calls: 0 }), render: fakeRenderer(events, async () => result) as never, root });
+        return { last: events.at(-1), ends: JSON.stringify(bundle.state.ends) };
       };
-      expect(await run({ status: "needs_input", reason: "duration_out_of_range", message: "Your narration runs about 97 seconds…", sceneId: null, detail: "" })).toBe("end:needs_input:");
-      expect(await run({ status: "failed", stage: "render", detail: "chrome crashed" })).toBe("end:failed:RENDER_FAILED");
+      const needs = await attemptWith({ status: "needs_input", reason: "duration_out_of_range", message: "Your narration runs about 97 seconds…", sceneId: null, detail: "raw compiler detail" });
+      expect(needs.last).toBe("end:needs_input:");
+      expect(needs.ends).not.toContain("raw compiler detail");
+      const failed = await attemptWith({ status: "failed", stage: "render", detail: "Error: chrome crashed\n    at /home/someone/secret/path.js:1:1" });
+      expect(failed.last).toBe("end:failed:RENDER_FAILED");
+      expect(failed.ends).not.toContain("chrome crashed");
+      expect(failed.ends).toContain("The render stopped with an error (see the server log)");
+    });
+  });
+
+  it("render progress: stage statuses are written only when the stage changes, not on every percent", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events);
+      const ticks: [RenderPhase, number][] = [["timing", 0], ["captions", 0], ["rendering", 1], ["rendering", 2], ["rendering", 3], ["checking", 0]];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const renderer = (spec: RenderJobSpec, options: { onProgress: (phase: RenderPhase, percent: number) => void }): RenderRun => ({
+        result: (async () => {
+          for (const [phase, percent] of ticks) {
+            options.onProgress(phase, percent);
+            await new Promise((r) => setTimeout(r, 15)); // a heartbeat (5 ms) in between
+          }
+          release();
+          return readyResult(spec);
+        })(),
+        cancel: () => undefined,
+      });
+      await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith({ calls: 0 }), render: renderer as never, root, heartbeatMs: 5 });
+      await gate;
+      const renderWrites = bundle.state.progress.filter((p) => p.stage === "render");
+      expect(renderWrites.length).toBeGreaterThan(2);
+      // Only the first write of the render stage moves stage statuses; the percent writes carry none.
+      expect(renderWrites.filter((p) => p.stages && Object.keys(p.stages).length > 0)).toHaveLength(1);
     });
   });
 });
 
-/** The same objects, a new store (a later run). */
-function fakeFilesFrom(files: ReturnType<typeof fakeFiles>): FileStore {
-  const copy = fakeFiles();
-  for (const [k, v] of files.objects) copy.objects.set(k, v);
-  return copy as FileStore & { objects: Map<string, Uint8Array> };
-}
+describe("paid narration is never paid for again (code review, finding 1)", () => {
+  const network = () => new StorageError("put", "network", null);
+
+  it("saved answer, audio not in R2 (uploads keep failing) → zero further provider calls: not in the step's retries, not after Try again", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events);
+      const provider = { calls: 0, texts: [] as string[] };
+      const steps = retryingSteps(3);
+      const broken = fakeFiles((key) => (key.endsWith("audio.mp3") ? network() : null));
+      const outcome = await run(bundle, { files: () => broken, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root }, { step: steps });
+      // Scene 1 was paid ONCE; its step ran 4 times (Inngest's 3 retries), each upload tried 3 times.
+      expect(provider.calls).toBe(1);
+      expect(steps.runs.get("speech-1")).toBe(4);
+      expect(broken.puts.filter((k) => k.endsWith("audio.mp3"))).toHaveLength(12);
+      expect(outcome).toBe("failed");
+      expect(events.at(-1)).toBe("end:failed:INTERNAL");
+      // The job's end released the lock and KEPT the answer and its bytes.
+      const scene1 = [...bundle.speech.values()][0]!;
+      expect(scene1).toMatchObject({ status: "failed", claim: null });
+      expect(savedAudioOf(scene1)).not.toBeNull();
+
+      // Try again (attempt 2), storage works now: scene 1 is uploaded from the saved bytes, never re-recorded.
+      const working = fakeFiles();
+      const again = await run(bundle, { files: () => working, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root }, { attempt: 2, step: retryingSteps(3) });
+      expect(again).toBe("done");
+      expect(provider.calls).toBe(scenesOf());
+      expect(new Set(provider.texts).size).toBe(provider.texts.length); // no scene was recorded twice
+      expect(working.objects.get(scene1.audioKey)).toEqual(new Uint8Array(working.objects.get(scene1.audioKey)!));
+      expect(sha(working.objects.get(scene1.audioKey)!)).toBe(scene1.audioSha256);
+      // Try again counted nothing for scene 1: it already had its paid answer.
+      expect(bundle.state.sends.filter((k) => k === scene1.cacheKey)).toHaveLength(1);
+    });
+  });
+
+  it("R2 refuses the upload (access denied) → the job ends at once (no step retries); Try again later uploads the saved bytes", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events);
+      const provider = { calls: 0 };
+      const steps = retryingSteps(3);
+      const refusing = fakeFiles((key) => (key.endsWith("audio.mp3") ? new StorageError("put", "access_denied", 403) : null));
+      expect(await run(bundle, { files: () => refusing, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root }, { step: steps })).toBe("failed");
+      expect(steps.runs.get("speech-1")).toBe(1);
+      expect(refusing.puts.filter((k) => k.endsWith("audio.mp3"))).toHaveLength(1);
+      expect(bundle.state.ends.at(-1)).toMatchObject({ outcome: "failed", code: "INTERNAL", detail: "File storage refused the request (see the server log)" });
+      expect(provider.calls).toBe(1);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root }, { attempt: 2 })).toBe("done");
+      expect(provider.calls).toBe(scenesOf());
+    });
+  });
+
+  it("another job of the same owner takes over a failed recording with a saved answer: it uploads the bytes, no call", async () => {
+    await withTempDir(async (root) => {
+      const first = fakeStore([]);
+      const provider = { calls: 0 };
+      await run(first, { files: sameFiles(fakeFiles((key) => (key.endsWith("audio.mp3") ? new StorageError("put", "access_denied", 403) : null))), voice: voiceWith(provider), render: fakeRenderer([], readyResult) as never, root });
+      expect(provider.calls).toBe(1);
+      const other = fakeStore([], { ready: first.speech }); // a different job, same owner, same recordings
+      expect(await run(other, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer([], readyResult) as never, root })).toBe("done");
+      expect(provider.calls).toBe(scenesOf());
+      // The saved recording is free for the other job: its up-front reservation skipped it.
+      expect(other.state.voice?.characters).toBeLessThan(first.state.voice!.characters);
+    });
+  });
+});
+
+describe("every ElevenLabs request is counted before it is sent (code review, finding 2) and logged in providerUsage (finding 5)", () => {
+  const charactersOf = (requests: { text: string }[]) => requests.reduce((sum, r) => sum + countCharacters(r.text), 0);
+
+  it("a 200 answer with bad JSON (may be billed) → PROVIDER_BUSY; Try again pays again and COUNTS again", async () => {
+    await withTempDir(async (root) => {
+      const bundle = fakeStore([]);
+      const eleven = scriptedElevenLabs(["bad-json"]);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root })).toBe("failed");
+      expect(bundle.state.ends.at(-1)).toMatchObject({ code: "PROVIDER_BUSY" });
+      expect(eleven.requests).toHaveLength(1);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root }, { attempt: 2 })).toBe("done");
+      expect(eleven.requests).toHaveLength(scenesOf() + 1);
+      expect(bundle.state.sends).toHaveLength(eleven.requests.length);
+      // Everything counted: the bad answer AND its new recording.
+      expect(bundle.state.counted).toBe(charactersOf(eleven.requests));
+      expect(bundle.state.usage).toHaveLength(eleven.requests.length);
+      expect(bundle.state.usage[0]).toMatchObject({ status: "failed", outcome: "invalid_output" });
+      expect(bundle.state.usage[0]!.characters).toBeGreaterThan(0);
+      expect(bundle.state.usage.slice(1).every((u) => u.status === "final" && u.outcome === "ok")).toBe(true);
+    });
+  });
+
+  it("timeouts (ElevenLabs may have done the work) → PROVIDER_BUSY after 3 requests; Try again's request is counted too", async () => {
+    await withTempDir(async (root) => {
+      const bundle = fakeStore([]);
+      const eleven = scriptedElevenLabs(["timeout", "timeout", "timeout"]);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root })).toBe("failed");
+      expect(eleven.requests).toHaveLength(3);
+      // All three requests were counted before they were sent (the first on the up-front reservation).
+      expect(bundle.state.sends).toHaveLength(3);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root }, { attempt: 2 })).toBe("done");
+      expect(eleven.requests).toHaveLength(scenesOf() + 3);
+      expect(bundle.state.sends).toHaveLength(eleven.requests.length);
+      expect(bundle.state.counted).toBe(charactersOf(eleven.requests));
+      expect(bundle.state.usage.slice(0, 3).map((u) => `${u.status}:${u.outcome}`)).toEqual(["failed:busy", "failed:busy", "failed:timeout"]);
+      expect(bundle.state.usage.filter((u) => u.status === "reserved")).toHaveLength(0);
+    });
+  });
+
+  it("the model (or voice) changed between the reservation and the recording → a new recording, counted before it is sent", async () => {
+    await withTempDir(async (root) => {
+      const bundle = fakeStore([]);
+      const model = { id: "eleven_model_a" };
+      const eleven = scriptedElevenLabs([], model);
+      const store: GenerateJobStore = {
+        ...bundle.store,
+        reserveVoice: async (input) => {
+          const out = await bundle.store.reserveVoice(input);
+          model.id = "eleven_model_b"; // the server's ELEVENLABS_MODEL changed right after reserving
+          return out;
+        },
+      };
+      expect(await run({ ...bundle, store }, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root })).toBe("done");
+      expect(eleven.requests.every((r) => r.model === "eleven_model_b")).toBe(true);
+      expect(bundle.state.sends).toHaveLength(eleven.requests.length);
+      // The model-A reservation covers nothing sent; every model-B request was counted on its own.
+      expect(bundle.state.counted).toBe(2 * charactersOf(eleven.requests));
+    });
+  });
+
+  it("ElevenLabs' own quota answer → 'Voice limit reached this month.' (retryable); the request was counted", async () => {
+    await withTempDir(async (root) => {
+      const bundle = fakeStore([]);
+      const eleven = scriptedElevenLabs(["quota"]);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root })).toBe("failed");
+      expect(bundle.state.ends.at(-1)).toMatchObject({ code: "SPEND_CEILING" });
+      expect(bundle.state.sends).toHaveLength(1);
+      expect(bundle.state.usage[0]).toMatchObject({ status: "failed", outcome: "quota" });
+    });
+  });
+});
+
+describe("voice counting: credits, sends and months (pure, and in the database)", () => {
+  const november = voicePeriodOf("Asia/Kolkata", NOW);
+  const october = voicePeriodOf("Asia/Kolkata", new Date("2026-10-20T05:00:00.000Z"));
+  const a = { cacheKey: "sha256:a", characters: 100 };
+  const b = { cacheKey: "sha256:b", characters: 50 };
+
+  it("the up-front reservation gives one credit per recording; a credit already held this month isn't counted again", () => {
+    const first = planVoiceReservation(null, [a, b], november);
+    expect(first).toMatchObject({ total: 150, next: { cacheKeys: ["sha256:a", "sha256:b"], characters: 150, period: november } });
+    expect(planVoiceReservation(first.next, [a, b], november).total).toBe(0);
+  });
+
+  it("a send uses its credit once; the next send of the same recording is counted", () => {
+    const reserved = planVoiceReservation(null, [a], november).next;
+    const sent = planVoiceSend(reserved, a, november);
+    expect(sent).toMatchObject({ count: 0, next: { cacheKeys: [], sentKeys: ["sha256:a"], characters: 100 } });
+    expect(planVoiceSend(sent.next, a, november)).toMatchObject({ count: 100, next: { characters: 200, sentKeys: ["sha256:a"] } });
+    expect(planVoiceSend(reserved, b, november).count).toBe(50); // not reserved (e.g. another model)
+  });
+
+  it("a reservation made last month covers nothing this month (finding 7): reserved and sent again are counted", () => {
+    const old = planVoiceReservation(null, [a, b], october).next;
+    expect(voiceCredits(old, november)).toEqual([]);
+    expect(planVoiceReservation(old, [a, b], november)).toMatchObject({ total: 150, next: { cacheKeys: ["sha256:a", "sha256:b"], period: november } });
+    expect(planVoiceSend(old, a, november).count).toBe(100);
+  });
+
+  it("reserveVoiceSend in the database: a credit → nothing counted; no credit → both counters, refused at the limit", async () => {
+    const job = generateJob({ state: "running", voice: { cacheKeys: ["sha256:a"], characters: 100, sentKeys: [], period: november } });
+    const withCredit = fakeDb({ "jobs.findOne": () => job, "jobs.updateOne": () => ({}) });
+    expect(await reserveVoiceSend(withCredit.db, { jobId: job._id, attempt: 1, item: a, timezone: "Asia/Kolkata", now: NOW })).toBe("ok");
+    expect(withCredit.names()).toEqual(["jobs.findOne", "jobs.updateOne"]);
+    expect(withCredit.calls[1]!.args[1].$set.voice).toMatchObject({ cacheKeys: [], sentKeys: ["sha256:a"] });
+
+    const counted = fakeDb({ "jobs.findOne": () => job, "jobs.updateOne": () => ({}), "usageCounters.findOneAndUpdate": (_f: unknown, u: { $inc: { count: number } }) => ({ count: 10 + u.$inc.count }) });
+    expect(await reserveVoiceSend(counted.db, { jobId: job._id, attempt: 1, item: b, timezone: "Asia/Kolkata", now: NOW })).toBe("ok");
+    expect(counted.names().filter((n) => n === "usageCounters.findOneAndUpdate")).toHaveLength(2);
+
+    const full = fakeDb({ "jobs.findOne": () => job, "usageCounters.findOneAndUpdate": () => ({ count: 3001 }) });
+    expect(await reserveVoiceSend(full.db, { jobId: job._id, attempt: 1, item: b, timezone: "Asia/Kolkata", now: NOW })).toBe("quota");
+  });
+});
+
+describe("waiting for a recording held by another run (code review, findings 9 and 10)", () => {
+  it("waits with step.sleep (no retry used up), then records once the lock is free", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events, { busyClaims: 3 });
+      const steps = retryingSteps(3);
+      const provider = { calls: 0 };
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root }, { step: steps })).toBe("done");
+      expect(steps.sleeps).toEqual(["speech-1-wait-1", "speech-1-wait-2", "speech-1-wait-3"]);
+      expect([...steps.runs.values()].every((n) => n === 1)).toBe(true);
+      expect(provider.calls).toBe(scenesOf());
+    });
+  });
+
+  it("the waits outlast the lock's stale time; still locked after that → PROVIDER_BUSY (retryable), nothing paid", async () => {
+    expect(SPEECH_BUSY_MAX_WAITS * SPEECH_BUSY_WAIT_MS).toBeGreaterThan(SPEECH_LOCK_STALE_MS);
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events, { busyClaims: 1000 });
+      const provider = { calls: 0 };
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root })).toBe("failed");
+      expect(events.at(-1)).toBe("end:failed:PROVIDER_BUSY");
+      expect(provider.calls).toBe(0);
+    });
+  });
+});
+
+describe("the start step (code review, finding 4)", () => {
+  it("R2 refusing the bucket check ends the job at once, before any cost (never left 'running')", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const files = { ...fakeFiles(), checkBucket: async () => Promise.reject(new StorageError("head", "access_denied", 403)) };
+      const steps = retryingSteps(3);
+      const provider = { calls: 0 };
+      expect(await run(fakeStore(events), { files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root }, { step: steps })).toBe("failed");
+      expect(steps.runs.get("start")).toBe(1);
+      expect(events).toEqual(["start", "end:failed:INTERNAL"]);
+      expect(provider.calls).toBe(0);
+    });
+  });
+
+  it("a network problem in the bucket check is tried again, then the job FAILS (retryable) instead of staying 'running'", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const files = { ...fakeFiles(), checkBucket: async () => Promise.reject(new StorageError("head", "network", null)) };
+      const steps = retryingSteps(3);
+      expect(await run(fakeStore(events), { files: () => files, voice: voiceWith({ calls: 0 }), render: fakeRenderer(events, readyResult) as never, root }, { step: steps })).toBe("failed");
+      expect(steps.runs.get("start")).toBe(4);
+      expect(events.at(-1)).toBe("end:failed:INTERNAL");
+      expect(GENERATE_ERRORS.INTERNAL.retryable).toBe(true);
+    });
+  });
+});
 
 // Keys are typed: make sure the fake store accepts what the worker passes.
 void ((key: StorageKey) => key);

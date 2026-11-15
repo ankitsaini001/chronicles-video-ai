@@ -45,7 +45,7 @@ const NO_UNITS: ProviderUsageUnits = { promptTokens: 0, outputTokens: 0, charact
 /** Write the `reserved` row before calling the provider. Returns its id. */
 export async function reserveProviderUsage(
   db: Db,
-  input: { ownerId: string; provider: UsageProvider; operation: string; model: string; estCostInr?: number; projectId?: string; jobId?: string; now?: Date },
+  input: { ownerId: string; provider: UsageProvider; operation: string; model: string; estCostInr?: number; units?: Partial<ProviderUsageUnits>; projectId?: string; jobId?: string; now?: Date },
 ): Promise<ObjectId> {
   const doc: ProviderUsageDocument = {
     _id: new ObjectId(),
@@ -56,7 +56,8 @@ export async function reserveProviderUsage(
     provider: input.provider,
     operation: input.operation,
     model: input.model,
-    units: NO_UNITS,
+    // The estimate while reserved (ElevenLabs, F23: the characters about to be sent).
+    units: { ...NO_UNITS, ...input.units },
     estCostInr: input.estCostInr ?? 0,
     status: "reserved",
     outcome: null,

@@ -1,23 +1,31 @@
-import { type ClientSession, type Db, ObjectId } from "mongodb";
+import { Binary, type ClientSession, type Db, ObjectId } from "mongodb";
 
 // Recorded narration, one document per recording (docs/DATABASE.md §4.18 `speechArtifacts`, F23).
 // The audio and its timing files are in R2 (users/{ownerId}/speech/{cacheKey hex}/…); this document
 // is THE LOCK that stops paying ElevenLabs twice for the same recording (ARCHITECTURE §9, F22 MUST):
 //   1. claim it as `pending` with a conditional insert on the unique { ownerId, cacheKey } BEFORE
 //      calling ElevenLabs (claimSpeech);
-//   2. save the provider's answer here (saveSpeechResponse) BEFORE uploading the files, so a crash
-//      after the upload never needs a second paid call (the saved answer + the uploaded audio are
-//      reused);
-//   3. upload the files create-only, then mark it `ready` (markSpeechReady).
-// Whoever finds it `ready` reuses it (no call). Whoever finds a fresh claim of ANOTHER job waits and
-// tries again later; a claim of the same job (a re-run of the step, or a retry) or a claim older
-// than SPEECH_LOCK_STALE_MS (the holder died) is taken over. Reuse never crosses owners.
+//   2. save the provider's answer AND the paid audio bytes here (saveSpeechResponse), in one write,
+//      BEFORE uploading anything: from then on the recording is never paid for again; a re-run, a
+//      retry or another job uploads these bytes;
+//   3. upload the files create-only, then mark it `ready` (markSpeechReady), which removes the bytes.
+// Whoever finds it `ready` reuses it (no call). A `failed` one is taken over at once (its saved
+// answer and bytes, if any, are kept and reused). A `pending` claim is taken over:
+//   - by its own job at once when the answer is saved (no call is ever made for it again);
+//   - otherwise only when older than SPEECH_LOCK_STALE_MS, even by the same job: somebody may be
+//     calling ElevenLabs right now (e.g. Inngest re-running a step whose first run is still alive).
+// A job that ends releases its pending claims (releaseSpeechClaims), so others don't wait.
+// Reuse never crosses owners.
 // NEEDS the unique index { ownerId, cacheKey } (npm run db -- indexes --feature F23 --apply).
 
 export const SPEECH_ARTIFACTS_COLLECTION = "speechArtifacts";
 export const SPEECH_ARTIFACT_SCHEMA_VERSION = 1;
 
-/** A pending claim older than this is treated as abandoned (one ElevenLabs call with its retries takes at most ~6 min). */
+/**
+ * A pending claim older than this is treated as abandoned. It must stay above the longest time a
+ * recording can be in flight before its answer is saved: one ElevenLabs request with its 2 quick
+ * retries is at most 3 × 120 s (the request timeout) + 2 × 60 s (the longest wait honoured) = 8 min.
+ */
 export const SPEECH_LOCK_STALE_MS = 10 * 60_000;
 
 /** The provider's answer, as saved before the upload (the pipeline's SpeechCacheRecord, without the audio bytes). */
@@ -48,6 +56,11 @@ export interface SpeechArtifactDocument {
   claim: { jobId: ObjectId; attempt: number; at: Date } | null;
   /** The provider's answer, saved before the upload; cleared when ready. */
   response: SpeechRecordDoc | null;
+  /**
+   * The paid audio (MP3 bytes, about 100–250 KB), saved in the same write as `response` and removed
+   * once the files are in R2 (ready). A retry uploads these instead of paying ElevenLabs again.
+   */
+  audio?: Binary | Uint8Array | null;
   /** The job that paid for it (F23). */
   paidByJobId: ObjectId | null;
   error: { message: string; at: Date } | null;
@@ -74,15 +87,24 @@ export type SpeechClaim =
   | { kind: "busy"; doc: SpeechArtifactDocument };
 
 /**
- * Pure: may this job take the recording over? Yes when it failed before, when the claim is this
- * same job's (a re-run of its step, or its retry: an older attempt is dead by then), or when the
- * claim is older than SPEECH_LOCK_STALE_MS.
+ * Pure: may this job take the recording over? Yes when it failed before (or has no claim); when it
+ * is this same job's claim AND the paid answer is already saved (finishing it never calls
+ * ElevenLabs); or when the claim is older than SPEECH_LOCK_STALE_MS. A fresh claim WITHOUT a saved
+ * answer is never taken over, not even by the same job: its first run may still be calling ElevenLabs.
  */
-export function canTakeOverSpeech(doc: Pick<SpeechArtifactDocument, "status" | "claim">, jobId: ObjectId, now: Date): boolean {
+export function canTakeOverSpeech(doc: Pick<SpeechArtifactDocument, "status" | "claim" | "response">, jobId: ObjectId, now: Date): boolean {
   if (doc.status === "ready") return false;
   if (doc.status === "failed" || !doc.claim) return true;
-  if (doc.claim.jobId.equals(jobId)) return true;
+  if (doc.response && doc.claim.jobId.equals(jobId)) return true;
   return now.getTime() - doc.claim.at.getTime() >= SPEECH_LOCK_STALE_MS;
+}
+
+/** The saved paid audio of a recording, or null (none saved, or already in R2 and removed). */
+export function savedAudioOf(doc: Pick<SpeechArtifactDocument, "audio">): Uint8Array | null {
+  const audio = doc.audio;
+  if (!audio) return null;
+  const bytes = audio instanceof Binary ? audio.value() : audio;
+  return bytes.byteLength > 0 ? new Uint8Array(bytes) : null;
 }
 
 const collection = (db: Db) => db.collection<SpeechArtifactDocument>(SPEECH_ARTIFACTS_COLLECTION);
@@ -135,32 +157,47 @@ export async function claimSpeech(
 
 const claimedBy = (jobId: ObjectId, attempt: number) => ({ status: "pending" as const, "claim.jobId": jobId, "claim.attempt": attempt });
 
-/** Step 2: save the paid answer BEFORE uploading (only while this job still holds the claim). */
+/**
+ * Step 2: save the paid answer AND its audio bytes in ONE write, BEFORE uploading anything (only
+ * while this job still holds the claim). From here on this recording is never paid for again.
+ */
 export async function saveSpeechResponse(
   db: Db,
-  input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; durationMs: number | null; now?: Date },
+  input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; audio: Uint8Array; durationMs: number | null; now?: Date },
 ): Promise<boolean> {
   const now = input.now ?? new Date();
   const result = await collection(db).updateOne(
     { ownerId: input.ownerId, cacheKey: input.cacheKey, ...claimedBy(input.jobId, input.attempt) },
-    { $set: { response: input.response, audioSha256: input.response.audioSha256, characters: input.response.charactersSent, durationMs: input.durationMs, paidByJobId: input.jobId, "claim.at": now, updatedAt: now } },
+    {
+      $set: {
+        response: input.response,
+        audio: new Binary(input.audio),
+        audioSha256: input.response.audioSha256,
+        characters: input.response.charactersSent,
+        durationMs: input.durationMs,
+        paidByJobId: input.jobId,
+        "claim.at": now,
+        updatedAt: now,
+      },
+    },
   );
   return result.matchedCount === 1;
 }
 
-/** Step 3: the files are in R2: ready for everyone of this owner (the saved answer is no longer needed). */
+/** Step 3: the files are in R2: ready for everyone of this owner (the saved answer and bytes are removed). */
 export async function markSpeechReady(db: Db, input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; now?: Date }): Promise<boolean> {
   const now = input.now ?? new Date();
   const result = await collection(db).updateOne(
     { ownerId: input.ownerId, cacheKey: input.cacheKey, ...claimedBy(input.jobId, input.attempt), audioSha256: { $type: "string" } },
-    { $set: { status: "ready", claim: null, response: null, error: null, readyAt: now, updatedAt: now } },
+    { $set: { status: "ready", claim: null, response: null, error: null, readyAt: now, updatedAt: now }, $unset: { audio: "" } },
   );
   return result.matchedCount === 1;
 }
 
 /**
- * The recording failed (provider refused it, upload failed…). The saved answer is KEPT: if its
- * audio already reached R2, the next try reuses it instead of paying again.
+ * The recording failed (provider refused it, upload failed…). The saved answer and bytes are KEPT:
+ * the next try (of any job of this owner) uploads them instead of paying again. `message` is a fixed
+ * plain line written by our code (the provider's own text goes to the server log only).
  */
 export async function markSpeechFailed(db: Db, input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; message: string; now?: Date }): Promise<void> {
   const now = input.now ?? new Date();
@@ -168,6 +205,34 @@ export async function markSpeechFailed(db: Db, input: { ownerId: ObjectId; cache
     { ownerId: input.ownerId, cacheKey: input.cacheKey, ...claimedBy(input.jobId, input.attempt) },
     { $set: { status: "failed", claim: null, error: { message: input.message.slice(0, 300), at: now }, updatedAt: now } },
   );
+}
+
+/**
+ * A job ended (failed, cancelled, needs input, stuck): its pending claims become `failed` so other
+ * jobs don't wait for them. Saved answers and bytes are kept (the next try uploads them, no call).
+ */
+export async function releaseSpeechClaims(db: Db, input: { ownerId: ObjectId; jobId: ObjectId; now?: Date }, session?: ClientSession): Promise<void> {
+  const now = input.now ?? new Date();
+  await collection(db).updateMany(
+    { ownerId: input.ownerId, status: "pending", "claim.jobId": input.jobId },
+    { $set: { status: "failed", claim: null, error: { message: "The video job ended before this recording was finished", at: now }, updatedAt: now } },
+    session ? { session } : {},
+  );
+}
+
+/**
+ * The cache keys among these that cost nothing more: ready, or with a saved paid answer and its bytes
+ * (only the upload is left). The voice limits only count recordings that are not among these.
+ */
+export async function paidSpeechKeys(db: Db, ownerId: ObjectId, cacheKeys: readonly string[], session?: ClientSession): Promise<string[]> {
+  if (cacheKeys.length === 0) return [];
+  const docs = await collection(db)
+    .find(
+      { ownerId, cacheKey: { $in: [...new Set(cacheKeys)] }, $or: [{ status: "ready" }, { audio: { $type: "binData" }, response: { $ne: null } }] },
+      { projection: { cacheKey: 1 }, ...(session ? { session } : {}) },
+    )
+    .toArray();
+  return docs.map((d) => d.cacheKey);
 }
 
 /** The owner's ready recordings among these cache keys (reuse never crosses owners). */

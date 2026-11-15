@@ -4,6 +4,8 @@ import {
   GENERATE_MESSAGES,
   recordingMessage,
   renderingMessage,
+  savedAudioOf,
+  SPEECH_LOCK_STALE_MS,
   type GenerateErrorCode,
   type GenerateJobContext,
   type GenerateStage,
@@ -13,13 +15,14 @@ import {
   type SpeechClaim,
   type SpeechRecordDoc,
   type SpeechSetup,
+  type VoiceReservation,
   type VoiceScene,
 } from "@bytereel/db";
 import type { Plan } from "@bytereel/pipeline/contracts";
 import { BACKGROUND_MUSIC } from "@bytereel/pipeline/pipeline/music";
 import { THUMBNAIL_SECONDS, type RenderJobResult, type RenderJobSpec, type RenderPhase } from "@bytereel/pipeline/pipeline/render-protocol";
 import { cacheRecordFor, countCharacters, speechCacheKey, speechRequestFor, SpeechBudgetError, type SpeechConfig } from "@bytereel/pipeline/pipeline/speech";
-import { ProviderError } from "@bytereel/pipeline/providers";
+import { ProviderError, type SpeechCallOptions, type SpeechResponse } from "@bytereel/pipeline/providers";
 import { SpeechCacheRecordSchema } from "@bytereel/pipeline/storage";
 import { StorageError, StorageKeys, type ObjectInfo, type StorageKey, type StoredObject } from "@bytereel/storage";
 import { createHash } from "node:crypto";
@@ -31,31 +34,46 @@ import { voiceEstimatorFor, VoiceNotConfiguredError, type VoiceSetup } from "./v
 // free of Inngest and of the real database so tests run it with fakes (inngest/functions/
 // generate-video.ts passes the real ones). Durable steps:
 //   start            the job becomes running; language and approval re-checked; R2 bucket checked
+//                    (a wrong bucket/token/setting ends the job at once, before any cost)
 //   reserve-voice    the voice characters of every recording still to make, reserved in ONE
 //                    transaction (creator 3,000 + app 9,000 a month) BEFORE any ElevenLabs call
 //   speech-1…N       one recording per scene, under the speech lock (speechArtifacts): ready → reused
-//                    for free; else claimed, recorded, its answer saved, files uploaded create-only
+//                    for free; held by another run → wait 60 s (step.sleep) and look again; else
+//                    claimed, EVERY request counted right before it is sent (reserveVoiceSend) and
+//                    logged in providerUsage, the answer AND its audio bytes saved in one write, then
+//                    uploaded create-only (a few quick tries). A saved answer is never paid for again:
+//                    a retry, a Try again or another job uploads the saved bytes.
 //   render           a NEW renderId; narration downloaded and checked; the render child process does
 //                    Timing animations → Adding captions → Rendering → Checking; results uploaded to
 //                    R2 create-only; the video saved and the project made `video_ready`
 // Cancel: every step starts by checking `cancelRequestedAt`; during the render the worker checks it
 // every few seconds and stops the renderer. Characters already spent stay counted.
 // Try again (E2) runs the same steps: recordings made before are reused, never paid again.
+// What the creator sees is always a fixed plain line; provider text and stack traces go to the log.
 
 /** One job step: Inngest's step.run in production, a plain call in tests. */
 export interface StepRunner {
   run<T>(id: string, fn: () => Promise<T>): Promise<T>;
+  /** Wait between steps without holding the video queue or using up a step's retries (Inngest step.sleep). */
+  sleep(id: string, ms: number): Promise<void>;
 }
 
-/** What the worker needs from the database (packages/db/src/generate-jobs.ts, speech-artifacts.ts). */
+/** What the worker needs from the database (packages/db/src/generate-jobs.ts, speech-artifacts.ts, provider-usage.ts). */
 export interface GenerateJobStore {
   start(input: { jobId: string; attempt: number; runId: string | null }): Promise<GenerateJobContext | null>;
   load(input: { jobId: string; attempt: number }): Promise<GenerateJobContext | null>;
   timezone(ownerId: ObjectId): Promise<string>;
   readySpeech(ownerId: ObjectId, cacheKeys: readonly string[]): Promise<SpeechArtifactDocument[]>;
-  reserveVoice(input: { jobId: ObjectId; attempt: number; items: readonly VoiceScene[]; timezone: string; extra?: boolean }): Promise<"ok" | "quota" | "ceiling" | "stale">;
+  /** Keys that cost nothing more: ready, or with a saved paid answer and its bytes. */
+  paidSpeechKeys(ownerId: ObjectId, cacheKeys: readonly string[]): Promise<string[]>;
+  reserveVoice(input: { jobId: ObjectId; attempt: number; items: readonly VoiceScene[]; timezone: string }): Promise<VoiceReservation>;
+  /** Right before EVERY ElevenLabs request: use the recording's credit or count the request now. */
+  reserveVoiceSend(input: { jobId: ObjectId; attempt: number; item: VoiceScene; timezone: string }): Promise<VoiceReservation>;
+  /** providerUsage: the `reserved` row written before a request; finished after it. */
+  reserveUsage(input: { ownerId: string; projectId: string; jobId: string; model: string; characters: number }): Promise<unknown>;
+  finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; characters: number; latencyMs: number }): Promise<void>;
   claimSpeech(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; setup: SpeechSetup }): Promise<SpeechClaim>;
-  saveSpeechResponse(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; durationMs: number | null }): Promise<boolean>;
+  saveSpeechResponse(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; audio: Uint8Array; durationMs: number | null }): Promise<boolean>;
   markSpeechReady(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number }): Promise<boolean>;
   markSpeechFailed(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; message: string }): Promise<void>;
   progress(input: { jobId: ObjectId; attempt: number; stage: GenerateStage; percent: number; message: string; stages?: Partial<Record<GenerateStage, "running" | "succeeded">> }): Promise<{ cancelRequested: boolean } | null>;
@@ -81,18 +99,26 @@ export interface GenerateJobDeps {
   render: (spec: RenderJobSpec, options: { root: string; tmp: string; onProgress: (phase: RenderPhase, percent: number) => void }) => RenderRun;
   /** The repository root (work folders go in runs/.tmp/generate/<renderId>). */
   root: string;
-  /** Thrown inside a step to try it again after `waitMs` (Inngest RetryAfterError). */
-  retryLater: (message: string, waitMs: number) => Error;
   log?: (level: "info" | "warn" | "error", message: string) => void;
   /** How often the render step writes progress and checks Cancel (default 2 s). */
   heartbeatMs?: number;
+  /** Short in-process waits (save/upload tries, the provider's own quick retries). Tests: no real waiting. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export type GenerateJobOutcome = "done" | "failed" | "needs_input" | "cancelled" | "skipped";
-type StepResult = { status: "ok" } | { status: "ended"; outcome: GenerateJobOutcome } | { status: "stale" };
+type StepResult = { status: "ok" } | { status: "ended"; outcome: GenerateJobOutcome } | { status: "stale" } | { status: "busy" };
 
-/** A recording held by another job: try this step again after this long. */
+/** A recording held by another run: look again after this long (step.sleep, no retry used up). */
 export const SPEECH_BUSY_WAIT_MS = 60_000;
+/** Enough waits to outlast an abandoned claim (SPEECH_LOCK_STALE_MS), then a little more. */
+export const SPEECH_BUSY_MAX_WAITS = Math.ceil(SPEECH_LOCK_STALE_MS / SPEECH_BUSY_WAIT_MS) + 2;
+
+/** Saving a paid answer, and each upload, is tried this many times in-process before the step fails. */
+const SAVE_TRIES = 3;
+const SAVE_RETRY_WAIT_MS = 500;
+const UPLOAD_TRIES = 3;
+const UPLOAD_RETRY_WAIT_MS = 1000;
 
 /** A render's work folder this old was left by a render that never finished (the server restarted). */
 export const OLD_WORK_FOLDER_MS = 6 * 60 * 60_000;
@@ -124,6 +150,13 @@ async function putOnce(files: FileStore, key: StorageKey, data: Uint8Array | str
   }
 }
 
+/** R2 refused (wrong token permissions, missing bucket): trying again can't help, the job ends at once. */
+class StorageRefused extends Error {}
+const isRefusal = (error: unknown) => error instanceof StorageError && (error.code === "access_denied" || error.code === "bucket_not_found");
+
+/** The job no longer runs this attempt (ended elsewhere): stop without sending anything. */
+class JobStopped extends Error {}
+
 /** A provider retry would pass a monthly voice limit (it is not sent). */
 export class VoiceLimitDuringRecording extends SpeechBudgetError {
   constructor(readonly code: "QUOTA_EXCEEDED" | "SPEND_CEILING") {
@@ -131,12 +164,45 @@ export class VoiceLimitDuringRecording extends SpeechBudgetError {
   }
 }
 
-/** Which error a provider failure becomes (API.md §4.2): busy → retryable; account/voice problems → not. */
+/**
+ * Which error a provider failure becomes (API.md §4.2): busy or a broken answer → retryable
+ * PROVIDER_BUSY; ElevenLabs' own monthly limit → the retryable "Voice limit reached this month."
+ * (SPEND_CEILING; a long rate-limit wait the retry helper turned into "quota" is just busy);
+ * account, key and voice problems → PROVIDER_UNAVAILABLE (not retryable: edit the storyboard).
+ */
 export function speechFailureCode(error: unknown): GenerateErrorCode {
   if (error instanceof VoiceLimitDuringRecording) return error.code;
-  if (error instanceof ProviderError) return error.kind === "transient" || error.kind === "bad-response" ? "PROVIDER_BUSY" : "PROVIDER_UNAVAILABLE";
+  if (error instanceof ProviderError) {
+    if (error.kind === "transient" || error.kind === "bad-response") return "PROVIDER_BUSY";
+    if (error.kind === "quota") return error.status === 429 || (error.status ?? 0) >= 500 ? "PROVIDER_BUSY" : "SPEND_CEILING";
+    return "PROVIDER_UNAVAILABLE";
+  }
   if (error instanceof VoiceNotConfiguredError) return "PROVIDER_UNAVAILABLE";
   return "INTERNAL";
+}
+
+/** The fixed line stored with a failed recording (the provider's own text goes to the server log only). */
+const SPEECH_FAILURE_LINE: Partial<Record<GenerateErrorCode, string>> = {
+  PROVIDER_BUSY: "the voice service was busy or its answer was unusable",
+  PROVIDER_UNAVAILABLE: "the voice service refused the request (see the server log)",
+  QUOTA_EXCEEDED: "the creator's monthly voice characters are used up",
+  SPEND_CEILING: "the monthly voice characters are used up",
+};
+
+/** The fixed line stored when the render step fails (the renderer's own text goes to the server log only). */
+const RENDER_FAILURE_LINE: Record<"compile" | "render" | "validate", string> = {
+  compile: "Preparing the video failed (see the server log)",
+  render: "The render stopped with an error (see the server log)",
+  validate: "The finished video didn't pass its checks (see the server log)",
+};
+
+/** How a failed ElevenLabs request is logged in providerUsage. */
+function usageOutcomeOf(error: unknown): string {
+  if (!(error instanceof ProviderError)) return "error";
+  if (error.kind === "transient") return /timeout|timed out|abort/i.test(error.message) ? "timeout" : "busy";
+  if (error.kind === "bad-response") return "invalid_output";
+  if (error.kind === "quota") return "quota";
+  return "error";
 }
 
 /** Progress shown for each render phase (UI mapping: API.md §8.2). */
@@ -157,6 +223,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
   const { event, step } = input;
   const { store } = deps;
   const log = deps.log ?? ((level, message) => console[level](message));
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   if (!/^[0-9a-f]{24}$/.test(event.jobId)) return "skipped";
   const jobId = new ObjectId(event.jobId);
   const attempt = event.attempt;
@@ -190,18 +257,53 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     }
   };
 
-  // ---------- start ----------
-  const started = await step.run("start", async () => {
-    const ctx = await store.start({ jobId: event.jobId, attempt, runId: input.runId });
-    if (!ctx) return { ok: false as const, scenes: 0 };
-    await deps.files().checkBucket(); // a wrong bucket or token fails loudly here, before any cost
-    return { ok: true as const, scenes: (ctx.version.plan as unknown as Plan).scenes.length };
-  });
-  if (!started.ok) return "skipped";
+  /** A few quick in-process tries (a short network or database hiccup must not cost a new recording). */
+  async function withTries<T>(what: string, tries: number, waitMs: number, fn: () => Promise<T>): Promise<T> {
+    for (let tryNumber = 1; ; tryNumber++) {
+      try {
+        return await fn();
+      } catch (error) {
+        if (isRefusal(error)) throw new StorageRefused(error instanceof Error ? error.message : String(error));
+        if (tryNumber >= tries) throw error;
+        log("warn", `Video job ${event.jobId}: ${what} failed (try ${tryNumber} of ${tries}), trying again: ${error instanceof Error ? error.message : String(error)}`);
+        await sleep(waitMs * tryNumber);
+      }
+    }
+  }
+  const upload = (files: FileStore, key: StorageKey, data: Uint8Array | string) => withTries(`uploading ${key.split("/").pop()}`, UPLOAD_TRIES, UPLOAD_RETRY_WAIT_MS, () => putOnce(files, key, data));
 
-  const outcomeOf = (result: StepResult): GenerateJobOutcome | null => (result.status === "ok" ? null : result.status === "ended" ? result.outcome : "skipped");
+  /** R2 refused: the job ends now (Try again later uploads the saved narration, never paying again). */
+  const storageRefused = (error: unknown, stage?: GenerateStage): Promise<StepResult> => {
+    log("error", `Video job ${event.jobId}: file storage refused the request: ${error instanceof Error ? error.message : String(error)}`);
+    return end("failed", { code: "INTERNAL", ...(stage ? { stage } : {}), detail: "File storage refused the request (see the server log)" });
+  };
+  const refused = (error: unknown) => error instanceof StorageRefused || isRefusal(error);
+
+  const outcomeOf = (result: StepResult): GenerateJobOutcome | null => (result.status === "ok" || result.status === "busy" ? null : result.status === "ended" ? result.outcome : "skipped");
 
   try {
+    // ---------- start: running; a wrong bucket, token or R2 setting ends the job before any cost ----------
+    const started = await step.run("start", async (): Promise<{ ok: true; scenes: number } | { ok: false; outcome: GenerateJobOutcome }> => {
+      const ctx = await store.start({ jobId: event.jobId, attempt, runId: input.runId });
+      if (!ctx) return { ok: false, outcome: "skipped" };
+      let files: FileStore;
+      try {
+        files = deps.files();
+      } catch (error) {
+        log("error", `Video job ${event.jobId}: ${error instanceof Error ? error.message : String(error)}`);
+        return { ok: false, outcome: outcomeOf(await end("failed", { code: "INTERNAL", detail: "File storage isn't set up (see the server log)" })) ?? "failed" };
+      }
+      try {
+        await files.checkBucket();
+      } catch (error) {
+        // A network problem is thrown: the step tries again (then the job fails as INTERNAL below).
+        if (!isRefusal(error)) throw error;
+        return { ok: false, outcome: outcomeOf(await storageRefused(error)) ?? "failed" };
+      }
+      return { ok: true, scenes: (ctx.version.plan as unknown as Plan).scenes.length };
+    });
+    if (!started.ok) return started.outcome;
+
     // ---------- reserve the voice characters (all recordings still to make) ----------
     const reserved = await step.run("reserve-voice", async (): Promise<StepResult> => {
       const ctx = await loadOrStop();
@@ -210,8 +312,9 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       const voice = await voiceFor(plan);
       if (!("setup" in voice)) return voice;
       const scenes = voiceEstimatorFor(voice.setup)(ctx.version.plan);
-      const ready = new Set((await store.readySpeech(ctx.job.ownerId, scenes.map((s) => s.cacheKey))).map((d) => d.cacheKey));
-      const items = [...new Map(scenes.filter((s) => !ready.has(s.cacheKey)).map((s) => [s.cacheKey, s])).values()];
+      // Ready recordings and saved paid answers (only the upload is left) cost nothing more.
+      const free = new Set(await store.paidSpeechKeys(ctx.job.ownerId, scenes.map((s) => s.cacheKey)));
+      const items = [...new Map(scenes.filter((s) => !free.has(s.cacheKey)).map((s) => [s.cacheKey, s])).values()];
       const outcome = await store.reserveVoice({ jobId, attempt, items, timezone: await store.timezone(ctx.job.ownerId) });
       if (outcome === "quota") return end("failed", { code: "QUOTA_EXCEEDED", stage: "speech", detail: "The creator's monthly voice characters are used up" });
       if (outcome === "ceiling") return end("failed", { code: "SPEND_CEILING", stage: "speech", detail: "The app's monthly voice characters are used up" });
@@ -221,11 +324,23 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     const stopReserve = outcomeOf(reserved);
     if (stopReserve) return stopReserve;
 
-    // ---------- one recording per scene ----------
+    // ---------- one recording per scene (a recording held by another run: wait, look again) ----------
     for (let index = 0; index < started.scenes; index++) {
-      const recorded = await step.run(`speech-${index + 1}`, () => recordScene(index));
-      const stop = outcomeOf(recorded);
-      if (stop) return stop;
+      const n = index + 1;
+      for (let wait = 0; ; wait++) {
+        const recorded = await step.run(wait === 0 ? `speech-${n}` : `speech-${n}-again-${wait}`, () => recordScene(index));
+        if (recorded.status !== "busy") {
+          const stop = outcomeOf(recorded);
+          if (stop) return stop;
+          break;
+        }
+        if (wait >= SPEECH_BUSY_MAX_WAITS) {
+          log("warn", `Video job ${event.jobId}: scene ${n}'s narration stayed locked by another run for ${wait} minutes`);
+          const failed = await step.run(`speech-${n}-gave-up`, () => end("failed", { code: "PROVIDER_BUSY", stage: "speech", detail: `Scene ${n}: still being recorded by another video` }));
+          return outcomeOf(failed) ?? "failed";
+        }
+        await step.sleep(`speech-${n}-wait-${wait + 1}`, SPEECH_BUSY_WAIT_MS);
+      }
     }
 
     // ---------- render, check, upload, save ----------
@@ -233,7 +348,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     return outcomeOf(rendered) ?? "done";
   } catch (error) {
     // A step failed for good (its retries are used up) or something unexpected broke: the job
-    // fails with a retryable error instead of waiting forever.
+    // fails with a retryable error instead of waiting forever (its speech claims are released).
     log("error", `Video job ${event.jobId} failed: ${error instanceof Error ? error.message : String(error)}`);
     const failed = await step.run("fail-internal", () => end("failed", { code: "INTERNAL", detail: "Unexpected error (see the server log)" }));
     return outcomeOf(failed) ?? "failed";
@@ -249,6 +364,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     if (!("setup" in voice)) return voice;
     const { setup, config } = voice;
     const ownerId = ctx.job.ownerId;
+    const n = index + 1;
     const cacheKey = speechCacheKey(scene, config);
     const keys = {
       audio: StorageKeys.speechAudio(ownerId.toHexString(), cacheKey),
@@ -257,9 +373,9 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     };
     const request = speechRequestFor(plan, index, config);
     const characters = countCharacters(request.text);
-    if ((await store.progress({ jobId, attempt, stage: "speech", percent: 5 + (30 * index) / plan.scenes.length, message: recordingMessage(index + 1, plan.scenes.length) })) === null) return { status: "stale" };
+    if ((await store.progress({ jobId, attempt, stage: "speech", percent: 5 + (30 * index) / plan.scenes.length, message: recordingMessage(n, plan.scenes.length) })) === null) return { status: "stale" };
 
-    // The speech lock: claimed BEFORE any call; ready → reused; held by another job → later.
+    // The speech lock: claimed BEFORE any call; ready → reused; held by another run → wait.
     const claim = await store.claimSpeech({
       ownerId,
       cacheKey,
@@ -268,60 +384,110 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       setup: { sceneId: scene.id, firstProjectId: ctx.project._id, voiceId: config.voiceId, model: config.modelId, settings: { ...config.settings }, audioKey: keys.audio, alignmentKey: keys.alignment, normalizedAlignmentKey: keys.normalized, characters },
     });
     if (claim.kind === "ready") return { status: "ok" };
-    if (claim.kind === "busy") throw deps.retryLater(`Scene ${index + 1}'s narration is being recorded by another job`, SPEECH_BUSY_WAIT_MS);
+    if (claim.kind === "busy") return { status: "busy" };
 
-    const files = deps.files();
-    let record = claim.doc.response;
-    let audio: Uint8Array | null = null;
-    if (record) {
-      // An earlier run of this job saved a paid answer: reuse it if its audio reached R2.
-      const head = await files.head(keys.audio);
-      if (head && head.sha256 !== record.audioSha256) {
-        await store.markSpeechFailed({ ownerId, cacheKey, jobId, attempt, message: "stored audio doesn't match the saved answer" });
-        return end("failed", { code: "INTERNAL", stage: "speech", detail: `Scene ${index + 1}: stored audio doesn't match the saved answer` });
+    const lock = { ownerId, cacheKey, jobId, attempt };
+    const projectId = ctx.project._id.toHexString();
+    // A paid answer saved on the document is never paid for again (here, in a retry or in another job).
+    let paidAnswerKept = Boolean(claim.doc.response);
+    try {
+      const files = deps.files();
+      let record = claim.doc.response;
+      let audio = record ? savedAudioOf(claim.doc) : null;
+      if (record) {
+        const head = await files.head(keys.audio);
+        if (head && head.sha256 !== record.audioSha256) {
+          log("error", `Video job ${event.jobId}, scene ${n}: the stored audio doesn't match the saved answer (${keys.audio})`);
+          await store.markSpeechFailed({ ...lock, message: "The stored audio doesn't match the saved answer" });
+          return end("failed", { code: "INTERNAL", stage: "speech", detail: `Scene ${n}: the stored narration doesn't match (see the server log)` });
+        }
+        if (head) audio = null; // the audio is in R2 already: only the timing files may be missing
+        else if (!audio) {
+          // An answer saved without its bytes and no audio in R2: it must be recorded again (counted).
+          record = null;
+          paidAnswerKept = false;
+        }
       }
-      if (!head) record = null; // the audio never reached R2: it has to be recorded again
+      if (!record) {
+        const fresh = await recordNew();
+        if ("status" in fresh) return fresh;
+        record = fresh.record;
+        audio = fresh.audio;
+        paidAnswerKept = true;
+      }
+      if (audio) {
+        if (sha256(audio) !== record.audioSha256) throw new Error(`Scene ${n}: the saved audio doesn't match its answer`);
+        await upload(files, keys.audio, audio);
+      }
+      // The timing files come from the saved answer (the same request as the audio).
+      const parsed = SpeechCacheRecordSchema.parse(record);
+      await upload(files, keys.alignment, `${JSON.stringify(parsed, null, 2)}\n`);
+      await upload(files, keys.normalized, `${JSON.stringify({ schemaVersion: 1, cacheKey, audioSha256: parsed.audioSha256, normalizedAlignment: parsed.normalizedAlignment }, null, 2)}\n`);
+      if (!(await store.markSpeechReady(lock))) throw new Error(`Scene ${n}: couldn't mark the narration ready`);
+      return { status: "ok" };
+    } catch (error) {
+      if (refused(error)) return storageRefused(error, "speech");
+      if (error instanceof JobStopped) {
+        await store.markSpeechFailed({ ...lock, message: "The video job stopped before recording" }).catch(() => undefined);
+        return { status: "stale" };
+      }
+      // Nothing paid is kept: free the lock now, so the step's retry doesn't wait for it to go stale.
+      if (!paidAnswerKept) await store.markSpeechFailed({ ...lock, message: "The recording stopped with an error" }).catch(() => undefined);
+      throw error;
     }
-    if (!record) {
+
+    /** A new paid recording: every request counted and logged BEFORE it is sent; the answer + bytes saved at once. */
+    async function recordNew(): Promise<{ record: SpeechRecordDoc; audio: Uint8Array } | StepResult> {
       const timezone = await store.timezone(ownerId);
-      let response;
+      const model = config.modelId;
+      let usage: unknown = null;
+      let sentAt = 0;
+      const finishUsage = async (status: "final" | "failed", outcome: string, billed: number) => {
+        if (usage === null) return;
+        const handle = usage;
+        usage = null;
+        try {
+          await store.finishUsage(handle, { status, outcome, model, characters: billed, latencyMs: Date.now() - sentAt });
+        } catch (error) {
+          log("error", `Video job ${event.jobId}: usage log failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+      const options: SpeechCallOptions = {
+        beforeAttempt: async (requestNumber) => {
+          // Only busy/network failures are retried by the provider: the previous request ended that way.
+          if (requestNumber > 1) await finishUsage("failed", "busy", 0);
+          const counted = await store.reserveVoiceSend({ jobId, attempt, item: { cacheKey, characters }, timezone });
+          if (counted === "quota") throw new VoiceLimitDuringRecording("QUOTA_EXCEEDED");
+          if (counted === "ceiling") throw new VoiceLimitDuringRecording("SPEND_CEILING");
+          if (counted === "stale") throw new JobStopped("the job no longer runs this attempt");
+          usage = await store.reserveUsage({ ownerId: ownerId.toHexString(), projectId, jobId: event.jobId, model, characters });
+          sentAt = Date.now();
+        },
+        ...(deps.sleep ? { retry: { sleep: deps.sleep } } : {}),
+      };
+      let response: SpeechResponse;
       try {
-        response = await setup.provider(plan.language).synthesize(request, {
-          // The first attempt was reserved by reserve-voice; a provider retry may be billed again,
-          // so it is reserved too (and refused at the limit).
-          beforeAttempt: async (n) => {
-            if (n === 1) return;
-            const extra = await store.reserveVoice({ jobId, attempt, items: [{ cacheKey, characters }], timezone, extra: true });
-            if (extra === "quota") throw new VoiceLimitDuringRecording("QUOTA_EXCEEDED");
-            if (extra === "ceiling") throw new VoiceLimitDuringRecording("SPEND_CEILING");
-            if (extra === "stale") throw new Error("the job stopped while recording");
-          },
-        });
+        response = await setup.provider(plan.language).synthesize(request, options);
       } catch (error) {
+        // A broken answer (bad JSON, bad timings) may have been billed: logged with its characters.
+        await finishUsage("failed", usageOutcomeOf(error), error instanceof ProviderError && error.kind === "bad-response" ? characters : 0);
         const code = speechFailureCode(error);
-        const message = error instanceof Error ? error.message : String(error);
-        await store.markSpeechFailed({ ownerId, cacheKey, jobId, attempt, message });
         if (code === "INTERNAL") throw error;
-        log(code === "PROVIDER_UNAVAILABLE" ? "error" : "warn", `Video job ${event.jobId}, scene ${index + 1}: ${message}`);
-        return end("failed", { code, stage: "speech", detail: `Scene ${index + 1}: ${message}` });
+        const line = SPEECH_FAILURE_LINE[code] ?? "the recording failed";
+        log(code === "PROVIDER_UNAVAILABLE" ? "error" : "warn", `Video job ${event.jobId}, scene ${n}: ${error instanceof Error ? error.message : String(error)}`);
+        await store.markSpeechFailed({ ...lock, message: line });
+        return end("failed", { code, stage: "speech", detail: `Scene ${n}: ${line}` });
       }
-      const fresh = cacheRecordFor(cacheKey, request, response, new Date());
-      const ends = fresh.alignment?.character_end_times_seconds ?? [];
+      await finishUsage("final", "ok", response.characterCost ?? characters);
+      const cached = cacheRecordFor(cacheKey, request, response, new Date());
+      const ends = cached.alignment?.character_end_times_seconds ?? [];
       const durationMs = ends.length ? Math.round(ends[ends.length - 1]! * 1000) : null;
-      // Saved BEFORE the upload: if anything fails from here on, the paid answer is kept.
-      const saved = await store.saveSpeechResponse({ ownerId, cacheKey, jobId, attempt, response: fresh as unknown as SpeechRecordDoc, durationMs });
-      if (!saved) throw new Error(`Scene ${index + 1}: lost the recording lock while saving`);
-      record = fresh as unknown as SpeechRecordDoc;
-      audio = response.audio;
-      if (sha256(audio) !== record.audioSha256) throw new Error(`Scene ${index + 1}: audio checksum mismatch`);
-      await putOnce(files, keys.audio, audio);
+      const fresh = cached as unknown as SpeechRecordDoc;
+      // The answer AND the paid bytes in ONE write, BEFORE any upload (a few quick tries).
+      const saved = await withTries(`saving scene ${n}'s answer`, SAVE_TRIES, SAVE_RETRY_WAIT_MS, () => store.saveSpeechResponse({ ...lock, response: fresh, audio: response.audio, durationMs }));
+      if (!saved) throw new Error(`Scene ${n}: lost the recording lock while saving`);
+      return { record: fresh, audio: response.audio };
     }
-    // The timing files come from the saved answer (the same request as the audio).
-    const parsed = SpeechCacheRecordSchema.parse(record);
-    await putOnce(files, keys.alignment, `${JSON.stringify(parsed, null, 2)}\n`);
-    await putOnce(files, keys.normalized, `${JSON.stringify({ schemaVersion: 1, cacheKey, audioSha256: parsed.audioSha256, normalizedAlignment: parsed.normalizedAlignment }, null, 2)}\n`);
-    if (!(await store.markSpeechReady({ ownerId, cacheKey, jobId, attempt }))) throw new Error(`Scene ${index + 1}: couldn't mark the narration ready`);
-    return { status: "ok" };
   }
 
   async function renderVideo(): Promise<StepResult> {
@@ -371,15 +537,15 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       }
 
       // Render in the child process; progress is written at most every heartbeat, and Cancel checked.
+      // Stage statuses are written only when the stage changes (not on every percent).
       let latest: { phase: RenderPhase; percent: number } = { phase: "timing", percent: 0 };
-      let lastWritten = "";
+      let lastStage = "";
       let run: RenderRun | null = null;
       let stopping = false;
       const write = async () => {
         const update = renderPhaseProgress(latest.phase, latest.percent);
-        const key = `${update.stage}:${update.message}`;
-        const result = await store.progress({ jobId, attempt, ...update, ...(key === lastWritten ? { stages: {} } : {}) });
-        lastWritten = key;
+        const result = await store.progress({ jobId, attempt, ...update, ...(update.stage === lastStage ? { stages: {} } : {}) });
+        lastStage = update.stage;
         if ((result === null || result.cancelRequested) && !stopping) {
           stopping = true;
           run?.cancel();
@@ -400,6 +566,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
             },
           },
         );
+        // Resolves once the render process is gone (finished, failed, cancelled or killed).
         result = await run.result;
       } finally {
         clearInterval(heartbeat);
@@ -408,22 +575,22 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       if (result.status === "cancelled" || stopping) return end("cancelled");
       if (result.status === "needs_input") {
         log("info", `Video job ${event.jobId}: needs a storyboard change: ${result.detail}`);
-        return end("needs_input", { stage: "compile", detail: result.detail, needsInput: { reason: result.reason, message: result.message, sceneId: result.sceneId } });
+        return end("needs_input", { stage: "compile", needsInput: { reason: result.reason, message: result.message, sceneId: result.sceneId } });
       }
       if (result.status === "failed") {
         log("error", `Video job ${event.jobId}: ${result.stage} failed: ${result.detail}`);
-        return end("failed", { code: result.stage === "compile" ? "INTERNAL" : "RENDER_FAILED", stage: result.stage, detail: result.detail });
+        return end("failed", { code: result.stage === "compile" ? "INTERNAL" : "RENDER_FAILED", stage: result.stage, detail: RENDER_FAILURE_LINE[result.stage] });
       }
 
       // Upload the finished files create-only (a new renderId, so nothing can be overwritten).
       await store.progress({ jobId, attempt, stage: "validate", percent: 98, message: GENERATE_MESSAGES.SAVING });
       const ref = { ownerId: owner, projectId: ctx.project._id.toHexString(), renderId: renderId.toHexString() };
-      const mp4 = await putOnce(files, StorageKeys.renderOutput(ref), new Uint8Array(await readFile(result.files.video)));
+      const mp4 = await upload(files, StorageKeys.renderOutput(ref), new Uint8Array(await readFile(result.files.video)));
       if (mp4.sha256 !== result.qa.sha256) throw new Error("the uploaded video doesn't match the checked one");
-      const thumbnail = await putOnce(files, StorageKeys.renderThumbnail(ref), new Uint8Array(await readFile(result.files.thumbnail)));
-      const timeline = await putOnce(files, StorageKeys.renderTimeline(ref), new Uint8Array(await readFile(result.files.timeline)));
-      const captions = await putOnce(files, StorageKeys.renderCaptions(ref), new Uint8Array(await readFile(result.files.captions)));
-      const qa = await putOnce(files, StorageKeys.renderQa(ref), new Uint8Array(await readFile(result.files.qa)));
+      const thumbnail = await upload(files, StorageKeys.renderThumbnail(ref), new Uint8Array(await readFile(result.files.thumbnail)));
+      const timeline = await upload(files, StorageKeys.renderTimeline(ref), new Uint8Array(await readFile(result.files.timeline)));
+      const captions = await upload(files, StorageKeys.renderCaptions(ref), new Uint8Array(await readFile(result.files.captions)));
+      const qa = await upload(files, StorageKeys.renderQa(ref), new Uint8Array(await readFile(result.files.qa)));
       const saved = await store.complete({
         jobId,
         attempt,
@@ -439,6 +606,9 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
         },
       });
       return saved ? { status: "ended", outcome: "done" } : { status: "stale" };
+    } catch (error) {
+      if (refused(error)) return storageRefused(error);
+      throw error;
     } finally {
       // The work folder goes after success or failure; the uploaded files stay in R2.
       await rm(workDir, { recursive: true, force: true }).catch((e: unknown) => log("warn", `Video job ${event.jobId}: couldn't remove its work folder: ${String(e)}`));

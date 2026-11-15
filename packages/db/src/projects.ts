@@ -217,15 +217,13 @@ export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storybo
  *   is on the version: `valid`).
  * - F23: `generate_video` (D8 "Generate video") in storyboard_ready when the current version IS
  *   approved and has no video job running (an approval from F20, a cancelled job), unless its last
- *   job said the storyboard must change (needs_input). `retry_job` (E2) in generate_failed when the
+ *   job said the storyboard must change (needs_input) or failed with an error that can't be retried
+ *   as it is (D8 refuses both, like E2). `retry_job` (E2) in generate_failed when the
  *   newest video job failed with a retryable error and is still for the approved current version.
  * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
  *   loses every action that costs AI or voice: `retry_job`, `request_revision`, `edit_idea` (only
  *   useful for its Try again), and since F23 `approve_storyboard` / `generate_video` (approving now
  *   starts the voice + video job). It stays viewable; the free actions stay.
- * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
- *   loses every action that costs AI or voice: `retry_job`, `request_revision`, and `edit_idea`
- *   (only useful for its Try again). It stays viewable; the free actions stay.
  */
 export function allowedActionsFor(
   doc: ProjectDocument,
@@ -277,7 +275,8 @@ function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null 
   if ((doc.state === "storyboard_ready" || doc.state === "generate_failed") && !approved) actions.push("approve_storyboard");
   // F23: the video job of the current (approved) version.
   const videoJob = latestGenerateJob?.type === "generate" && latestGenerateJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true ? latestGenerateJob : null;
-  if (doc.state === "storyboard_ready" && approved && videoJob?.state !== "needs_input") actions.push("generate_video");
+  const videoNeedsChange = videoJob?.state === "needs_input" || (videoJob?.state === "failed" && videoJob.error?.retryable !== true);
+  if (doc.state === "storyboard_ready" && approved && !videoNeedsChange) actions.push("generate_video");
   if (doc.state === "generate_failed" && approved && videoJob?.state === "failed" && videoJob.error?.retryable === true && !actions.includes("retry_job")) actions.push("retry_job");
   return actions;
 }

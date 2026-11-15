@@ -129,10 +129,16 @@ export interface JobDocument {
   event: { id: string; sentAt: Date | null; lastTriedAt: Date | null };
   planner: PlanCheckpoint | null;
   /**
-   * Generate jobs (F23): the narration this job reserved voice characters for (one entry per
-   * recording, `cacheKeys`) and how many characters in total, so a retry never counts a recording twice.
+   * Generate jobs (F23): the voice characters this job counted. Every ElevenLabs request is counted
+   * BEFORE it is sent:
+   * - `cacheKeys`: recordings reserved up front (before the first call) and NOT sent yet: each covers
+   *   ONE request in `period`; it is removed when that request is sent;
+   * - `sentKeys`: recordings this job has sent at least once (any later request for them is counted again);
+   * - `characters`: everything this job counted (all attempts);
+   * - `period`: the months `cacheKeys` were counted in (the creator's month, the app's UTC month); in
+   *   another month they no longer cover anything and are reserved again.
    */
-  voice?: { cacheKeys: string[]; characters: number } | null;
+  voice?: { cacheKeys: string[]; characters: number; sentKeys?: string[]; period?: { user: string; app: string } | null } | null;
   /** Generate jobs (F23): the render attempt in progress. Every attempt gets a NEW renderId (R2 folder). */
   render?: { renderId: ObjectId; startedAt: Date } | null;
   /** When the job last became `queued` (C2 or E2), for the stuck-job rule. */

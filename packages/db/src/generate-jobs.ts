@@ -6,7 +6,7 @@ import { getJob, JOBS_COLLECTION, retryEventId, type JobDocument, type JobNeedsI
 import { PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type StoredPlan } from "./plan-versions";
 import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, type ProjectDocument } from "./projects";
 import { RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, latestReadyRenderOf, type RenderDocument } from "./renders";
-import { readySpeech } from "./speech-artifacts";
+import { paidSpeechKeys, releaseSpeechClaims } from "./speech-artifacts";
 import { APPROVABLE_STATES, findOrCreateApproval, STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalBody, type StoryboardApprovalDocument } from "./storyboard-approvals";
 import { addUsageWithinLimit, APP_USAGE_OWNER_ID, APP_USAGE_TIMEZONE, readUsageCount, usageCounterPeriod } from "./usage-counters";
 import { APP_VOICE_CHARACTERS_PER_MONTH, DEFAULT_TIMEZONE, USAGE_LIMITS } from "./usage";
@@ -20,7 +20,11 @@ import { APP_VOICE_CHARACTERS_PER_MONTH, DEFAULT_TIMEZONE, USAGE_LIMITS } from "
 //   finish functions here. Every write is conditional on "this job is still running this attempt".
 // - The worker reserves the voice characters of ALL the narration it still has to record in one
 //   transaction BEFORE its first ElevenLabs call (reserveVoice), so a video never fails on the limit
-//   after narration was paid for.
+//   after narration was paid for. Then EVERY request is counted right before it is sent
+//   (reserveVoiceSend): the first request of a recording uses its up-front reservation (once, in the
+//   same month); any other request (a provider retry, a Try again after a failed or timed-out call,
+//   a changed voice or model, a new month) is counted again, with the same limits. Over-counting a
+//   request ElevenLabs didn't bill is fine; nothing is ever refunded.
 // - Finishing (succeeded / failed / needs_input / cancelled) is ONE short transaction: job + project
 //   (+ the render document on success).
 
@@ -94,7 +98,7 @@ export function newGenerateJob(input: { ownerId: ObjectId; projectId: ObjectId; 
     cancelRequestedAt: null,
     event: { id: key, sentAt: null, lastTriedAt: null },
     planner: null,
-    voice: { cacheKeys: [], characters: 0 },
+    voice: { cacheKeys: [], characters: 0, sentKeys: [], period: null },
     render: null,
     queuedAt: input.now,
     createdAt: input.now,
@@ -134,8 +138,9 @@ export type VoiceEstimator = (plan: StoredPlan) => VoiceScene[];
 
 /**
  * The recordings still to pay for: one per distinct cache key (two scenes with the same words and
- * voice share one recording), without those this owner already has ready (free) and those this job
- * already reserved (a retry never counts twice).
+ * voice share one recording), without those this owner already has (ready, or a paid answer saved
+ * with its audio: free) and those this job reserved and hasn't sent yet in this month (`reserved`,
+ * from voiceCredits: a retry never counts twice).
  */
 export async function voiceStillNeeded(
   db: Db,
@@ -144,7 +149,7 @@ export async function voiceStillNeeded(
 ): Promise<{ items: VoiceScene[]; characters: number }> {
   const unique = new Map<string, number>();
   for (const s of input.scenes) if (!unique.has(s.cacheKey)) unique.set(s.cacheKey, s.characters);
-  const ready = new Set((await readySpeech(db, input.ownerId, [...unique.keys()], session)).map((d) => d.cacheKey));
+  const ready = new Set(await paidSpeechKeys(db, input.ownerId, [...unique.keys()], session));
   const reserved = new Set(input.reserved ?? []);
   const items = [...unique].filter(([key]) => !ready.has(key) && !reserved.has(key)).map(([cacheKey, characters]) => ({ cacheKey, characters }));
   return { items, characters: items.reduce((sum, i) => sum + i.characters, 0) };
@@ -178,9 +183,51 @@ export function voiceLimitError(which: "user" | "app", input: { used: number; ne
   return new ProjectActionError("SPEND_CEILING", GENERATE_MESSAGES.VOICE_LIMIT, { ceiling: "voice_characters_per_month", resetsAt: resetsAt.toISOString() });
 }
 
+/** The months voice characters are counted in: the creator's (their timezone) and the app's (UTC). */
+export type VoicePeriod = { user: string; app: string };
+export type JobVoice = NonNullable<JobDocument["voice"]>;
+
+export function voicePeriodOf(timezone: string, now: Date): VoicePeriod {
+  return { user: usageCounterPeriod("voiceChars", timezone, now).period, app: usageCounterPeriod("appVoiceChars", APP_USAGE_TIMEZONE, now).period };
+}
+
+const samePeriod = (a: VoicePeriod | null | undefined, b: VoicePeriod) => a?.user === b.user && a.app === b.app;
+
+/** Pure: the recordings this job reserved and hasn't sent yet, still valid in `period` (else none). */
+export function voiceCredits(voice: JobDocument["voice"], period: VoicePeriod): string[] {
+  return voice && samePeriod(voice.period, period) ? [...voice.cacheKeys] : [];
+}
+
+/**
+ * Pure: the up-front reservation (reserveVoice). Every recording still needed gets one credit; those
+ * that already have one in this period are not counted again. Credits from another month are dropped
+ * (they were counted in that month). Returns what to count and the job's `voice` afterwards.
+ */
+export function planVoiceReservation(voice: JobDocument["voice"], items: readonly VoiceScene[], period: VoicePeriod): { count: VoiceScene[]; total: number; next: JobVoice } {
+  const credits = voiceCredits(voice, period);
+  const count = [...new Map(items.filter((i) => !credits.includes(i.cacheKey)).map((i) => [i.cacheKey, i])).values()];
+  const total = count.reduce((sum, i) => sum + i.characters, 0);
+  return { count, total, next: { cacheKeys: [...credits, ...count.map((i) => i.cacheKey)], characters: (voice?.characters ?? 0) + total, sentKeys: [...(voice?.sentKeys ?? [])], period } };
+}
+
+/**
+ * Pure: ONE request about to be sent (reserveVoiceSend). It uses the recording's credit when there is
+ * one in this period (nothing more counted; the credit is gone); otherwise its characters are counted
+ * now. Either way the recording is noted in `sentKeys`.
+ */
+export function planVoiceSend(voice: JobDocument["voice"], item: VoiceScene, period: VoicePeriod): { count: number; next: JobVoice } {
+  const credits = voiceCredits(voice, period);
+  const covered = credits.includes(item.cacheKey);
+  const sentKeys = [...new Set([...(voice?.sentKeys ?? []), item.cacheKey])];
+  if (covered) return { count: 0, next: { cacheKeys: credits.filter((k) => k !== item.cacheKey), characters: voice?.characters ?? 0, sentKeys, period } };
+  // No credit: counted now. Credits of another month are dropped (they no longer cover anything).
+  return { count: item.characters, next: { cacheKeys: credits, characters: (voice?.characters ?? 0) + item.characters, sentKeys, period } };
+}
+
 /** Check (without counting) that the narration still to record fits both monthly limits. Throws the refusal. */
-async function assertVoiceFits(db: Db, session: ClientSession, input: { ownerId: ObjectId; timezone: string; scenes: VoiceScene[]; reserved: readonly string[]; now: Date }): Promise<void> {
-  const needed = await voiceStillNeeded(db, { ownerId: input.ownerId, scenes: input.scenes, reserved: input.reserved }, session);
+async function assertVoiceFits(db: Db, session: ClientSession, input: { ownerId: ObjectId; timezone: string; scenes: VoiceScene[]; job: JobDocument | null; now: Date }): Promise<void> {
+  const reserved = voiceCredits(input.job?.voice, voicePeriodOf(input.timezone, input.now));
+  const needed = await voiceStillNeeded(db, { ownerId: input.ownerId, scenes: input.scenes, reserved }, session);
   if (needed.characters === 0) return;
   const userUsed = await readUsageCount(db, input.ownerId.toHexString(), "voiceChars", input.timezone, input.now, session);
   const appUsed = await readUsageCount(db, APP_USAGE_OWNER_ID, "appVoiceChars", APP_USAGE_TIMEZONE, input.now, session);
@@ -204,7 +251,8 @@ export type ApproveAndGenerateResult = {
  * stateVersion, the state, the exact version (current, same hash, valid). Then:
  * - this version already has a finished video (its `gen:` job succeeded): no job, no limits; the
  *   project points back to that video (`video_ready`) → `reused`;
- * - its job failed or was cancelled: the SAME job is queued again (attempt + 1), no videos/day count;
+ * - its job failed (with a retryable error, as for E2) or was cancelled: the SAME job is queued again
+ *   (attempt + 1), no videos/day count;
  * - no job yet (also an approval made in F20): a new job, +1 on today's videos (3 a day).
  * Both queue paths check the voice characters still needed (creator 3,000/month, app 9,000/month).
  * The approval reuses this version's row when it has one (unique per version), else it is created.
@@ -263,6 +311,10 @@ export async function approveAndGenerate(
       if (existing?.state === "needs_input") {
         throw new ProjectActionError("INVALID_STATE", "Please change the storyboard first.", { reason: "needs_input", message: existing.needsInput?.message ?? null });
       }
+      // Like E2: a failure that can't be retried as it is (e.g. the voice service refused) needs a storyboard change.
+      if (existing?.state === "failed" && existing.error?.retryable !== true) {
+        throw new ProjectActionError("INVALID_STATE", "This step can't be retried. Please edit your storyboard instead.", { jobState: existing.state, retryable: false });
+      }
 
       // This exact version already has a finished video (e.g. after an undo): point back to it.
       if (existing?.state === "succeeded") {
@@ -296,7 +348,7 @@ export async function approveAndGenerate(
           });
         }
       }
-      await assertVoiceFits(db, session, { ownerId: project.ownerId, timezone: input.timezone, scenes: input.voice(version.plan), reserved: existing?.voice?.cacheKeys ?? [], now });
+      await assertVoiceFits(db, session, { ownerId: project.ownerId, timezone: input.timezone, scenes: input.voice(version.plan), job: existing, now });
 
       const approval = await findOrCreateApproval(db, session, project, version, now);
       let job: JobDocument;
@@ -370,7 +422,7 @@ export async function retryGenerateJob(
       }
       const version = await db.collection<PlanVersionDocument>(PLAN_VERSIONS_COLLECTION).findOne({ _id: planVersionId, projectId: project._id, ownerId }, { session });
       if (!version) throw new ProjectActionError("APPROVAL_REQUIRED", "Your storyboard changed since you approved it. Please approve it again.");
-      await assertVoiceFits(db, session, { ownerId, timezone: input.timezone, scenes: input.voice(version.plan), reserved: job.voice?.cacheKeys ?? [], now });
+      await assertVoiceFits(db, session, { ownerId, timezone: input.timezone, scenes: input.voice(version.plan), job, now });
       const moved = await projects.updateOne(
         { _id: project._id, activeJobId: null, stateVersion: project.stateVersion },
         { $set: { state: "generating", activeJobId: job._id, lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
@@ -491,41 +543,36 @@ class VoiceLimitReached extends Error {
   }
 }
 
+export type VoiceReservation = "ok" | "quota" | "ceiling" | "stale";
+
 /**
- * Reserve voice characters BEFORE calling ElevenLabs, in ONE transaction on both counters (the
- * creator's month and the app's month). `items` are the recordings to reserve: at the start of the
- * narration step all that are still needed (keys already reserved by this job are skipped);
- * `extra: true` for a provider retry of one recording (counted again: it may be billed again).
+ * Count voice characters in ONE transaction on both counters (the creator's month and the app's
+ * month) and save the job's new `voice`, only while the job runs this attempt. Two runs at the same
+ * moment both write the job document, so MongoDB lets one commit and re-runs the other, which then
+ * sees the first one's change (a credit can be used only once).
  * "quota" = the creator's 3,000; "ceiling" = the app's 9,000; nothing is counted then.
  */
-export async function reserveVoice(
+async function countVoice(
   db: Db,
-  input: { jobId: ObjectId; attempt: number; items: readonly VoiceScene[]; timezone: string; extra?: boolean; now?: Date },
-): Promise<"ok" | "quota" | "ceiling" | "stale"> {
-  const now = input.now ?? new Date();
+  input: { jobId: ObjectId; attempt: number; timezone: string; now: Date },
+  plan: (job: JobDocument, period: VoicePeriod) => { total: number; next: JobVoice },
+): Promise<VoiceReservation> {
   const session = db.client.startSession();
-  let outcome: "ok" | "quota" | "ceiling" | "stale" = "stale";
+  let outcome: VoiceReservation = "stale";
   try {
     await session.withTransaction(async () => {
       outcome = "stale";
       const jobs = db.collection<JobDocument>(JOBS_COLLECTION);
       const job = await jobs.findOne({ _id: input.jobId, attempt: input.attempt, state: "running" }, { session });
       if (!job) return;
-      const already = new Set(job.voice?.cacheKeys ?? []);
-      const items = input.extra ? [...input.items] : input.items.filter((i) => !already.has(i.cacheKey));
-      const total = items.reduce((sum, i) => sum + i.characters, 0);
+      const { total, next } = plan(job, voicePeriodOf(input.timezone, input.now));
       if (total > 0) {
-        const user = await addUsageWithinLimit(db, session, { ownerId: job.ownerId.toHexString(), kind: "voiceChars", timezone: input.timezone, limit: USAGE_LIMITS.voiceCharactersPerMonth, amount: total, now });
+        const user = await addUsageWithinLimit(db, session, { ownerId: job.ownerId.toHexString(), kind: "voiceChars", timezone: input.timezone, limit: USAGE_LIMITS.voiceCharactersPerMonth, amount: total, now: input.now });
         if (!user.ok) throw new VoiceLimitReached("quota");
-        const app = await addUsageWithinLimit(db, session, { ownerId: APP_USAGE_OWNER_ID, kind: "appVoiceChars", timezone: APP_USAGE_TIMEZONE, limit: APP_VOICE_CHARACTERS_PER_MONTH, amount: total, now });
+        const app = await addUsageWithinLimit(db, session, { ownerId: APP_USAGE_OWNER_ID, kind: "appVoiceChars", timezone: APP_USAGE_TIMEZONE, limit: APP_VOICE_CHARACTERS_PER_MONTH, amount: total, now: input.now });
         if (!app.ok) throw new VoiceLimitReached("ceiling");
-        const newKeys = input.extra ? [] : items.map((i) => i.cacheKey);
-        await jobs.updateOne(
-          { _id: job._id, attempt: input.attempt, state: "running" },
-          { $set: { "voice.cacheKeys": [...(job.voice?.cacheKeys ?? []), ...newKeys], "voice.characters": (job.voice?.characters ?? 0) + total, updatedAt: now } },
-          { session },
-        );
       }
+      await jobs.updateOne({ _id: job._id, attempt: input.attempt, state: "running" }, { $set: { voice: next, updatedAt: input.now } }, { session });
       outcome = "ok";
     });
   } catch (error) {
@@ -535,6 +582,26 @@ export async function reserveVoice(
     await session.endSession();
   }
   return outcome;
+}
+
+/**
+ * The up-front reservation, BEFORE the first ElevenLabs call: every recording still needed (`items`:
+ * not ready, no saved paid answer) gets one credit, counted now; recordings that already have a
+ * credit in this month are not counted again (planVoiceReservation).
+ */
+export async function reserveVoice(db: Db, input: { jobId: ObjectId; attempt: number; items: readonly VoiceScene[]; timezone: string; now?: Date }): Promise<VoiceReservation> {
+  return countVoice(db, { ...input, now: input.now ?? new Date() }, (job, period) => planVoiceReservation(job.voice, input.items, period));
+}
+
+/**
+ * Right before EVERY ElevenLabs request (each attempt, retries included): use the recording's credit,
+ * or count the request now with the same limits (planVoiceSend). Not "ok" = do not send it.
+ */
+export async function reserveVoiceSend(db: Db, input: { jobId: ObjectId; attempt: number; item: VoiceScene; timezone: string; now?: Date }): Promise<VoiceReservation> {
+  return countVoice(db, { ...input, now: input.now ?? new Date() }, (job, period) => {
+    const planned = planVoiceSend(job.voice, input.item, period);
+    return { total: planned.count, next: planned.next };
+  });
 }
 
 /**
@@ -688,9 +755,12 @@ export async function completeGenerateJob(db: Db, input: { jobId: ObjectId; atte
  * - `needs_input`: the storyboard must change (video outside 60–90 s, words that can't be timed);
  *   project → `storyboard_ready` with `lastError` NEEDS_INPUT; the approval is kept;
  * - `cancelled`: project → `storyboard_ready` (approval kept: "Generate video" queues the same job).
- * In every case `activeJobId` is cleared and an older video stays the project's video
- * (`currentRenderId` untouched). Only while the job is queued/running (and the given attempt; for the
- * stuck-job rule: not updated since `staleBefore` / queued since `queuedBefore`). False = nothing changed.
+ * In every case `activeJobId` is cleared, an older video stays the project's video (`currentRenderId`
+ * untouched) and the job's pending speech claims are released (saved answers and bytes kept). Only
+ * while the job is queued/running (and the given attempt; for the stuck-job rule: not updated since
+ * `staleBefore` / queued since `queuedBefore`). False = nothing changed.
+ * `detail` is shown in the job's stage error (E1/C6): ONLY a fixed plain line written by our code,
+ * never a provider's text, a stack trace or a link (those go to the server log).
  */
 export async function endGenerateJob(
   db: Db,
@@ -744,7 +814,7 @@ export async function endGenerateJob(
         const needsInput = input.needsInput ?? { reason: "alignment_uncertain" as const, message: "Please adjust the wording of your storyboard.", sceneId: null };
         set = {
           state: "needs_input",
-          stages: job.stages.map((s) => (s.name === stageName ? { ...s, status: "failed" as const, endedAt: now, error: { code: "NEEDS_INPUT", message: (input.detail ?? needsInput.message).slice(0, 300) } } : s)),
+          stages: job.stages.map((s) => (s.name === stageName ? { ...s, status: "failed" as const, endedAt: now, error: { code: "NEEDS_INPUT", message: needsInput.message.slice(0, 300) } } : s)),
           progress: { ...job.progress, message: needsInput.message },
           needsInput,
           error: null,
@@ -763,6 +833,7 @@ export async function endGenerateJob(
       await db
         .collection<ProjectDocument>(PROJECTS_COLLECTION)
         .updateOne({ _id: job.projectId, activeJobId: job._id }, { $set: { ...projectSet, activeJobId: null, updatedAt: now }, $inc: { stateVersion: 1 } }, { session });
+      await releaseSpeechClaims(db, { ownerId: job.ownerId, jobId: job._id, now }, session);
       ended = true;
     });
   } finally {
