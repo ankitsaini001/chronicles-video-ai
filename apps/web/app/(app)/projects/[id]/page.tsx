@@ -12,7 +12,8 @@ import { loadProjectWithJobs } from "@/lib/plan/jobs";
 // - `planning`: "Writing storyboard…" with the job's progress (polled every 2 s, PlanJobPanel).
 // - `plan_failed`: the plain error, Try again and Edit idea.
 // - a storyboard exists (`currentStep` storyboard): sends you to /projects/[id]/storyboard (F16).
-//   The later steps (video, publish) get their own pages in F23–F30.
+// - the video step (making it, failed, ready): sends you to /projects/[id]/video (F23).
+//   The publish step gets its own page in F28–F30.
 // Leaving and coming back keeps the progress: the job runs on the server (Inngest) and this page
 // reads it again. Only the owner sees it: another user's project, a missing one and a malformed id
 // all get the same 404 page, so nobody can tell whether a project exists (ARCHITECTURE §10.3).
@@ -45,6 +46,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { project, activeJob, latestPlanJob } = loaded;
   const step = currentStepOf(displayStateOf(project));
   if (step === "storyboard") redirect(`/projects/${project._id.toHexString()}/storyboard`);
+  // F23: the video step has its own page (Making video, failed, ready).
+  const shown = displayStateOf(project);
+  if (shown === "generating" || shown === "generate_failed" || shown === "video_ready") redirect(`/projects/${project._id.toHexString()}/video`);
   const jobState = project.state === "planning" || project.state === "plan_failed" ? project.state : null;
   const archived = project.state === "archived";
 
