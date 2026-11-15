@@ -3,9 +3,10 @@ import type { TimelineObject } from "@bytereel/pipeline/contracts";
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { COLUMNS, LONE_PART, partRowHeight, partTextBox } from "../layout";
 import { clamp01, popIn, rise, wave } from "../motion";
-import { C, FONT } from "../theme";
-import { Card, fitSize, textLines, Title } from "../ui";
+import { C } from "../theme";
+import { BoxText, Card, fitSize, textLines, Title } from "../ui";
 import { activations, activeAmount, heroCamera, ofKind, TOP, type Activation, type Ctx, type Pattern } from "./shared";
 
 /**
@@ -27,7 +28,7 @@ export const LabeledDiagram: Pattern = {
     const titleSize = diagram ? fitSize(diagram.label, 900, 2, 78, 58) : 0;
     const titleBottom = diagram ? TOP + textLines(diagram.label, titleSize) * titleSize * 1.08 : TOP - 30;
     const rows = Math.ceil(parts.length / 2);
-    const rowH = rows >= 3 ? 116 : 132;
+    const rowH = partRowHeight(rows);
     const gridTop = parts.length ? Math.max(GRID_TOP, 1265 - rows * (rowH + 16)) : 1300;
     const heroSpace = gridTop - 30 - (titleBottom + 30);
     const heroSize = Math.max(340, Math.min(parts.length ? 520 : 600, heroSpace));
@@ -47,8 +48,8 @@ export const LabeledDiagram: Pattern = {
             const row = Math.floor(i / 2);
             const lone = i === parts.length - 1 && parts.length % 2 === 1;
             // two equal columns inside the safe zone (the right one ends left of the Reels buttons)
-            const left = lone ? 300 : i % 2 === 0 ? 75 : 525;
-            return <PartCard key={p.id} ctx={ctx} part={p} acts={acts} left={left} top={gridTop + row * (rowH + 16)} width={lone ? 460 : 415} height={rowH} />;
+            const col = lone ? LONE_PART : COLUMNS[i % 2]!;
+            return <PartCard key={p.id} ctx={ctx} part={p} acts={acts} left={col.x} top={gridTop + row * (rowH + 16)} width={col.width} height={rowH} />;
           })}
         </CameraView>
       </AbsoluteFill>
@@ -66,7 +67,7 @@ const PartCard: React.FC<{ ctx: Ctx; part: TimelineObject; acts: Activation[]; l
     <div style={{ position: "absolute", left, top, width, height }}>
       <Card t={t} active={act} from={30} style={{ height: "100%", display: "flex", alignItems: "center", gap: 16, padding: "0 22px", boxSizing: "border-box" }}>
         <div style={{ width: 18, height: 18, flex: "none", borderRadius: "50%", background: "#F5A524", boxShadow: `0 0 ${Math.round(8 + 14 * act)}px rgba(245,165,36,0.8)` }} />
-        <span style={{ fontFamily: FONT, fontWeight: 800, fontSize: fitSize(part.label, width - 78, 2, 50, 40), lineHeight: 1.08, color: act > 0.5 ? C.gold : C.text, opacity: clamp01(0.75 + act), textWrap: "balance" }}>{part.label}</span>
+        <BoxText text={part.label} {...partTextBox(width, height)} style={{ color: act > 0.5 ? C.gold : C.text, opacity: clamp01(0.75 + act) }} />
       </Card>
     </div>
   );

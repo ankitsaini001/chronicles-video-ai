@@ -1,4 +1,5 @@
 import type React from "react";
+import { fitBox, type TextBox } from "./layout";
 import { clamp01, glide, pop } from "./motion";
 import { C, FONT, GRADIENTS, LAYOUT } from "./theme";
 
@@ -77,6 +78,34 @@ export function fitSize(text: string, width: number, maxLines: number, max: numb
   for (let size = max; size > min; size -= 2) if (textLines(text, size, width) <= maxLines) return size;
   return min;
 }
+
+/**
+ * Card text that must stay inside its card (comparison points, takeaway rows, diagram parts): as big
+ * as fits the box (layout.ts fitBox), down to `min`; anything that still does not fit is cut off at
+ * the box's last line instead of spilling out.
+ */
+export const BoxText: React.FC<TextBox & { text: string; style?: React.CSSProperties }> = ({ text, style, ...box }) => {
+  const fit = fitBox(text, box);
+  return (
+    <span
+      style={{
+        fontFamily: FONT,
+        fontWeight: 800,
+        fontSize: fit.size,
+        lineHeight: box.lineHeight,
+        textWrap: "balance",
+        display: "-webkit-box",
+        WebkitBoxOrient: "vertical",
+        WebkitLineClamp: fit.maxLines,
+        overflow: "hidden",
+        maxHeight: box.height,
+        ...style,
+      }}
+    >
+      {text}
+    </span>
+  );
+};
 
 /** Gold title at the top of a scene. Width-balanced, never wider than the stage. */
 export const Title: React.FC<{ text: string; t: number; top: number; size: number; width?: number }> = ({ text, t, top, size, width = 900 }) =>

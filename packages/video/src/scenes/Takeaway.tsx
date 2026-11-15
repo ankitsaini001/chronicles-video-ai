@@ -3,9 +3,10 @@ import type { TimelineObject } from "@bytereel/pipeline/contracts";
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { bulletTextBox, takeawayRows, WIDE_CARD } from "../layout";
 import { clamp01, pop, popIn, pulse, rise } from "../motion";
-import { C, FONT } from "../theme";
-import { Card, fitSize, textLines, Title } from "../ui";
+import { C } from "../theme";
+import { BoxText, Card, fitSize, textLines, Title } from "../ui";
 import { eventsOn, heroCamera, lastWordEnd, ofKind, TOP, type Ctx, type Pattern } from "./shared";
 
 /**
@@ -27,8 +28,7 @@ export const Takeaway: Pattern = {
     const bullets = ofKind(ctx, "bullet").slice(0, 4);
     const titleSize = headline ? fitSize(headline.label, 900, 2, 88, 62) : 0;
     const titleBottom = headline ? TOP + textLines(headline.label, titleSize) * titleSize * 1.08 : TOP - 40;
-    const rowH = bullets.length >= 3 ? 112 : 136;
-    const font = bullets.length >= 3 ? 46 : 52;
+    const { rowH, font } = takeawayRows(bullets.length);
     const listTop = 1250 - bullets.length * (rowH + 18) + 18;
     const space = (bullets.length ? listTop - 30 : 1250) - (titleBottom + 30);
     const heroSize = Math.max(320, Math.min(bullets.length ? 440 : 600, space));
@@ -98,15 +98,14 @@ const Bullet: React.FC<{ ctx: Ctx; b: TimelineObject; top: number; height: numbe
   const f = ctx.frame;
   const done = pop(f, checkAt(ctx, b), 260, 12);
   const glow = pulse(f, checkAt(ctx, b), 30);
-  const size = fitSize(b.label, 660, 2, font, 38);
   return (
-    <div style={{ position: "absolute", left: 95, width: 845, top, height }}>
+    <div style={{ position: "absolute", left: WIDE_CARD.left, width: WIDE_CARD.width, top, height }}>
       <Card t={popIn(f, b.revealFrame)} active={Math.max(glow, 0.35 * clamp01(done))} from={30} style={{ height: "100%", display: "flex", alignItems: "center", gap: 28, padding: "0 32px", boxSizing: "border-box" }}>
         <svg width={84} height={84} viewBox="-42 -42 84 84" style={{ flex: "none" }}>
           <circle r={37} fill={done > 0.05 ? "#F5A524" : "transparent"} stroke="#F5A524" strokeWidth={5} transform={`scale(${done > 0.05 ? 0.75 + 0.25 * Math.min(1.15, done) : 1})`} />
           {done > 0.05 && <path d="M -16 2 L -5 13 L 17 -11" transform="scale(1.5)" fill="none" stroke="#1A1005" strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" pathLength={1} strokeDasharray={`${clamp01(done)} 2`} />}
         </svg>
-        <span style={{ fontFamily: FONT, fontWeight: 800, fontSize: size, lineHeight: 1.1, color: done > 0.5 ? C.text : "#D9CBB8", textWrap: "balance" }}>{b.label}</span>
+        <BoxText text={b.label} {...bulletTextBox(height, font)} style={{ color: done > 0.5 ? C.text : "#D9CBB8" }} />
       </Card>
     </div>
   );

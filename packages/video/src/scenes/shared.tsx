@@ -5,6 +5,7 @@ import { ICON_KEYWORDS, iconFor, type IconName } from "@bytereel/pipeline/planni
 import { cameraAt, CAM_HOME, withDrift, type CamMove, type CamState } from "../camera";
 import { heroAt, type HeroCues } from "../heroes/HeroLayer";
 import { LiveIcon } from "../icons/LiveIcon";
+import { CAMERA } from "../layout";
 import { pop, pulse, rise } from "../motion";
 import { C, FONT } from "../theme";
 import { Card, IconTile } from "../ui";
@@ -89,11 +90,11 @@ export function sceneHeroCues(scene: TimelineScene, words: readonly CaptionTrack
 export function heroCamera(ctx: Ctx, home: CamState = CAM_HOME): CamState {
   const moves: CamMove[] = [{ at: ctx.scene.startFrame - 14, dur: 1, ...home }];
   ctx.scene.heroes.slice(1).forEach((s) => {
-    moves.push({ at: s.startFrame, dur: 8, z: 1.035 });
+    moves.push({ at: s.startFrame, dur: 8, z: CAMERA.punchZoom });
     moves.push({ at: s.startFrame + 10, dur: 26, z: 1.0 });
   });
-  moves.push({ at: ctx.scene.startFrame, dur: ctx.scene.durationFrames, z: 1.02 });
-  return withDrift(cameraAt(ctx.frame, moves, home), ctx.frame, 0.5);
+  moves.push({ at: ctx.scene.startFrame, dur: ctx.scene.durationFrames, z: CAMERA.pushZoom });
+  return withDrift(cameraAt(ctx.frame, moves, home), ctx.frame, CAMERA.drift);
 }
 
 /** The hero step on screen now (for hiding a small icon that would show the same object twice). */

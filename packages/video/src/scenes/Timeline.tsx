@@ -1,18 +1,20 @@
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { TIMELINE } from "../layout";
 import { clamp01, popIn, rise } from "../motion";
-import { C, FONT } from "../theme";
+import { C, FONT, LAYOUT } from "../theme";
 import { fitSize, textLines, Title } from "../ui";
 import { activations, activeAmount, activeAt, heroCamera, ofKind, TOP, type Pattern } from "./shared";
 
 /**
  * Timeline (events in order): the title, the hero for the event being told, and a time line at
  * the bottom that draws itself from milestone to milestone with a travelling light. The milestone
- * being talked about glows and its name is written big under the line.
+ * being talked about glows and its name is written big under the line. The line ends left of the
+ * Reels buttons (layout.ts TIMELINE).
  */
 
-const LINE_Y = 1080;
+const LINE_Y = TIMELINE.lineY;
 
 export const Timeline: Pattern = {
   camera: (ctx) => heroCamera(ctx),
@@ -21,8 +23,7 @@ export const Timeline: Pattern = {
     const axis = ofKind(ctx, "axis")[0];
     const milestones = ofKind(ctx, "milestone").slice(0, 7);
     const n = milestones.length;
-    const left = 150;
-    const right = 920;
+    const { left, right } = TIMELINE;
     const xs = milestones.map((_, i) => (n === 1 ? 540 : left + (i * (right - left)) / (n - 1)));
     const acts = activations(ctx, milestones);
     const now = activeAt(acts, f);
@@ -37,8 +38,9 @@ export const Timeline: Pattern = {
     const lineEnd = left + (right - left) * reach;
     const lastReveal = n ? milestones[n - 1]!.revealFrame : 0;
     const dotX = reach > 0.02 ? (f >= lastReveal + 20 ? left + (right - left) * (((f - lastReveal - 20) / 70) % 1) : lineEnd) : null;
-    const labelSize = nowObj ? fitSize(nowObj.label, 760, 2, 54, 42) : 0;
-    const labelX = nowIndex >= 0 ? Math.max(90 + 380, Math.min(940 - 380, xs[nowIndex]!)) : 540;
+    const half = TIMELINE.labelWidth / 2;
+    const labelSize = nowObj ? fitSize(nowObj.label, TIMELINE.labelWidth, 2, 54, 42) : 0;
+    const labelX = nowIndex >= 0 ? Math.max(90 + half, Math.min(LAYOUT.safeRight - half, xs[nowIndex]!)) : 540;
     return (
       <AbsoluteFill>
         <CameraView cam={cam}>
@@ -81,7 +83,7 @@ export const Timeline: Pattern = {
             })}
           </svg>
           {nowObj && (
-            <div key={nowObj.id} style={{ position: "absolute", left: labelX - 380, width: 760, top: LINE_Y + 46, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: labelSize, lineHeight: 1.08, color: C.gold, textWrap: "balance", opacity: clamp01(popIn(f, now!.frame) * 1.5), transform: `translateY(${(1 - Math.min(1, popIn(f, now!.frame))) * 20}px)` }}>
+            <div key={nowObj.id} style={{ position: "absolute", left: labelX - half, width: TIMELINE.labelWidth, top: LINE_Y + 46, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: labelSize, lineHeight: 1.08, color: C.gold, textWrap: "balance", opacity: clamp01(popIn(f, now!.frame) * 1.5), transform: `translateY(${(1 - Math.min(1, popIn(f, now!.frame))) * 20}px)` }}>
               {nowObj.label}
             </div>
           )}

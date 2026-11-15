@@ -4,15 +4,17 @@ import { heroForText } from "@bytereel/pipeline/planning/hero-catalog";
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { COLUMNS, COLUMNS_MIDDLE, comparisonLayout, POINT_CARD, pointTextBox } from "../layout";
 import { clamp01, pop, popIn, pulse } from "../motion";
 import { C, FONT } from "../theme";
-import { Card, fitSize } from "../ui";
-import { activations, activeAmount, eventsOn, firstCue, heroCamera, iconOf, TOP, type Activation, type Ctx, type Pattern } from "./shared";
+import { BoxText, Card, fitSize } from "../ui";
+import { activations, activeAmount, eventsOn, firstCue, heroCamera, iconOf, type Activation, type Ctx, type Pattern } from "./shared";
 
 /**
  * Comparison (A vs B): two columns, each with its own hero object and name, a "VS" badge between
  * them, and the points under each column with a check or a cross when the narration says so. The
- * column being talked about glows; the other dims a little.
+ * column being talked about glows; the other dims a little. Every point is drawn: with more than 3
+ * in a column (or a long one) the heroes get smaller to make room (layout.ts comparisonLayout).
  */
 
 /** Each point belongs to the column listed before it; if both columns come first, points alternate A, B, A, B. */
@@ -54,12 +56,6 @@ export function columnHeroes(ctx: Ctx, columns: readonly TimelineObject[]): Hero
   });
 }
 
-/** Two equal columns inside the safe zone (the right one ends left of the Reels buttons at x 940). */
-const COLS = [
-  { x: 75, width: 415 },
-  { x: 525, width: 415 },
-] as const;
-
 export const Comparison: Pattern = {
   camera: (ctx) => heroCamera(ctx),
   View: ({ ctx, cam }) => {
@@ -78,7 +74,8 @@ export const Comparison: Pattern = {
       }
       return col;
     })();
-    const heroY = TOP + 190;
+    const layout = comparisonLayout(points.map((list) => list.map((p) => p.label)));
+    const { heroY, heroSize } = layout;
     const vs = popIn(f, Math.max(...columns.map((c) => c.revealFrame)));
     return (
       <AbsoluteFill>
@@ -86,25 +83,25 @@ export const Comparison: Pattern = {
           {columns.map((column, i) => {
             const t = popIn(f, column.revealFrame);
             const lit = activeColumn === i ? 1 : activeColumn === -1 ? 0.5 : 0;
-            const col = COLS[i]!;
+            const col = COLUMNS[i]!;
             const cx = col.x + col.width / 2;
-            const titleSize = fitSize(column.label, col.width, 2, 54, 42);
+            const titleSize = fitSize(column.label, col.width, 2, layout.titleMax, 40);
             return (
               <div key={column.id} style={{ opacity: clamp01(t * 1.5) * (0.55 + 0.45 * Math.max(lit, activeColumn === -1 ? 1 : 0)) }}>
-                <HeroLayer steps={[heroes[i]!]} cues={ctx.heroCues} frame={f} cx={cx} cy={heroY} size={340} />
-                <div style={{ position: "absolute", left: col.x - 10, width: col.width + 20, top: heroY + 172, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: titleSize, lineHeight: 1.08, color: lit > 0.5 ? C.gold : C.text, textWrap: "balance" }}>
+                <HeroLayer steps={[heroes[i]!]} cues={ctx.heroCues} frame={f} cx={cx} cy={heroY} size={heroSize} />
+                <div style={{ position: "absolute", left: col.x - 10, width: col.width + 20, top: layout.titleTop, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: titleSize, lineHeight: 1.08, color: lit > 0.5 ? C.gold : C.text, textWrap: "balance" }}>
                   {column.label}
                 </div>
               </div>
             );
           })}
           {columns.length === 2 && vs > 0.001 && (
-            <div style={{ position: "absolute", left: 507 - 52, top: heroY - 52, width: 104, height: 104, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #F7B44A, #E8901A)", boxShadow: "0 0 30px rgba(245,165,36,0.6)", fontFamily: FONT, fontWeight: 800, fontSize: 44, color: "#1A1005", transform: `scale(${Math.min(1.1, vs)})` }}>
+            <div style={{ position: "absolute", left: COLUMNS_MIDDLE - 52, top: heroY - 52, width: 104, height: 104, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #F7B44A, #E8901A)", boxShadow: "0 0 30px rgba(245,165,36,0.6)", fontFamily: FONT, fontWeight: 800, fontSize: 44, color: "#1A1005", transform: `scale(${Math.min(1.1, vs)})` }}>
               VS
             </div>
           )}
           {points.map((list, i) => (
-            <PointList key={i} ctx={ctx} list={list.slice(0, 3)} col={COLS[i]!} top={heroY + 318} acts={acts} />
+            <PointList key={i} ctx={ctx} list={list} col={COLUMNS[i]!} top={layout.pointsTop} rowH={layout.rowH} gap={layout.gap} acts={acts} />
           ))}
         </CameraView>
       </AbsoluteFill>
@@ -112,10 +109,8 @@ export const Comparison: Pattern = {
   },
 };
 
-const PointList: React.FC<{ ctx: Ctx; list: TimelineObject[]; col: (typeof COLS)[number]; top: number; acts: Activation[] }> = ({ ctx, list, col, top, acts }) => {
+const PointList: React.FC<{ ctx: Ctx; list: TimelineObject[]; col: (typeof COLUMNS)[number]; top: number; rowH: number; gap: number; acts: Activation[] }> = ({ ctx, list, col, top, rowH, gap, acts }) => {
   const f = ctx.frame;
-  const space = 1270 - top;
-  const rowH = Math.min(160, (space - (list.length - 1) * 14) / Math.max(1, list.length));
   return (
     <>
       {list.map((p, i) => {
@@ -124,11 +119,10 @@ const PointList: React.FC<{ ctx: Ctx; list: TimelineObject[]; col: (typeof COLS)
         const act = activeAmount(acts, p.id, f);
         const mark = eventsOn(ctx, p.id).find((e) => e.action === "check" || e.action === "cross");
         const marked = mark ? pop(f, mark.startFrame, 260, 12) : 0;
-        const size = fitSize(p.label, col.width - 100, rowH >= 140 ? 3 : 2, 46, 38);
         return (
-          <div key={p.id} style={{ position: "absolute", left: col.x, width: col.width, top: top + i * (rowH + 14), height: rowH }}>
-            <Card t={t} active={Math.max(act, 0.6 * pulse(f, mark?.startFrame ?? -99, 30))} from={24} style={{ height: "100%", display: "flex", alignItems: "center", gap: 14, padding: "0 16px", boxSizing: "border-box" }}>
-              <svg width={56} height={56} viewBox="-31 -31 62 62" style={{ flex: "none" }}>
+          <div key={p.id} style={{ position: "absolute", left: col.x, width: col.width, top: top + i * (rowH + gap), height: rowH }}>
+            <Card t={t} active={Math.max(act, 0.6 * pulse(f, mark?.startFrame ?? -99, 30))} from={24} style={{ height: "100%", display: "flex", alignItems: "center", gap: POINT_CARD.gap, padding: `0 ${POINT_CARD.padding}px`, boxSizing: "border-box" }}>
+              <svg width={POINT_CARD.mark} height={POINT_CARD.mark} viewBox="-31 -31 62 62" style={{ flex: "none" }}>
                 {mark ? (
                   <>
                     <circle r={27} fill={mark.action === "check" ? "#4FD1A0" : "#FF6B6B"} transform={`scale(${0.6 + 0.4 * Math.min(1.1, marked)})`} opacity={marked > 0.02 ? 1 : 0.25} />
@@ -143,7 +137,7 @@ const PointList: React.FC<{ ctx: Ctx; list: TimelineObject[]; col: (typeof COLS)
                   <circle r={10} fill="#F5A524" />
                 )}
               </svg>
-              <span style={{ fontFamily: FONT, fontWeight: 800, fontSize: size, lineHeight: 1.1, color: act > 0.5 ? C.gold : C.text, textWrap: "balance" }}>{p.label}</span>
+              <BoxText text={p.label} {...pointTextBox(rowH)} style={{ color: act > 0.5 ? C.gold : C.text }} />
             </Card>
           </div>
         );

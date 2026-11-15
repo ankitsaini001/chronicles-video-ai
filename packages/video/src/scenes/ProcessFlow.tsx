@@ -4,6 +4,7 @@ import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { spline } from "../geometry";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { RAIL, railConnector, railLayout } from "../layout";
 import { clamp01, popIn, rise } from "../motion";
 import { C, FONT } from "../theme";
 import { activations, activeAmount, activeAt, BigCard, heroCamera, TOP, type Ctx, type Pattern } from "./shared";
@@ -30,8 +31,6 @@ export function processChain(objects: readonly TimelineObject[]): { nodes: Timel
   return { nodes, arrows };
 }
 
-const RAIL_Y = 1130;
-
 export const ProcessFlow: Pattern = {
   camera: (ctx) => heroCamera(ctx),
   View: ({ ctx, cam }) => {
@@ -50,21 +49,22 @@ export const ProcessFlow: Pattern = {
               <BigCard ctx={ctx} object={nowObj} at={now!.frame} size={66} />
             </div>
           )}
-          {nodes.length > 0 && <StepRail ctx={ctx} nodes={nodes} arrows={arrows} y={RAIL_Y} activeIds={acts} />}
+          {nodes.length > 0 && <StepRail ctx={ctx} nodes={nodes} arrows={arrows} y={RAIL.y} activeIds={acts} />}
         </CameraView>
       </AbsoluteFill>
     );
   },
 };
 
-/** Numbered nodes on a rail with self-drawing arrows and a light that travels along the drawn part. */
+/**
+ * Numbered nodes on a rail with self-drawing arrows and a light that travels along the drawn part.
+ * The rail ends left of the Reels buttons; with 6-7 steps the nodes and arrows get smaller (layout.ts).
+ */
 const StepRail: React.FC<{ ctx: Ctx; nodes: TimelineObject[]; arrows: (TimelineObject | null)[]; y: number; activeIds: ReturnType<typeof activations> }> = ({ ctx, nodes, arrows, y, activeIds }) => {
   const f = ctx.frame;
   const n = nodes.length;
-  const size = n <= 4 ? 108 : 92;
-  const left = 190;
-  const right = 890;
-  const xs = nodes.map((_, i) => (n === 1 ? 540 : left + (i * (right - left)) / (n - 1)));
+  const rail = railLayout(n);
+  const { xs, size, arrowScale: k } = rail;
   const revealed = nodes.filter((o) => f >= o.revealFrame).length;
   const lastReveal = nodes[n - 1]!.revealFrame;
   return (
@@ -74,8 +74,7 @@ const StepRail: React.FC<{ ctx: Ctx; nodes: TimelineObject[]; arrows: (TimelineO
           const at = arrow ? Math.min(arrow.revealFrame, nodes[i + 1]!.revealFrame - 6) : nodes[i + 1]!.revealFrame - 6;
           const draw = rise(f, at, 18);
           if (draw <= 0.001) return null;
-          const x1 = xs[i]! + size / 2 + 12;
-          const x2 = xs[i + 1]! - size / 2 - 22;
+          const { x1, x2 } = railConnector(rail, i);
           const head = x1 + (x2 - x1) * draw;
           const line = spline([{ x: x1, y }, { x: x2, y }]);
           // the light runs along the connector that was drawn last, then loops over the whole rail
@@ -83,11 +82,11 @@ const StepRail: React.FC<{ ctx: Ctx; nodes: TimelineObject[]; arrows: (TimelineO
           const dot = dotT === null ? null : line.at(dotT);
           return (
             <g key={i}>
-              <line x1={x1} y1={y} x2={head} y2={y} stroke="#F5A524" strokeWidth={26} strokeOpacity={0.18} strokeLinecap="round" />
-              <line x1={x1} y1={y} x2={head} y2={y} stroke="#F5A524" strokeWidth={9} strokeLinecap="round" />
-              {draw > 0.15 && <polygon points={`${head + 24},${y} ${head - 8},${y - 18} ${head},${y} ${head - 8},${y + 18}`} fill="#F5A524" opacity={clamp01((draw - 0.15) * 5)} />}
+              <line x1={x1} y1={y} x2={head} y2={y} stroke="#F5A524" strokeWidth={26 * k} strokeOpacity={0.18} strokeLinecap="round" />
+              <line x1={x1} y1={y} x2={head} y2={y} stroke="#F5A524" strokeWidth={9 * k} strokeLinecap="round" />
+              {draw > 0.15 && <polygon points={`${head + 24 * k},${y} ${head - 8 * k},${y - 18 * k} ${head},${y} ${head - 8 * k},${y + 18 * k}`} fill="#F5A524" opacity={clamp01((draw - 0.15) * 5)} />}
               {dot && (
-                <g transform={`translate(${dot.x} ${dot.y})`}>
+                <g transform={`translate(${dot.x} ${dot.y}) scale(${k})`}>
                   <circle r={30} fill="url(#rail-dot)" />
                   <circle r={7} fill="#FFFFFF" />
                 </g>

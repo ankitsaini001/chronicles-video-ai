@@ -1,6 +1,7 @@
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { WIDE_CARD } from "../layout";
 import { clamp01, pop, popIn, pulse, rise } from "../motion";
 import { C, FONT, GRADIENTS } from "../theme";
 import { Card, fitSize } from "../ui";
@@ -30,7 +31,8 @@ export const StepSequence: Pattern = {
     const segLeft = 540 - (n * segW + (n - 1) * 14) / 2;
     const complete = step ? eventsOn(ctx, step.id).find((e) => e.action === "complete") : undefined;
     const done = complete ? pop(f, complete.startFrame, 260, 12) : 0;
-    const textSize = step ? fitSize(step.label, 600, 3, 56, 42) : 0;
+    // the card: padding 2 × 34, the number circle 130 and a gap of 30 beside the text
+    const textSize = step ? fitSize(step.label, WIDE_CARD.width - 68 - 130 - 30, 3, 56, 42) : 0;
     return (
       <AbsoluteFill>
         <CameraView cam={cam}>
@@ -49,7 +51,7 @@ export const StepSequence: Pattern = {
           })}
           <HeroLayer steps={ctx.scene.heroes} cues={ctx.heroCues} frame={f} cx={540} cy={715} size={540} />
           {step && now && (
-            <div key={step.id} style={{ position: "absolute", left: 95, width: 845, top: 1010, height: 250 }}>
+            <div key={step.id} style={{ position: "absolute", left: WIDE_CARD.left, width: WIDE_CARD.width, top: 1010, height: 250 }}>
               <Card t={pop(f, now.frame, 220, 14)} active={0.6 + 0.4 * pulse(f, now.frame, 30)} from={30} style={{ height: "100%", display: "flex", alignItems: "center", gap: 30, padding: "0 34px", boxSizing: "border-box" }}>
                 <div style={{ width: 130, height: 130, flex: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: GRADIENTS.button, boxShadow: "0 0 28px rgba(245,165,36,0.55)", fontFamily: FONT, fontWeight: 800, fontSize: 70, color: "#1A1005", position: "relative" }}>
                   {done > 0.05 ? (

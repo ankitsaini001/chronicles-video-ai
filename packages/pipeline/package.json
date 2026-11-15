@@ -19,6 +19,7 @@
     "./storage": "./src/storage/index.ts",
     "./theme": "./src/theme.ts",
     "./timing": "./src/timing/index.ts",
+    "./timing/text-width": "./src/timing/text-width.ts",
     "./validation": "./src/validation/index.ts"
   }
 }

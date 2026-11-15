@@ -4,6 +4,7 @@ import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { arcPath } from "../geometry";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { SERIES, SERIES_LABEL, VALUE_CARD } from "../layout";
 import { pop, popIn, pulse, rise } from "../motion";
 import { C, FONT, GRADIENTS } from "../theme";
 import { Card, fitSize, textLines, Title } from "../ui";
@@ -14,7 +15,7 @@ import { activations, activeAmount, activeAt, heroCamera, ofKind, TOP, type Ctx,
  * - pie slices: a ring that grows slice by slice around the hero, and a big count-up card for the
  *   slice being named;
  * - bars or line points: big bars (or a self-drawing line) with their values, a smaller hero above,
- *   and the label of the value being named under the chart;
+ *   and the label of the value being named under the chart (every value is drawn, up to 7);
  * - counters only: the hero and a big count-up card.
  */
 
@@ -93,7 +94,7 @@ const ValueCard: React.FC<{ ctx: Ctx; m: Model; list: TimelineObject[] }> = ({ c
   const text = formatNumber(Math.round((o.value ?? 0) * grow(f, o) * 10 ** m.format.decimals) / 10 ** m.format.decimals, m.format);
   const numberSize = Math.min(140, Math.floor(420 / Math.max(3, text.length) / 0.6));
   return (
-    <div key={o.id} style={{ position: "absolute", left: 100, width: 840, top: 1050, height: 200 }}>
+    <div key={o.id} style={{ position: "absolute", left: VALUE_CARD.left, width: VALUE_CARD.width, top: 1050, height: 200 }}>
       <Card t={pop(f, now.frame, 220, 14)} active={0.6 + 0.4 * pulse(f, now.frame, 30)} from={30} style={{ height: "100%", display: "flex", alignItems: "center", gap: 28, padding: "0 36px", boxSizing: "border-box", position: "relative", overflow: "hidden" }}>
         {o.kind !== "pie-slice" && <div style={{ position: "absolute", left: 0, bottom: 0, height: 8, width: `${(Math.abs(o.value ?? 0) / maxAbs) * 100 * grow(f, o)}%`, background: GRADIENTS.button }} />}
         <div style={{ width: 16, height: 120, borderRadius: 8, background: colorOf(m, o), flex: "none" }} />
@@ -151,7 +152,7 @@ const Pie: React.FC<{ ctx: Ctx; m: Model }> = ({ ctx, m }) => {
 /** Bars (or a line through points) growing from a baseline, with their values on top. */
 const Series: React.FC<{ ctx: Ctx; m: Model }> = ({ ctx, m }) => {
   const f = ctx.frame;
-  const list = m.series.slice(0, 6);
+  const list = m.series;
   const line = list.every((o) => o.kind === "line-point");
   const acts = activations(ctx, list);
   const now = activeAt(acts, f);
@@ -159,8 +160,7 @@ const Series: React.FC<{ ctx: Ctx; m: Model }> = ({ ctx, m }) => {
   const maxAbs = Math.max(1, ...list.map((o) => Math.abs(o.value ?? 0)));
   const base = 1185;
   const height = 330;
-  const left = 130;
-  const right = 920;
+  const { left, right } = SERIES;
   const step = (right - left) / list.length;
   const barW = Math.min(170, step * 0.62);
   // the hero fills the middle until the chart starts, then moves up and makes room for it
@@ -214,7 +214,7 @@ const Series: React.FC<{ ctx: Ctx; m: Model }> = ({ ctx, m }) => {
         ) : null,
       )}
       {nowObj && (
-        <div key={nowObj.id} style={{ position: "absolute", left: 90, width: 860, top: base + 24, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: fitSize(nowObj.label, 860, 1, 50, 40), color: C.text, opacity: Math.min(1, popIn(f, now!.frame) * 1.5) }}>
+        <div key={nowObj.id} style={{ position: "absolute", left: SERIES_LABEL.left, width: SERIES_LABEL.width, top: base + 24, textAlign: "center", fontFamily: FONT, fontWeight: 800, fontSize: fitSize(nowObj.label, SERIES_LABEL.width, 1, 50, 40), color: C.text, opacity: Math.min(1, popIn(f, now!.frame) * 1.5) }}>
           {nowObj.label}
         </div>
       )}

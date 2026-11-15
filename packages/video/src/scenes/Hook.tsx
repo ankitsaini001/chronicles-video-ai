@@ -2,6 +2,7 @@ import type { CaptionTrackWord } from "@bytereel/pipeline/contracts";
 import { AbsoluteFill } from "remotion";
 import { CameraView } from "../camera";
 import { HeroLayer } from "../heroes/HeroLayer";
+import { HOOK_SUBTITLE_WIDTH } from "../layout";
 import { clamp01, fall, glide, popIn, rise } from "../motion";
 import { C, FONT, GRADIENTS } from "../theme";
 import { fitSize, Flash, SlamWord, textLines, Title } from "../ui";
@@ -52,7 +53,8 @@ export const Hook: Pattern = {
     // below the title and the slam words (some hero art reaches a little above its box, e.g. a rain cloud)
     const slamBottom = TOP + textLines(slam.map((w) => w.text).join(" "), slamSize(slam), 940) * slamSize(slam) * 1.02;
     const heroY = Math.max(860, titleBottom + 30 + heroSize / 2 - 30, slamBottom + heroSize / 2 + 30);
-    const subSize = subtitle ? fitSize(subtitle.label, 860, 2, 50, 38) : 0;
+    // the pill (padding 2 × 36) stays left of the Reels buttons
+    const subSize = subtitle ? fitSize(subtitle.label, HOOK_SUBTITLE_WIDTH - 72, 2, 50, 38) : 0;
     const subTop = Math.min(1180, heroY + heroSize / 2 + 10);
     return (
       <AbsoluteFill>
@@ -65,8 +67,8 @@ export const Hook: Pattern = {
             </>
           )}
           {subtitle && (
-            <div style={{ position: "absolute", left: 90, width: 900, top: subTop, display: "flex", justifyContent: "center", opacity: clamp01(popIn(f, subtitle.revealFrame) * 1.5), transform: `translateY(${(1 - Math.min(1, popIn(f, subtitle.revealFrame))) * 30}px)` }}>
-              <div style={{ fontFamily: FONT, fontWeight: 800, fontSize: subSize, lineHeight: 1.15, textAlign: "center", textWrap: "balance", color: C.gold, background: "rgba(26,18,10,0.92)", border: "2px solid rgba(245,165,36,0.6)", borderRadius: 40, padding: "12px 36px", maxWidth: 900, boxSizing: "border-box", boxShadow: "0 0 26px rgba(245,165,36,0.3)" }}>
+            <div style={{ position: "absolute", left: 540 - HOOK_SUBTITLE_WIDTH / 2, width: HOOK_SUBTITLE_WIDTH, top: subTop, display: "flex", justifyContent: "center", opacity: clamp01(popIn(f, subtitle.revealFrame) * 1.5), transform: `translateY(${(1 - Math.min(1, popIn(f, subtitle.revealFrame))) * 30}px)` }}>
+              <div style={{ fontFamily: FONT, fontWeight: 800, fontSize: subSize, lineHeight: 1.15, textAlign: "center", textWrap: "balance", color: C.gold, background: "rgba(26,18,10,0.92)", border: "2px solid rgba(245,165,36,0.6)", borderRadius: 40, padding: "12px 36px", maxWidth: HOOK_SUBTITLE_WIDTH, boxSizing: "border-box", boxShadow: "0 0 26px rgba(245,165,36,0.3)" }}>
                 {subtitle.label}
               </div>
             </div>
