@@ -61,7 +61,7 @@ These defaults make the specification buildable. They can change during review w
 - Vertical **9:16 only**, at **1080 × 1920**, **30 fps**.
 - Target **adult creators**. Child-directed accounts and classroom administration are outside V1.
 - **Private / limited beta without billing.** Apply internal abuse controls and spend ceilings, without exposing a credit product.
-- **A soft background music bed, generated in code** (no music library, no cost), on by default behind one switch (decision #28). *Originally "no background music"; changed with the approved v4 video style.*
+- **A soft background music bed, generated in code** (no music library, no cost), with soft sound effects (impact, scene-change whoosh, chime on key reveals), on by default behind one switch (decision #28). *Originally "no background music"; changed with the approved v4 video style.*
 - Begin with **eight reusable motion patterns**: title/hook, labeled diagram, process flow, comparison, timeline, chart, step sequence, takeaway.
 
 ---
@@ -290,7 +290,7 @@ Rules:
 | Visuals | Eight motion patterns, one default style |
 | Narration | ElevenLabs, Male or Female voice (creator's choice) per language |
 | Captions | Synchronized phrases, inside Instagram safe zones, editable |
-| Music | A soft code-generated music bed under the narration (ducked while speaking), on by default with one switch (decision #28) |
+| Music | A soft code-generated music bed under the narration (ducked while speaking) plus soft sound effects (impact, whoosh at scene changes, chime on key reveals), on by default with one switch (decision #28) |
 
 ---
 
@@ -518,7 +518,7 @@ Everything else follows the course plan, so our code stays in sync.
 | 25 | Changing a project's language is not in V1; create a new project. Voice (female/male) can still be switched | 2026-11-13 |
 | 26 | "Brainstorm with AI" (C7, F14) uses its own model: `GEMINI_BRAINSTORM_MODEL` (optional, default `gemini-3.1-flash-lite`, a fixed id, never a `-latest` alias) with low thinking; the storyboard planner keeps `GEMINI_MODEL`. Reason: `gemini-3.6-flash` took 55–57 s on the free tier even with low thinking (over the 30 s limit); 3.1 Flash-Lite answered in 3–8 s with 5 good ideas. Exactly 5 ideas; 10/hour and 30/day per creator | 2026-11-13 |
 | 27 | **Hindi and Hinglish are hidden until the voice-plan decision** (founder). The ElevenLabs free plan can't use Hindi voices, so those storyboards could never become videos, and no AI tokens are spent on them. Hidden, not removed: one switch (`ENABLED_LANGUAGES` in `packages/db/src/languages.ts`, now `["en"]`) hides them on the home page and the Idea screen, and the server refuses them (422 `LANGUAGE_UNAVAILABLE`) for every AI/voice action; existing Hindi/Hinglish projects stay viewable. Re-enable by adding them back to the list | 2026-11-14 |
-| 28 | **Video style v4 "hero visuals" approved** (founder + colleague, 2026-11-15) and made the only style (F22b): one big hero object per sentence picked by the planner from a fixed library of about 46 objects (free keyword fallback), dark amber stage, 3–5 word phrase captions with the spoken word highlighted, light-wipe transitions, an end card with only the takeaway (no "Follow for more"), no mascot and no scenery. Includes a **soft code-generated music bed** (replaces "no background music" in #9 and §2.2/§10), on by default behind one switch (`BACKGROUND_MUSIC`, packages/pipeline/src/pipeline/music.ts). Render target: at most 2× the old engine's time, files under about 8 MB per minute | 2026-11-15 |
+| 28 | **Video style v4 "hero visuals" approved** (founder + colleague, 2026-11-15) and made the only style (F22b): one big hero object per sentence picked by the planner from a fixed library of about 46 objects (free keyword fallback), dark amber stage, 3–5 word phrase captions with the spoken word highlighted, light-wipe transitions, an end card with only the takeaway (no "Follow for more"), no mascot and no scenery. Includes a **soft code-generated music bed** (replaces "no background music" in #9 and §2.2/§10) with three short **sound effects** generated the same way (a soft impact on the first frame, a whoosh at every scene change, a gentle chime on key reveals such as checks and chart values), all on by default behind one switch (`BACKGROUND_MUSIC`, packages/pipeline/src/pipeline/music.ts); silent fixture renders have neither. Render target: at most 2× the old engine's time, files under about 8 MB per minute | 2026-11-15 |
 
 ## 22. Open Items (resolved during build, do not block it)
 - Domain + trademark check for **ByteReel** (.com / .ai / .in / get… / try… variants); backups: ByteMotion, ByteKahaani

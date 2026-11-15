@@ -18,8 +18,8 @@ import {
 import { loadFixture, validPlan } from "./helpers";
 
 const words = (text: string): CaptionWord[] => text.split(" ").map((w, i) => ({ text: w, startSec: i * 0.4, endSec: i * 0.4 + 0.35 }));
-/** The line-breaking rules are tested at a fixed size, independent of the video style's caption size. */
-const layout = { fontSizePx: 50, maxLineWidthPx: 672 };
+/** The line-breaking rules are tested with the real caption layout of video style v4 (66 px, 650 px lines). */
+const layout = { fontSizePx: DEFAULT_CAPTION_LAYOUT.fontSizePx, maxLineWidthPx: DEFAULT_CAPTION_LAYOUT.maxLineWidthPx };
 const isNumber = (w: string | undefined) => !!w && /^\d/.test(w);
 const isUnit = (w: string | undefined) => !!w && /^(percent|rupees|crore|km)\b/.test(w);
 
@@ -31,7 +31,7 @@ function compileFixture() {
 
 describe("caption line breaking", () => {
   it("keeps a short phrase on one line", () => {
-    expect(breakLines(["It", "starts", "with", "the", "Sun."], layout)).toEqual([["It", "starts", "with", "the", "Sun."]]);
+    expect(breakLines(["Then", "the", "Sun", "rises."], layout)).toEqual([["Then", "the", "Sun", "rises."]]);
   });
 
   it("never splits a number from its unit across lines", () => {
@@ -45,7 +45,7 @@ describe("caption line breaking", () => {
   });
 
   it("avoids a lone last word when another break fits", () => {
-    const lines = breakLines("The water you drink may once have been a cloud.".split(" "), layout)!;
+    const lines = breakLines("Water you drink was a cloud.".split(" "), layout)!;
     expect(lines).toHaveLength(2);
     expect(lines[1]!.length).toBeGreaterThan(1);
     expect(lines[0]!.length).toBeGreaterThan(1);
@@ -58,7 +58,7 @@ describe("caption line breaking", () => {
 
 describe("caption phrase grouping", () => {
   it("never ends a phrase between a number and its unit", () => {
-    const narrow = { ...layout, maxLineWidthPx: 300 }; // "97 percent" still fits on one line
+    const narrow = { ...layout, maxLineWidthPx: 400 }; // "97 percent" still fits on one line
     const phrases = groupPhrases(words("Around 1 percent is fresh water and about 2 percent is frozen and about 97 percent is salty"), narrow);
     phrases.forEach((phrase, i) => {
       const next = phrases[i + 1];

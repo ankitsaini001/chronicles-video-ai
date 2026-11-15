@@ -87,6 +87,25 @@ describe("render-fixture stage orchestration", () => {
     });
   });
 
+  it("renders silently (no music) with its temporary files inside the run folder (never the system temp folder)", async () => {
+    await withTempDir(async (dir) => {
+      const store = new LocalArtifactStore(dir);
+      const jobs: RenderJob[] = [];
+      const render = async (job: RenderJob) => {
+        jobs.push(job);
+        return fakeRender(job);
+      };
+      await renderFixtureRun({ input: loadFixture("water-cycle.plan.json"), store, render, probe: async () => goodProbe(0) });
+      expect(jobs).toHaveLength(1);
+      const job = jobs[0]!;
+      expect(job.music).toBe(false);
+      const runDir = store.runDir(RUN);
+      expect(job.workDir.startsWith(`${runDir}/`)).toBe(true);
+      expect(job.outputPath.startsWith(`${job.workDir}/`)).toBe(true);
+      expect(job.previewDir.startsWith(`${job.workDir}/`)).toBe(true);
+    });
+  });
+
   it("moves the run to needs-input (no filler) when the compiled duration is out of range", async () => {
     await withTempDir(async (dir) => {
       const store = new LocalArtifactStore(dir);

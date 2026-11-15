@@ -40,6 +40,12 @@ export const CAPTION_STYLE = {
   maxWords: 5,
 } as const;
 
+/**
+ * Public file name of the generated music bed (F22b): the render stage writes it into the render's
+ * public folder (pipeline/music.ts) and the composition plays it (packages/video/src/Explainer.tsx).
+ */
+export const MUSIC_FILE = "music-bed.wav";
+
 /** Motion timings in frames (30 fps). */
 export const MOTION = {
   reveal: 12,

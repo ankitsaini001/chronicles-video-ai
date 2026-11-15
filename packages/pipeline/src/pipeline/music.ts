@@ -1,4 +1,5 @@
 import type { CaptionTrack, Timeline } from "../contracts";
+import { MUSIC_FILE } from "../theme";
 
 /**
  * The soft background music bed of video style v4 (F22b), generated in code: no downloads, no
@@ -23,8 +24,8 @@ import type { CaptionTrack, Timeline } from "../contracts";
  */
 export const BACKGROUND_MUSIC = true;
 
-/** Public file name of the music bed (packages/video/src/Explainer.tsx MUSIC_FILE). */
-export const MUSIC_FILE = "music-bed.wav";
+/** Public file name of the music bed (one name, shared with the composition: theme.ts). */
+export { MUSIC_FILE };
 
 export const MUSIC_SAMPLE_RATE = 48000;
 const SR = MUSIC_SAMPLE_RATE;

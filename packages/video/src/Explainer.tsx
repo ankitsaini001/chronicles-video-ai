@@ -2,7 +2,7 @@ import type React from "react";
 import { useMemo } from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import type { CaptionTrack, CaptionTrackWord, Timeline } from "@bytereel/pipeline/contracts";
-import { SAFE_ZONE } from "@bytereel/pipeline/theme";
+import { MUSIC_FILE, SAFE_ZONE } from "@bytereel/pipeline/theme";
 import { Backdrop } from "./Backdrop";
 import { Captions, CaptionScrim } from "./Captions";
 import { loadPackagedFonts } from "./fonts";
@@ -14,9 +14,6 @@ import { FONT, LAYOUT } from "./theme";
 import { LightWipe, ProgressBar } from "./ui";
 
 loadPackagedFonts();
-
-/** The background music file (generated in code by the render stage) in the render's public folder. */
-export const MUSIC_FILE = "music-bed.wav";
 
 export interface ExplainerProps {
   timeline: Timeline;
