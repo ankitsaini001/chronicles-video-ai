@@ -49,7 +49,9 @@ export const Hook: Pattern = {
     const titleSize = headline ? fitSize(headline.label, 900, 3, 82, 60) : 0;
     const titleBottom = headline ? TOP + 10 + textLines(headline.label, titleSize) * titleSize * 1.08 : TOP;
     const heroSize = 600;
-    const heroY = Math.max(860, titleBottom + 30 + heroSize / 2 - 30);
+    // below the title and the slam words (some hero art reaches a little above its box, e.g. a rain cloud)
+    const slamBottom = TOP + textLines(slam.map((w) => w.text).join(" "), slamSize(slam), 940) * slamSize(slam) * 1.02;
+    const heroY = Math.max(860, titleBottom + 30 + heroSize / 2 - 30, slamBottom + heroSize / 2 + 30);
     const subSize = subtitle ? fitSize(subtitle.label, 860, 2, 50, 38) : 0;
     const subTop = Math.min(1180, heroY + heroSize / 2 + 10);
     return (
