@@ -6,6 +6,7 @@ import {
   getLatestReviseJob,
   getOwnedProject,
   IdempotencyLockLostError,
+  ProjectActionError,
   StoryboardApprovalBodySchema,
   toJobResource,
   toProjectResource,
@@ -23,8 +24,8 @@ import { assertGenerateReady } from "@/lib/video/api";
 // video job, e.g. one approved in F20 or a cancelled job). The creator approves the EXACT version on
 // screen: body (strict) `planVersionId`, `planHash`, `expectedStateVersion`. Idempotency-Key required.
 // Rate: 10 per hour.
-// Order: the language switch (422 LANGUAGE_UNAVAILABLE, before anything is counted) → the video job
-// set-up (Inngest, voice, R2; else 500, nothing saved) → ONE transaction
+// Order: the project (404) → the language switch (422 LANGUAGE_UNAVAILABLE, before anything is
+// counted) → the video job set-up (Inngest, voice, R2; else 500, nothing saved) → ONE transaction
 // (packages/db/src/generate-jobs.ts approveAndGenerate): the checks, videos/day (3, new job only),
 // the voice characters still to record (creator 3,000/month, then app 9,000/month), the approval
 // (reused when the version has one), the queued `generate` job (key gen:{planVersionId}; a failed or
@@ -42,18 +43,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     body: StoryboardApprovalBodySchema,
     idempotent: true,
     handle: async ({ db, user, body, idempotencyLock }) => {
+      // The project and the language switch first: a clear 404 / 422 even when the video job isn't set
+      // up (both are checked again inside the transaction).
       const owned = await getOwnedProject(db, user.id, projectId);
-      // The language switch first: a clear 422 even when the video job isn't set up (checked again inside).
-      if (owned) {
-        try {
-          assertLanguageEnabled(owned.language);
-        } catch (error) {
-          toApiProblem(error);
-        }
+      if (!owned) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this project."));
+      try {
+        assertLanguageEnabled(owned.language);
+      } catch (error) {
+        toApiProblem(error);
       }
       const voice = assertGenerateReady();
       // The project's newest jobs (read first), so the answer's `allowedActions` match C3's.
-      const related = owned ? { latestPlanJob: await getLatestPlanJob(db, owned._id), latestReviseJob: await getLatestReviseJob(db, owned._id) } : {};
+      const related = { latestPlanJob: await getLatestPlanJob(db, owned._id), latestReviseJob: await getLatestReviseJob(db, owned._id) };
       const answer = (out: ApproveAndGenerateResult) => ({
         approval: toStoryboardApprovalResource(out.approval),
         job: toJobResource(out.job),

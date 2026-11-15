@@ -357,6 +357,12 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
                   {approving ? "Starting…" : "Generate video"}
                 </Button>
               )}
+              {/* F23: opened with "Edit storyboard" from a failed or ready video: the way back to it. */}
+              {(project.state === "generate_failed" || project.state === "video_ready") && (
+                <Button href={`/projects/${project.id}/video`} variant="secondary" className="whitespace-nowrap">
+                  Back to video
+                </Button>
+              )}
             </div>
           ) : (
             <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">

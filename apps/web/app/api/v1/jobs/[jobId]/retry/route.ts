@@ -1,4 +1,15 @@
-import { API_RATE_LIMITS, getOwnedJob, IdempotencyLockLostError, retryGenerateJob, retryPlanJob, retryReviseJob, toJobResource } from "@bytereel/db";
+import {
+  API_RATE_LIMITS,
+  assertLanguageEnabled,
+  getOwnedJob,
+  getOwnedProject,
+  IdempotencyLockLostError,
+  ProjectActionError,
+  retryGenerateJob,
+  retryPlanJob,
+  retryReviseJob,
+  toJobResource,
+} from "@bytereel/db";
 import { z } from "zod";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
@@ -21,6 +32,8 @@ import { assertGenerateReady } from "@/lib/video/api";
 // retryGenerateJob): language first (422), only a retryable failure, only while the storyboard is
 // still the approved version (409 APPROVAL_REQUIRED), the voice characters still to record must fit
 // (recordings already made are reused for free); project → `generating`. Never counts toward videos/day.
+// Order: the job (404) and, for a video job, its project's language (422) BEFORE the set-up checks
+// (500 when Inngest, the voice or R2 isn't set up).
 // After the commit the event `{jobId}:retry:{attempt}` goes to Inngest. Answer: 202 Job.
 
 const EmptyBody = z.strictObject({});
@@ -33,15 +46,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     idempotent: true,
     handle: async ({ db, user, idempotencyLock }) => {
       const owned = await getOwnedJob(db, user.id, jobId);
-      const voice = owned?.type === "generate" ? assertGenerateReady() : null;
-      if (owned?.type !== "generate") assertPlanJobsReady();
+      if (!owned) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
+      if (owned.type === "generate") {
+        const project = await getOwnedProject(db, user.id, owned.projectId.toHexString());
+        if (!project) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
+        try {
+          assertLanguageEnabled(project.language);
+        } catch (error) {
+          toApiProblem(error);
+        }
+      }
+      const voice = owned.type === "generate" ? assertGenerateReady() : null;
+      if (owned.type !== "generate") assertPlanJobsReady();
       let job;
       try {
         const respond = (j: Parameters<typeof toJobResource>[0]) => ({ status: 202, body: toJobResource(j) });
         job =
-          owned?.type === "generate" && voice
+          owned.type === "generate" && voice
             ? await retryGenerateJob(db, { ownerId: user.id, jobId, timezone: user.timezone, voice, idempotencyLock, respond })
-            : owned?.type === "revise"
+            : owned.type === "revise"
               ? await retryReviseJob(db, { ownerId: user.id, jobId, idempotencyLock, respond })
               : await retryPlanJob(db, { ownerId: user.id, jobId, idempotencyLock, respond });
       } catch (error) {

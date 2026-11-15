@@ -11,7 +11,8 @@ import { thumbnailLink } from "@/lib/video/storage";
 
 // ③ Video (F23; ARCHITECTURE §11, PRD §6.3, Stitch "Step 3 Making video"): the video while it is
 // made (the four steps, Cancel), after a failure (the plain message, Try again), and when it is
-// ready (its thumbnail; watching and downloading it here is F24). Only the owner sees it: another
+// ready (its thumbnail; watching and downloading it here is F24). After a failure or when ready,
+// "Edit storyboard" (and the stepper's "2 Storyboard") open the storyboard. Only the owner sees it: another
 // user's project, a missing one and a malformed id all get the same 404 page. A project on another
 // step goes back to /projects/[id], which sends it to its step. An archived project opens read-only.
 
@@ -41,7 +42,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
         <Link href="/dashboard" className="self-start text-xs font-medium text-muted transition-colors hover:text-text sm:absolute sm:left-0 sm:self-center">
           ← My videos
         </Link>
-        <ProjectStepper current="video" />
+        <ProjectStepper current="video" hrefs={state === "generating" ? {} : { storyboard: `/projects/${projectId}/storyboard` }} />
       </div>
       <MakingVideoScreen
         key={`${state}:${project.stateVersion}`}

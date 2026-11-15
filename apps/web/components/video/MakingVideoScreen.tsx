@@ -1,6 +1,7 @@
 "use client";
 
 import type { JobResource } from "@bytereel/db";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { apiSend, newIdempotencyKey } from "@/components/storyboard/client";
@@ -12,7 +13,10 @@ import { videoSteps, waitingText, type VideoStepStatus } from "@/lib/video/steps
 // Rendering). It polls C6 every 2 s (every 15 s while the tab is hidden; it stops when the job ends
 // or the page is left), like the storyboard job panel; the work continues on the server, so coming
 // back shows the live state. Cancel (E3) and Try again (E2). When the video is ready: its thumbnail
-// in the phone and "Your video is ready"; watching and downloading it here is F24.
+// in the phone and "Your video is ready"; watching and downloading it here is F24. After a failure or
+// when ready: "Edit storyboard" (a muted text link, like Cancel) opens the storyboard, so a failure
+// that can't be retried as it is never leaves the creator stuck. (A cancelled video goes straight back
+// to the storyboard.)
 
 export type MakingVideoScreenProps = {
   projectId: string;
@@ -128,6 +132,7 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
   const failed = props.state === "generate_failed";
   const canRetry = failed && actions.includes("retry_job") && job !== null && !props.archived;
   const canCancel = generating && actions.includes("cancel_job") && !cancelling;
+  const canEditStoryboard = (failed || ready) && actions.includes("edit_storyboard") && !props.archived;
 
   const heading = ready ? "Your video is ready" : failed ? "We couldn't finish your video" : "Making your video";
   return (
@@ -189,6 +194,11 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
             <button type="button" onClick={() => void cancel()} disabled={busy !== null} className="min-h-11 cursor-pointer px-1 text-sm font-medium text-muted transition-colors hover:text-danger disabled:opacity-50">
               {busy === "cancel" ? "Cancelling…" : "Cancel"}
             </button>
+          )}
+          {canEditStoryboard && (
+            <Link href={`/projects/${props.projectId}/storyboard`} className="inline-flex min-h-11 items-center px-1 text-sm font-medium text-muted transition-colors hover:text-text">
+              Edit storyboard
+            </Link>
           )}
         </div>
       </section>
