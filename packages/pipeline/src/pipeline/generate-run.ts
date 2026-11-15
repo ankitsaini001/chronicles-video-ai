@@ -17,6 +17,7 @@ import { evaluateProbe, probeMp4, PROBED_WITH, type Mp4Probe, type QaReport } fr
 import { AudioProbeError, probeAudioFile, type AudioProbe } from "../validation/audio";
 import { checkGenerationGate } from "./approval-gate";
 import { loadManifest, recordArtifact, saveManifest, transitionRun, updateSceneSpeech, updateStage } from "./manifest";
+import { BACKGROUND_MUSIC } from "./music";
 import type { RenderJob, RenderReport } from "./render";
 import { previewFramesFor } from "./render-fixture";
 import {
@@ -260,6 +261,8 @@ export async function generateRun(options: GenerateOptions): Promise<GenerateRes
         previewFrames: previewFramesFor(compiled),
         previewDir: path.join(tempDir, "preview-frames"),
         publicDir,
+        music: BACKGROUND_MUSIC,
+        workDir: tempDir,
         onProgress,
       });
       manifest = recordArtifact(manifest, await moveIntoStore(writer, ArtifactKeys.output, tempVideo), now());

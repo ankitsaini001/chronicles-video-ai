@@ -338,7 +338,7 @@ async function fakeRender(job: RenderJob): Promise<RenderReport> {
   }
   // The composition receives every scene's audio through publicDir.
   for (const scene of job.timeline.scenes) await fs.access(path.join(job.publicDir!, scene.audioKey!));
-  return { bundleMs: 1, renderMs: 2, stillsMs: 3, previews };
+  return { musicMs: 0, bundleMs: 1, renderMs: 2, stillsMs: 3, previews };
 }
 
 const goodLiveProbe = (frames: number): Mp4Probe => ({

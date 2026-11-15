@@ -5,7 +5,6 @@ import { sha256 } from "../packages/pipeline/src/shared/hash";
 import {
   breakLines,
   compileTimeline,
-  DEFAULT_CAPTION_LAYOUT,
   estimateTextWidth,
   groupPhrases,
   startFrameOf,

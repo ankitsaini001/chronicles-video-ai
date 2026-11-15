@@ -4,15 +4,29 @@ import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { openBrowser, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import type { CaptionTrack, Timeline } from "../contracts";
+import { MUSIC_FILE, musicInputFor, synthMusicBed } from "./music";
 
 /**
  * Local Remotion rendering (PIPELINE_DESIGN.md §8 "Render" stage). Uses Remotion's own
  * chrome-headless-shell (downloaded once into node_modules/.remotion) and its bundled ffmpeg.
  * Rendering never calls AI providers; the composition draws only the compiled timeline.
+ * Video style v4 (F22b): packages/video/src/Explainer.tsx.
  */
 
 export const VIDEO_ENTRY = path.resolve(import.meta.dirname, "../../../video/src/index.ts");
 export const COMPOSITION_ID = "Explainer";
+
+/**
+ * Encoding settings, tuned for render time and file size on 2026-11-15 (F22b, see the feature file):
+ * JPEG frames from the browser, H.264 at CRF 23 (visually the same as 18 on this dark style,
+ * a third of the size).
+ */
+export const RENDER_SETTINGS = {
+  crf: 23,
+  jpegQuality: 85,
+  x264Preset: "medium",
+  audioBitrate: "160k",
+} as const;
 
 export interface RenderJob {
   timeline: Timeline;
@@ -27,10 +41,17 @@ export interface RenderJob {
    * `audio/<scene-id>.mp3`, which the composition plays via staticFile(scene.audioKey). null = none.
    */
   publicDir?: string | null;
+  /** Add the generated music bed (needs `publicDir`). Default false. */
+  music?: boolean;
+  /** Folder for temporary files (the Remotion bundle). Default: the system temp folder. */
+  workDir?: string;
+  /** Frames rendered in parallel. Default: Remotion's (half the CPU threads). */
+  concurrency?: number | null;
   onProgress?: (message: string) => void;
 }
 
 export interface RenderReport {
+  musicMs: number;
   bundleMs: number;
   renderMs: number;
   stillsMs: number;
@@ -39,11 +60,20 @@ export interface RenderReport {
 
 export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
   const log = job.onProgress ?? (() => undefined);
-  const inputProps = { timeline: job.timeline, captions: job.captions };
-  const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), "bytereel-bundle-"));
+  const music = job.music ?? false;
+  if (music && !job.publicDir) throw new Error("the music bed needs a public folder");
+  const inputProps = { timeline: job.timeline, captions: job.captions, music };
+  await fs.mkdir(job.workDir ?? os.tmpdir(), { recursive: true });
+  const bundleDir = await fs.mkdtemp(path.join(job.workDir ?? os.tmpdir(), "bytereel-bundle-"));
 
   try {
     let started = Date.now();
+    if (music) {
+      log("Generating the music bed...");
+      await fs.writeFile(path.join(job.publicDir!, MUSIC_FILE), synthMusicBed(musicInputFor(job.timeline, job.captions)));
+    }
+    const musicMs = Date.now() - started;
+    started = Date.now();
     log("Bundling the Remotion composition...");
     const serveUrl = await bundle({ entryPoint: VIDEO_ENTRY, outDir: bundleDir, enableCaching: true, publicDir: job.publicDir ?? null });
     const bundleMs = Date.now() - started;
@@ -63,12 +93,16 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
         inputProps,
         codec: "h264",
         pixelFormat: "yuv420p",
-        crf: 20,
-        // Narration is decoded once from the scene MP3s, mixed at each scene start and encoded once to AAC.
+        crf: RENDER_SETTINGS.crf,
+        x264Preset: RENDER_SETTINGS.x264Preset,
+        imageFormat: "jpeg",
+        jpegQuality: RENDER_SETTINGS.jpegQuality,
+        // Narration is decoded once from the scene MP3s, mixed at each scene start (with the music bed) and encoded once to AAC.
         audioCodec: "aac",
-        audioBitrate: "192k",
+        audioBitrate: RENDER_SETTINGS.audioBitrate,
         outputLocation: job.outputPath,
         puppeteerInstance: browser,
+        concurrency: job.concurrency ?? null,
         overwrite: true,
         logLevel: "error",
         onProgress: ({ progress }) => {
@@ -90,7 +124,7 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
         previews.push({ id, frame, path: output });
       }
       log(`Saved ${previews.length} preview frames.`);
-      return { bundleMs, renderMs, stillsMs: Date.now() - started, previews };
+      return { musicMs, bundleMs, renderMs, stillsMs: Date.now() - started, previews };
     } finally {
       await browser.close({ silent: true });
     }

@@ -1,20 +1,21 @@
 import type React from "react";
-import { ICON_NAMES, iconFor, iconForLabel, type IconName } from "@bytereel/pipeline/planning/icon-catalog";
-import { COLORS } from "@bytereel/pipeline/theme";
+import type { IconName } from "@bytereel/pipeline/planning/icon-catalog";
 
 /**
- * Small allow-listed local icon set (inline SVG, 100×100 view box, two accents only).
- * No icon is ever fetched or generated at render time.
+ * Small allow-listed local icon set (inline SVG, 100x100 view box), coloured for the dark v4 stage:
+ * light blue and amber accents, light "ink". No icon is ever fetched or generated at render time.
+ * Twelve icons also have animated versions (LiveIcon.tsx); the rest use this artwork.
  *
- * The icon is picked from an object's label with the fixed keyword table in
+ * The icon is the plan object's `icon`, else picked from its label with the fixed keyword table in
  * packages/pipeline/src/planning/icon-catalog.ts (shared with the planner prompt).
  */
 
-const B = COLORS.accent;
-const BS = COLORS.accentSoft;
-const W = COLORS.warm;
-const WS = COLORS.warmSoft;
-const INK = COLORS.ink;
+const B = "#5DB8F0";
+const BS = "#163049";
+const W = "#F5A524";
+const WS = "#3A2410";
+const INK = "#F7EFE6";
+const COLORS = { surface: "#1A120A" } as const;
 
 const ICONS = {
   sun: (
@@ -64,7 +65,7 @@ const ICONS = {
   mountain: (
     <>
       <path d="M6 84 L38 30 L56 58 L68 42 L94 84 Z" fill={BS} stroke={B} strokeWidth="4" strokeLinejoin="round" />
-      <path d="M30 44 L38 30 L46 43 Z" fill={COLORS.surface} />
+      <path d="M30 44 L38 30 L46 43 Z" fill="#EEF4FA" />
     </>
   ),
   layers: (
@@ -183,8 +184,6 @@ const ICONS = {
   ),
   dot: <circle cx="50" cy="50" r="30" fill={B} />,
 } satisfies Record<IconName, React.ReactNode>;
-
-export { ICON_NAMES, iconFor, iconForLabel, type IconName };
 
 export const Icon: React.FC<{ name: IconName; size: number; style?: React.CSSProperties }> = ({ name, size, style }) => (
   <svg width={size} height={size} viewBox="0 0 100 100" style={{ display: "block", overflow: "visible", ...style }}>

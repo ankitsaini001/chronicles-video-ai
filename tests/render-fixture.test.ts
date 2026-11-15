@@ -19,7 +19,7 @@ async function fakeRender(job: RenderJob): Promise<RenderReport> {
     await writeFile(path, `png ${p.frame}`);
     previews.push({ ...p, path });
   }
-  return { bundleMs: 1, renderMs: 2, stillsMs: 3, previews };
+  return { musicMs: 0, bundleMs: 1, renderMs: 2, stillsMs: 3, previews };
 }
 
 const RUN = { ownerId: "fixture-owner", projectId: "fixture-water-cycle", versionId: "v1" };
