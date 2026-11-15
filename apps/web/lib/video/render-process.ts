@@ -7,10 +7,15 @@ import type { RenderChildMessage, RenderJobResult, RenderJobSpec, RenderParentMe
 
 // Rendering on this computer (F23, founder 2026-11-15; Vercel Sandbox is decided at go-live, F38):
 // the generate worker starts packages/pipeline/src/pipeline/render-child.ts in its own Node process
-// (with tsx), hands it the job over Node's IPC channel, relays its progress, and can cancel it
-// (a "cancel" message → Remotion's cancel signal; killed if it doesn't stop within 20 s).
-// Temporary files: the child gets TMPDIR=<project>/runs/.tmp explicitly (Remotion and Chrome use
-// the process temp folder, never /tmp, which is shared on the founder's machine).
+// (with tsx), hands it the job over Node's IPC channel, relays its progress, and can cancel it.
+// - Stopping (Cancel, or the 20-minute limit): a "cancel" message first (Remotion's cancel signal);
+//   if it hasn't stopped within 20 s, its whole process group is killed (the child runs detached, so
+//   Chrome and ffmpeg, which it starts, are in its group and go too).
+// - The result resolves exactly once, when the process is gone (exit) or can't be used (error).
+// - Environment: only what rendering needs (renderChildEnv): no database, voice, storage, login or
+//   AI secrets reach the child or Chrome.
+// - Temporary files: the child gets TMPDIR=<the job's work folder>/tmp explicitly (Remotion and Chrome
+//   use the process temp folder, never /tmp, which is shared on the founder's machine).
 
 /** The repository root: the folder that holds packages/pipeline (the web app runs in apps/web). */
 export function projectRoot(start: string = process.cwd()): string {
@@ -47,60 +52,106 @@ export interface RenderRun {
   cancel: () => void;
 }
 
-const CANCEL_GRACE_MS = 20_000;
+/** After "cancel", how long the render may take to stop before its process group is killed. */
+export const CANCEL_GRACE_MS = 20_000;
 /** A render that takes longer than this is stopped (about 2–4 min is normal). */
 export const RENDER_MAX_MS = 20 * 60_000;
 
-export function startRenderProcess(spec: RenderJobSpec, options: { root: string; tmp: string; onProgress: (phase: RenderPhase, percent: number) => void; maxMs?: number }): RenderRun {
+/** The only environment variables the render child (and Chrome, ffmpeg) get, besides TMPDIR. */
+const CHILD_ENV_NAMES = ["PATH", "HOME", "NODE_ENV", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
+const CHILD_ENV_PREFIXES = ["REMOTION_"] as const;
+
+/**
+ * The render child's environment: an allowlist (PATH, HOME, NODE_ENV, the locale, TZ, REMOTION_*)
+ * plus its own TMPDIR. Nothing else: the database, ElevenLabs, R2, login and Gemini secrets stay in
+ * the web server.
+ */
+export function renderChildEnv(env: NodeJS.ProcessEnv, tmp: string): NodeJS.ProcessEnv {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if ((CHILD_ENV_NAMES as readonly string[]).includes(name) || CHILD_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))) out[name] = value;
+  }
+  out.TMPDIR = tmp;
+  return out as NodeJS.ProcessEnv;
+}
+
+export function startRenderProcess(
+  spec: RenderJobSpec,
+  options: { root: string; tmp: string; onProgress: (phase: RenderPhase, percent: number) => void; maxMs?: number; graceMs?: number },
+): RenderRun {
   const script = path.join(options.root, "packages", "pipeline", "src", "pipeline", "render-child.ts");
   const loader = path.join(options.root, "node_modules", "tsx", "dist", "loader.mjs");
   if (!existsSync(script) || !existsSync(loader)) {
     return { result: Promise.resolve({ status: "failed", stage: "render", detail: "the render program or tsx was not found in the project" }), cancel: () => undefined };
   }
-  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: options.tmp };
-  delete env.NODE_OPTIONS; // the web server's own Node flags are not for the renderer
+  const maxMs = options.maxMs ?? RENDER_MAX_MS;
+  const graceMs = options.graceMs ?? CANCEL_GRACE_MS;
   // turbopackIgnore: the script is a separate program run with tsx, never part of the server bundle.
+  // detached: the child leads its own process group, so killing the group also stops Chrome and ffmpeg.
   const child = fork(/*turbopackIgnore: true*/ script, [], {
     cwd: options.root,
-    env,
+    env: renderChildEnv(process.env, options.tmp),
     execArgv: ["--import", pathToFileURL(loader).href],
     stdio: ["ignore", "inherit", "inherit", "ipc"],
     serialization: "advanced",
+    detached: true,
   });
-  let cancelled = false;
+  let stopping: "cancelled" | "timed-out" | null = null;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
-  const kill = () => {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  /** Kill the child's whole process group (the child, Chrome, ffmpeg); nothing left is fine. */
+  const killGroup = () => {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // the group is already gone
+    }
   };
+  /** Ask the renderer to stop (Remotion's cancel signal); kill its group if it hasn't stopped in time. */
+  const stop = (why: "cancelled" | "timed-out") => {
+    if (stopping) return;
+    stopping = why;
+    if (child.connected) {
+      try {
+        child.send({ type: "cancel" } satisfies RenderParentMessage);
+      } catch {
+        // the channel just closed: the kill below still runs
+      }
+    }
+    killTimer = setTimeout(killGroup, graceMs);
+  };
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   const result = new Promise<RenderJobResult>((resolve) => {
-    let settled: RenderJobResult | null = null;
-    const deadline = setTimeout(() => {
-      settled ??= { status: "failed", stage: "render", detail: `the render took longer than ${Math.round((options.maxMs ?? RENDER_MAX_MS) / 60_000)} minutes and was stopped` };
-      kill();
-    }, options.maxMs ?? RENDER_MAX_MS);
-    child.on("message", (message: RenderChildMessage) => {
-      if (message?.type === "progress") options.onProgress(message.phase, message.percent);
-      else if (message?.type === "result") settled = message.result;
-    });
-    child.on("error", (error) => {
-      settled ??= { status: "failed", stage: "render", detail: `the render process couldn't start: ${error.message}` };
-    });
-    child.on("exit", (code, signal) => {
+    let answer: RenderJobResult | null = null;
+    let done = false;
+    const finish = (value: RenderJobResult) => {
+      if (done) return;
+      done = true;
       clearTimeout(deadline);
       clearTimeout(killTimer);
-      if (settled) return resolve(settled);
-      resolve(cancelled ? { status: "cancelled" } : { status: "failed", stage: "render", detail: `the render process stopped without an answer (code ${code}, signal ${signal})` });
+      resolve(value);
+    };
+    deadline = setTimeout(() => stop("timed-out"), maxMs);
+    child.on("message", (message: RenderChildMessage) => {
+      if (message?.type === "progress") options.onProgress(message.phase, message.percent);
+      else if (message?.type === "result") answer = message.result;
+    });
+    // The process couldn't start, or can't be talked to any more: stop it and its group, and answer now.
+    child.on("error", (error) => {
+      killGroup();
+      finish(stopping === "cancelled" ? { status: "cancelled" } : { status: "failed", stage: "render", detail: `the render process failed: ${error.message}` });
+    });
+    child.on("exit", (code, signal) => {
+      killGroup(); // anything it left running (Chrome, ffmpeg)
+      if (stopping === "timed-out") return finish({ status: "failed", stage: "render", detail: `the render took longer than ${Math.round(maxMs / 60_000)} minutes and was stopped` });
+      if (answer) return finish(answer);
+      finish(stopping === "cancelled" ? { status: "cancelled" } : { status: "failed", stage: "render", detail: `the render process stopped without an answer (code ${code}, signal ${signal})` });
     });
   });
   const startMessage: RenderParentMessage = { type: "start", spec };
-  child.send(startMessage);
-  return {
-    result,
-    cancel: () => {
-      if (cancelled) return;
-      cancelled = true;
-      if (child.connected) child.send({ type: "cancel" } satisfies RenderParentMessage);
-      killTimer = setTimeout(kill, CANCEL_GRACE_MS);
-    },
-  };
+  child.send(startMessage, (error) => {
+    if (error) child.emit("error", error);
+  });
+  return { result, cancel: () => stop("cancelled") };
 }

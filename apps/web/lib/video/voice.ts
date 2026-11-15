@@ -1,4 +1,4 @@
-import type { StoredPlan, VoiceEstimator } from "@bytereel/db";
+import { readDbConfig, type StoredPlan, type VoiceEstimator } from "@bytereel/db";
 import { VOICE_ID_ENV_BY_PRESET } from "@bytereel/pipeline/config/voice-env";
 import type { Language, Plan } from "@bytereel/pipeline/contracts";
 import { countCharacters, speechCacheKey, speechConfigFor, speechRequestFor, type SpeechConfig } from "@bytereel/pipeline/pipeline/speech";
@@ -21,13 +21,23 @@ const TEST_ORIGIN = /^http:\/\/localhost:323\d$/;
 const VOICE_ID = /^[A-Za-z0-9]{1,64}$/;
 const MODEL_ID = /^[a-z0-9][a-z0-9_.-]{1,79}$/;
 
+/**
+ * The database this server really connects to: the same (trimmed) name the database layer uses
+ * (readDbConfig), so spaces around MONGODB_DB can't slip past the test-database checks. Null when
+ * the database settings are broken (then no job can run at all).
+ */
+function databaseName(env: NodeJS.ProcessEnv): string | null {
+  const settings = readDbConfig(env);
+  return settings.ok ? settings.config.dbName : null;
+}
+
 /** Why the stand-in switch can't be used here, or null when it is off or allowed. */
 export function fakeVoiceProblem(env: NodeJS.ProcessEnv): string | null {
   const flag = env[FAKE_ELEVENLABS_ENV];
   if (flag === undefined || flag === "") return null;
   if (flag !== "1") return `${FAKE_ELEVENLABS_ENV} must be "1" or unset.`;
   if (env.VERCEL || env.VERCEL_ENV) return `${FAKE_ELEVENLABS_ENV} is set on Vercel. Remove it from the project's environment variables.`;
-  if (env.MONGODB_DB !== TEST_DB) return `${FAKE_ELEVENLABS_ENV} is only allowed with MONGODB_DB=${TEST_DB}.`;
+  if (databaseName(env) !== TEST_DB) return `${FAKE_ELEVENLABS_ENV} is only allowed with MONGODB_DB=${TEST_DB}.`;
   if (!TEST_ORIGIN.test(env.BETTER_AUTH_URL ?? "")) return `${FAKE_ELEVENLABS_ENV} is only allowed on a local test server (http://localhost:3230–3239).`;
   return null;
 }
@@ -49,7 +59,7 @@ export function voiceSetupFromEnv(env: NodeJS.ProcessEnv = process.env): VoiceSe
       provider: (language) => new FakeElevenLabsSpeech(language),
     };
   }
-  if (env.MONGODB_DB === TEST_DB) return { ok: false, problem: `On the test database only the stand-in voice may be used (${FAKE_ELEVENLABS_ENV}=1): a test must never spend real ElevenLabs characters.` };
+  if (databaseName(env) === TEST_DB) return { ok: false, problem: `On the test database only the stand-in voice may be used (${FAKE_ELEVENLABS_ENV}=1): a test must never spend real ElevenLabs characters.` };
   const apiKey = env.ELEVENLABS_API_KEY?.trim();
   const model = env.ELEVENLABS_MODEL?.trim() ?? "";
   if (!apiKey) return { ok: false, problem: "ELEVENLABS_API_KEY is missing. Add it to the .env file." };

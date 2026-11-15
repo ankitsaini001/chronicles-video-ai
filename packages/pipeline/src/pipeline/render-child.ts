@@ -10,7 +10,9 @@ import type { RenderChildMessage, RenderJobResult, RenderParentMessage, RenderPh
  * (apps/web/lib/video/render-process.ts) with Node's IPC channel:
  *   worker → { type: "start", spec }   then optionally   { type: "cancel" }
  *   child  → { type: "progress", phase, percent } …   then   { type: "result", result }
- * It renders one video from local files (render-job.ts) and exits.
+ * It renders one video from local files (render-job.ts) and exits. The worker starts it detached (its
+ * own process group, so a kill also stops Chrome and ffmpeg) with only the environment rendering
+ * needs (no secrets). A failure's `detail` (with its stack) goes to the worker's server log only.
  *
  * Temporary files: Remotion and Chrome use the process temp folder (TMPDIR), not the job's work
  * folder. The worker starts this process with TMPDIR=<project>/runs/.tmp; as a second guard, this
@@ -70,9 +72,17 @@ process.on("message", (message: RenderParentMessage) => {
   }
 });
 
-// The worker went away (crash, restart): stop rendering for nobody.
+// The worker went away (crash, restart): stop rendering for nobody. This process leads its own
+// process group (the worker starts it detached), so after a short grace the whole group goes,
+// including any Chrome or ffmpeg left running.
 process.on("disconnect", () => {
   cancelled = true;
   cancel();
-  setTimeout(() => process.exit(1), 5000).unref();
+  setTimeout(() => {
+    try {
+      process.kill(-process.pid, "SIGKILL");
+    } catch {
+      process.exit(1);
+    }
+  }, 5000).unref();
 });

@@ -1,8 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FakeElevenLabsSpeech, silentMp3 } from "../apps/web/lib/video/fake-elevenlabs";
-import { ensureProjectTmp, isInside, projectRoot } from "../apps/web/lib/video/render-process";
+import { ensureProjectTmp, isInside, projectRoot, renderChildEnv, startRenderProcess } from "../apps/web/lib/video/render-process";
 import { fakeVoiceProblem, voiceEstimatorFor, voiceSetupFromEnv, VoiceNotConfiguredError } from "../apps/web/lib/video/voice";
 import type { Plan } from "../packages/pipeline/src/contracts";
 import { hashPlan } from "../packages/pipeline/src/planning";
@@ -19,6 +20,8 @@ import { validPlan, withTempDir } from "./helpers";
 // no Remotion (the renderer and the probes are fakes here; the e2e check renders for real).
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+/** A well-formed (not real) connection string: the voice checks read the database name the app would use. */
+const TEST_URI = "mongodb+srv://tester:not-a-password@cluster0.example.mongodb.net/";
 
 const goodProbe = (frames: number): Mp4Probe => ({
   codec: "h264",
@@ -179,8 +182,12 @@ describe("stand-in voice (E2E only, zero ElevenLabs calls)", () => {
   });
 
   it("is allowed only on the test database and a local test port, never on Vercel", () => {
-    const ok = { E2E_FAKE_ELEVENLABS: "1", MONGODB_DB: "bytereel_test", BETTER_AUTH_URL: "http://localhost:3232" };
+    const ok = { E2E_FAKE_ELEVENLABS: "1", MONGODB_DB: "bytereel_test", MONGODB_URI: TEST_URI, BETTER_AUTH_URL: "http://localhost:3232" };
     expect(fakeVoiceProblem(ok)).toBeNull();
+    // The same (trimmed) database name the app connects to: spaces can't slip past the check.
+    expect(fakeVoiceProblem({ ...ok, MONGODB_DB: " bytereel_test " })).toBeNull();
+    expect(fakeVoiceProblem({ ...ok, MONGODB_DB: " bytereel " })).toMatch(/only allowed with MONGODB_DB=bytereel_test/);
+    expect(fakeVoiceProblem({ ...ok, MONGODB_URI: "" })).toMatch(/only allowed with MONGODB_DB=bytereel_test/);
     expect(fakeVoiceProblem({})).toBeNull();
     expect(fakeVoiceProblem({ ...ok, MONGODB_DB: "bytereel" })).toMatch(/only allowed with MONGODB_DB=bytereel_test/);
     expect(fakeVoiceProblem({ ...ok, BETTER_AUTH_URL: "http://localhost:3000" })).toMatch(/local test server/);
@@ -190,9 +197,11 @@ describe("stand-in voice (E2E only, zero ElevenLabs calls)", () => {
   });
 
   it("the REAL voice is refused on the test database (a test can never spend real characters)", () => {
-    const setup = voiceSetupFromEnv({ MONGODB_DB: "bytereel_test", ELEVENLABS_API_KEY: "k".repeat(40), ELEVENLABS_MODEL: "eleven_multilingual_v2" });
+    const setup = voiceSetupFromEnv({ MONGODB_DB: "bytereel_test", MONGODB_URI: TEST_URI, ELEVENLABS_API_KEY: "k".repeat(40), ELEVENLABS_MODEL: "eleven_multilingual_v2" });
     expect(setup).toMatchObject({ ok: false });
     if (!setup.ok) expect(setup.problem).toMatch(/stand-in voice/);
+    // Whitespace around the name doesn't get past it (code review, finding 13).
+    expect(voiceSetupFromEnv({ MONGODB_DB: "bytereel_test\n", MONGODB_URI: TEST_URI, ELEVENLABS_API_KEY: "k".repeat(40), ELEVENLABS_MODEL: "eleven_multilingual_v2" })).toMatchObject({ ok: false });
   });
 
   it("the real voice: the plan's preset voice from the environment, never a fallback", () => {
@@ -208,7 +217,7 @@ describe("stand-in voice (E2E only, zero ElevenLabs calls)", () => {
 
   it("the voice estimate: one recording per scene with the characters ElevenLabs bills; stand-in keys differ from real ones", () => {
     const plan = validPlan();
-    const fake = voiceSetupFromEnv({ E2E_FAKE_ELEVENLABS: "1", MONGODB_DB: "bytereel_test", BETTER_AUTH_URL: "http://localhost:3232" });
+    const fake = voiceSetupFromEnv({ E2E_FAKE_ELEVENLABS: "1", MONGODB_DB: "bytereel_test", MONGODB_URI: TEST_URI, BETTER_AUTH_URL: "http://localhost:3232" });
     const real = voiceSetupFromEnv({ MONGODB_DB: "bytereel", ELEVENLABS_API_KEY: "k".repeat(40), ELEVENLABS_MODEL: "eleven_multilingual_v2", ELEVENLABS_VOICE_ID_INDIAN_FEMALE: "AbCdEf0123456789wxyz" });
     if (!fake.ok || !real.ok) throw new Error("setup");
     const stored = { ...plan, voicePreset: "indian-english-female" } as never;
@@ -244,4 +253,101 @@ describe("temporary files stay inside the project (F22b MUST)", () => {
       process.env.TMPDIR = saved;
     }
   });
+});
+
+describe("the render child process (code review, findings 11 and 12)", () => {
+  it("gets only what rendering needs: no database, voice, storage, login or AI secrets", () => {
+    const env = renderChildEnv(
+      {
+        PATH: "/usr/bin",
+        HOME: "/home/x",
+        NODE_ENV: "production",
+        LANG: "en_US.UTF-8",
+        REMOTION_CHROME_MODE: "headless-shell",
+        MONGODB_URI: "mongodb+srv://u:p@c/",
+        ELEVENLABS_API_KEY: "secret",
+        R2_SECRET_ACCESS_KEY: "secret",
+        R2_ACCESS_KEY_ID: "secret",
+        BETTER_AUTH_SECRET: "secret",
+        GEMINI_API_KEY: "secret",
+        NODE_OPTIONS: "--inspect",
+        TMPDIR: "/tmp",
+      },
+      "/project/runs/.tmp/generate/x/tmp",
+    );
+    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/x", NODE_ENV: "production", LANG: "en_US.UTF-8", REMOTION_CHROME_MODE: "headless-shell", TMPDIR: "/project/runs/.tmp/generate/x/tmp" });
+  });
+
+  /**
+   * A stand-in render child (the real worker side, a fake renderer): it starts a grandchild (like
+   * Chrome), writes the ids and its environment's names, notes a "cancel" but keeps running.
+   */
+  async function fakeChildRoot(dir: string) {
+    const root = path.join(dir, "root");
+    await mkdir(path.join(root, "packages", "pipeline", "src", "pipeline"), { recursive: true });
+    await symlink(path.join(ROOT, "node_modules"), path.join(root, "node_modules"));
+    await writeFile(
+      path.join(root, "packages", "pipeline", "src", "pipeline", "render-child.ts"),
+      `import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const out = process.env.TMPDIR as string;
+const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+process.on("message", (m: { type?: string }) => { if (m?.type === "cancel") writeFileSync(out + "/cancel-received", "yes"); });
+writeFileSync(out + "/pids.json", JSON.stringify({ child: process.pid, grandchild: grandchild.pid, env: Object.keys(process.env) }));
+setInterval(() => {}, 1000);
+`,
+    );
+    const tmp = path.join(dir, "tmp");
+    await mkdir(tmp, { recursive: true });
+    return { root, tmp };
+  }
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  async function until(check: () => boolean, ms = 10_000) {
+    const end = Date.now() + ms;
+    while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+    return check();
+  }
+
+  it("Cancel: 'cancel' is sent first; a renderer that doesn't stop is killed WITH its process group (Chrome, ffmpeg)", async () => {
+    await withTempDir(async (dir) => {
+      const { root, tmp } = await fakeChildRoot(dir);
+      const saved = process.env.MONGODB_URI;
+      process.env.MONGODB_URI = "mongodb+srv://u:not-real@cluster0.example.mongodb.net/";
+      try {
+        const run = startRenderProcess({} as RenderJobSpec, { root, tmp, onProgress: () => undefined, graceMs: 300 });
+        expect(await until(() => existsSync(path.join(tmp, "pids.json")))).toBe(true);
+        const ids = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number; grandchild: number; env: string[] };
+        expect(ids.env).not.toContain("MONGODB_URI");
+        expect(ids.env).toContain("TMPDIR");
+        run.cancel();
+        expect(await run.result).toEqual({ status: "cancelled" });
+        expect(existsSync(path.join(tmp, "cancel-received"))).toBe(true);
+        expect(await until(() => !alive(ids.grandchild) && !alive(ids.child))).toBe(true);
+      } finally {
+        if (saved === undefined) delete process.env.MONGODB_URI;
+        else process.env.MONGODB_URI = saved;
+      }
+    });
+  }, 30_000);
+
+  it("the time limit: 'cancel' first, then the whole group is killed; the result says it took too long", async () => {
+    await withTempDir(async (dir) => {
+      const { root, tmp } = await fakeChildRoot(dir);
+      const run = startRenderProcess({} as RenderJobSpec, { root, tmp, onProgress: () => undefined, maxMs: 4_000, graceMs: 300 });
+      expect(await until(() => existsSync(path.join(tmp, "pids.json")))).toBe(true);
+      const ids = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number; grandchild: number };
+      const result = await run.result;
+      expect(result).toMatchObject({ status: "failed", stage: "render" });
+      expect(result.status === "failed" && result.detail).toMatch(/took longer than/);
+      expect(existsSync(path.join(tmp, "cancel-received"))).toBe(true);
+      expect(await until(() => !alive(ids.grandchild) && !alive(ids.child))).toBe(true);
+    });
+  }, 30_000);
 });
