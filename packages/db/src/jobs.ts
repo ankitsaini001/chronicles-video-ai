@@ -119,15 +119,22 @@ export interface JobDocument {
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
   needsInput: JobNeedsInput | null;
-  /** Revise jobs carry `revisionId` from the start (API.md §8.2). */
-  result: { planVersionId?: ObjectId; revisionId?: ObjectId } | null;
-  /** `plan:{projectId}:{inputHash}` or `rev:{revisionId}` (unique). */
+  /** Revise jobs carry `revisionId` from the start (API.md §8.2). Generate jobs (F23): `renderId` on success. */
+  result: { planVersionId?: ObjectId; revisionId?: ObjectId; renderId?: ObjectId } | null;
+  /** `plan:{projectId}:{inputHash}`, `rev:{revisionId}` or `gen:{planVersionId}` (unique). */
   idempotencyKey: string;
   inngestRunId: string | null;
   cancelRequestedAt: Date | null;
   /** The Inngest event that starts this attempt: its id (dedupe) and when it was sent. */
   event: { id: string; sentAt: Date | null; lastTriedAt: Date | null };
   planner: PlanCheckpoint | null;
+  /**
+   * Generate jobs (F23): the narration this job reserved voice characters for (one entry per
+   * recording, `cacheKeys`) and how many characters in total, so a retry never counts a recording twice.
+   */
+  voice?: { cacheKeys: string[]; characters: number } | null;
+  /** Generate jobs (F23): the render attempt in progress. Every attempt gets a NEW renderId (R2 folder). */
+  render?: { renderId: ObjectId; startedAt: Date } | null;
   /** When the job last became `queued` (C2 or E2), for the stuck-job rule. */
   queuedAt: Date;
   createdAt: Date;
@@ -147,7 +154,12 @@ export type JobResource = {
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
   needsInput: JobNeedsInput | null;
-  result: { planVersionId?: string; revisionId?: string } | null;
+  result: { planVersionId?: string; revisionId?: string; renderId?: string } | null;
+  /**
+   * Generate jobs waiting for their turn (F23, additive): how many videos are being made or wait
+   * before this one (only one video is rendered at a time). Null when not waiting or not known.
+   */
+  queue: { ahead: number } | null;
   cancelRequestedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -162,7 +174,7 @@ export function isTerminal(state: JobState): boolean {
   return TERMINAL_JOB_STATES.includes(state);
 }
 
-export function toJobResource(doc: JobDocument): JobResource {
+export function toJobResource(doc: JobDocument, extras: { ahead?: number | null } = {}): JobResource {
   return {
     id: doc._id.toHexString(),
     projectId: doc.projectId.toHexString(),
@@ -177,8 +189,10 @@ export function toJobResource(doc: JobDocument): JobResource {
       ? {
           ...(doc.result.planVersionId ? { planVersionId: doc.result.planVersionId.toHexString() } : {}),
           ...(doc.result.revisionId ? { revisionId: doc.result.revisionId.toHexString() } : {}),
+          ...(doc.result.renderId ? { renderId: doc.result.renderId.toHexString() } : {}),
         }
       : null,
+    queue: doc.state === "queued" && typeof extras.ahead === "number" ? { ahead: extras.ahead } : null,
     cancelRequestedAt: iso(doc.cancelRequestedAt),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -271,6 +285,11 @@ export async function getJob(db: Db, jobId: ObjectId, session?: ClientSession): 
 /** The project's newest plan job (the one the Try again button retries), or null. */
 export async function getLatestPlanJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
   return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "plan" }, { sort: { createdAt: -1 } });
+}
+
+/** The project's newest generate job (F23: the video), or null. */
+export async function getLatestGenerateJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
+  return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "generate" }, { sort: { createdAt: -1 } });
 }
 
 /** The project's newest revise job (F18: Try again after a failed change request), or null. */

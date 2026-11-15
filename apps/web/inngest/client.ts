@@ -25,6 +25,17 @@ export const PLAN_REQUESTED = "plan.requested";
 /** Event that starts a storyboard change (API.md D5, E2; F18). Carries ids only. */
 export const REVISION_REQUESTED = "revision.requested";
 
+/** Event that starts the video job (API.md D8, E2; F23). Carries ids only. */
+export const VIDEO_GENERATE_REQUESTED = "video.generate.requested";
+
+/**
+ * Only ONE video job step runs at a time across the whole app (F23, founder 2026-11-15): renders run
+ * on this computer, and one render at a time keeps the machine (and the founder's dev server)
+ * usable. Inngest counts steps, so two videos may take turns between steps, but a render (one step)
+ * never overlaps another. Other videos wait ("Waiting to start…"). `scope: "env"` with a fixed key.
+ */
+export const VIDEO_CONCURRENCY: [{ scope: "env"; key: string; limit: number }] = [{ scope: "env", key: '"video-render"', limit: 1 }];
+
 /**
  * Storyboard AI work shares ONE limit across `plan-video` and `revise-plan` (F16–F20 review): at most
  * 2 runs per creator and 5 in total at the same time, whichever function they are in. `scope: "env"`

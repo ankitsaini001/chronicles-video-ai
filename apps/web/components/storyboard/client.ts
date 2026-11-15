@@ -12,6 +12,9 @@ export const CLIENT_MESSAGES = {
   STALE: "This project changed in another tab, refresh.",
 } as const;
 
+/** 503 errors whose message is shown as is (API.md §4.3); any other 5xx shows the generic text. */
+const SHOWN_503_CODES = ["SPEND_CEILING", "PROVIDER_BUSY", "MAINTENANCE"];
+
 /** A random Idempotency-Key for one click (API.md §6); re-sent only for a retry of that same click. */
 export function newIdempotencyKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -34,11 +37,13 @@ export async function apiSend<T = Record<string, unknown>>(method: "GET" | "POST
   if (response.ok) return { ok: true, status: response.status, json: json as T };
   if (response.status === 401) window.location.assign("/login");
   const error = (json.error ?? {}) as { code?: string; message?: string; details?: Record<string, unknown> };
+  // A few 503 answers carry a message meant for the creator (e.g. "Voice limit reached this month.").
+  const plain503 = response.status === 503 && SHOWN_503_CODES.includes(error.code ?? "");
   return {
     ok: false,
     status: response.status,
     code: error.code ?? "INTERNAL",
-    message: response.status >= 500 ? CLIENT_MESSAGES.INTERNAL : (error.message ?? CLIENT_MESSAGES.INTERNAL),
+    message: response.status >= 500 && !plain503 ? CLIENT_MESSAGES.INTERNAL : (error.message ?? CLIENT_MESSAGES.INTERNAL),
     details: error.details,
   };
 }

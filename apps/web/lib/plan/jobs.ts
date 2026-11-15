@@ -1,6 +1,8 @@
 import {
   checkStuckJob,
+  generateJobsAhead,
   getJob,
+  getLatestGenerateJob,
   getLatestPlanJob,
   getLatestReviseJob,
   getOwnedProject,
@@ -9,10 +11,10 @@ import {
   type ProjectDocument,
 } from "@bytereel/db";
 import type { Db } from "mongodb";
-import { getInngest, PLAN_REQUESTED, REVISION_REQUESTED } from "../../inngest/client";
+import { getInngest, PLAN_REQUESTED, REVISION_REQUESTED, VIDEO_GENERATE_REQUESTED } from "../../inngest/client";
 
-// Starting and watching plan jobs (F15) and revise jobs (F18) from the API routes and the project
-// pages (server only).
+// Starting and watching plan jobs (F15), revise jobs (F18) and video jobs (F23) from the API routes
+// and the project pages (server only).
 // - sendPlanEvent: hands a queued job to Inngest AFTER its transaction committed (DATABASE.md §7.1).
 //   The event id is the job's event id (the job key, or `{jobId}:retry:{attempt}`), so sending it
 //   twice starts only one run. A failed send is logged and remembered; the stuck-job rule sends it again.
@@ -31,7 +33,7 @@ export async function sendPlanEvent(db: Db, job: JobDocument, log: Log = default
     try {
       await inngest.client.send({
         id: job.event.id,
-        name: job.type === "revise" ? REVISION_REQUESTED : PLAN_REQUESTED,
+        name: job.type === "generate" ? VIDEO_GENERATE_REQUESTED : job.type === "revise" ? REVISION_REQUESTED : PLAN_REQUESTED,
         data: { jobId: job._id.toHexString(), projectId: job.projectId.toHexString(), ownerId: job.ownerId.toHexString(), attempt: job.attempt },
       });
       ok = true;
@@ -54,9 +56,15 @@ export async function refreshJob(db: Db, job: JobDocument, log: Log = defaultLog
   return checked.job;
 }
 
-export type ProjectWithJobs = { project: ProjectDocument; activeJob: JobDocument | null; latestPlanJob: JobDocument | null; latestReviseJob?: JobDocument | null };
+export type ProjectWithJobs = {
+  project: ProjectDocument;
+  activeJob: JobDocument | null;
+  latestPlanJob: JobDocument | null;
+  latestReviseJob?: JobDocument | null;
+  latestGenerateJob?: JobDocument | null;
+};
 
-/** The owner's project with its active job (stuck-job rule applied) and its newest plan and revise jobs, or null. */
+/** The owner's project with its active job (stuck-job rule applied) and its newest plan, revise and video jobs, or null. */
 export async function loadProjectWithJobs(db: Db, ownerId: string, projectId: string, log: Log = defaultLog): Promise<ProjectWithJobs | null> {
   let project = await getOwnedProject(db, ownerId, projectId);
   if (!project) return null;
@@ -68,6 +76,15 @@ export async function loadProjectWithJobs(db: Db, ownerId: string, projectId: st
     }
   }
   const activeJob = project.activeJobId ? await getJob(db, project.activeJobId) : null;
-  const [latestPlanJob, latestReviseJob] = await Promise.all([getLatestPlanJob(db, project._id), project.currentPlanVersionId ? getLatestReviseJob(db, project._id) : null]);
-  return { project, activeJob, latestPlanJob, latestReviseJob };
+  const [latestPlanJob, latestReviseJob, latestGenerateJob] = await Promise.all([
+    getLatestPlanJob(db, project._id),
+    project.currentPlanVersionId ? getLatestReviseJob(db, project._id) : null,
+    project.currentPlanVersionId ? getLatestGenerateJob(db, project._id) : null,
+  ]);
+  return { project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob };
+}
+
+/** A video job waiting for its turn: how many videos are being made or wait before it (else null). */
+export async function videosAhead(db: Db, job: JobDocument | null): Promise<number | null> {
+  return job?.type === "generate" && job.state === "queued" ? generateJobsAhead(db, job) : null;
 }

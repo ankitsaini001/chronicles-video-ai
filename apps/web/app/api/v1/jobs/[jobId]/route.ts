@@ -1,7 +1,7 @@
 import { API_RATE_LIMITS, getOwnedJob, isTerminal, toJobResource } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { ApiProblem } from "@/lib/api/v1";
-import { refreshJob } from "@/lib/plan/jobs";
+import { refreshJob, videosAhead } from "@/lib/plan/jobs";
 
 // E1 GET /api/v1/jobs/{jobId} (docs/API.md E1): one job's status (API.md §8.2). Owner only: someone
 // else's job, a missing one and a malformed id all get 404. An active job gets the stuck-job rule
@@ -14,7 +14,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     handle: async ({ db, user }) => {
       const job = await getOwnedJob(db, user.id, jobId);
       if (!job) throw new ApiProblem(404, "NOT_FOUND", "We couldn't find this job.");
-      return toJobResource(isTerminal(job.state) ? job : await refreshJob(db, job));
+      const current = isTerminal(job.state) ? job : await refreshJob(db, job);
+      return toJobResource(current, { ahead: await videosAhead(db, current) });
     },
   })(request);
 }

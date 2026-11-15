@@ -221,9 +221,11 @@ describe("existing Hindi/Hinglish projects", () => {
     // English keeps everything.
     expect(allowedActionsFor(english({}), null, revise)).toEqual(["rename", "edit_storyboard", "request_revision", "retry_job", "approve_storyboard", "archive"]);
     expect(allowedActionsFor(english({ state: "plan_failed", currentPlanVersionId: null }), plan)).toEqual(["rename", "edit_idea", "retry_job", "archive"]);
-    // Hindi / Hinglish: viewable, narration edit/undo, rename, archive and approve remain.
+    // Hindi / Hinglish: viewable, narration edit/undo, rename and archive remain. Since F23 approving
+    // starts the voice + video job, so "Approve & generate video" and "Generate video" are gone too.
     for (const language of ["hi", "hinglish"] as const) {
-      expect(allowedActionsFor(projectDoc({ language }), null, revise)).toEqual(["rename", "edit_storyboard", "approve_storyboard", "archive"]);
+      expect(allowedActionsFor(projectDoc({ language }), null, revise)).toEqual(["rename", "edit_storyboard", "archive"]);
+      expect(allowedActionsFor(projectDoc({ language, approvedPlanVersionId: VERSION }), null)).toEqual(["rename", "edit_storyboard", "archive"]);
       expect(allowedActionsFor(projectDoc({ language, state: "plan_failed", currentPlanVersionId: null }), plan)).toEqual(["rename", "archive"]);
     }
   });

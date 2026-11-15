@@ -24,7 +24,7 @@ export {
   type LoginGuardUser,
   type LoginLock,
 } from "./login-guard";
-export { DEFAULT_TIMEZONE, isValidTimezone, USAGE_LIMITS, usagePeriods, type UsagePeriods } from "./usage";
+export { APP_VOICE_CHARACTERS_PER_MONTH, DEFAULT_TIMEZONE, isValidTimezone, USAGE_LIMITS, usagePeriods, type UsagePeriods } from "./usage";
 export { ensureIndexes, INDEX_FEATURES, INDEXES, indexesForFeatures, type IndexDefinition } from "./indexes";
 export {
   addInvite,
@@ -52,6 +52,8 @@ export {
 } from "./idempotency";
 export {
   addUsageWithinLimit,
+  APP_USAGE_OWNER_ID,
+  APP_USAGE_TIMEZONE,
   readUsageCount,
   USAGE_COUNTERS_COLLECTION,
   usageCounterPeriod,
@@ -139,6 +141,7 @@ export {
 export {
   canRetryPlanJob,
   getJob,
+  getLatestGenerateJob,
   getLatestPlanJob,
   getLatestReviseJob,
   getOwnedJob,
@@ -198,8 +201,8 @@ export {
 } from "./plan-versions";
 export {
   APPROVABLE_STATES,
-  approveStoryboard,
   AUDIT_LOGS_COLLECTION,
+  findOrCreateApproval,
   StoryboardApprovalBodySchema,
   type StoryboardApprovalBody,
   STORYBOARD_APPROVAL_SCHEMA_VERSION,
@@ -237,7 +240,57 @@ export {
   type LibraryTab,
   type ProjectSummaryResource,
 } from "./project-library";
-export { checkStuckJob, checkStuckPlanJob, type StuckCheck } from "./stuck-jobs";
+export { checkStuckJob, checkStuckPlanJob, GENERATE_IDLE_LIMIT_MS, isGenerateJobStuck, type StuckCheck } from "./stuck-jobs";
+export {
+  approveAndGenerate,
+  beginRender,
+  canRetryGenerateJob,
+  cancelGenerateJob,
+  completeGenerateJob,
+  endGenerateJob,
+  GENERATE_ERRORS,
+  GENERATE_MESSAGES,
+  GENERATE_STAGES,
+  generateJobKey,
+  generateJobsAhead,
+  lastGenerateActivity,
+  loadGenerateAttempt,
+  newGenerateJob,
+  ownerTimezone,
+  recordingMessage,
+  renderInputHash,
+  renderingMessage,
+  reserveVoice,
+  retryGenerateJob,
+  setGenerateProgress,
+  startGenerateAttempt,
+  voiceLimitError,
+  voiceLimitProblem,
+  voiceStillNeeded,
+  type ApproveAndGenerateResult,
+  type GenerateErrorCode,
+  type GenerateJobContext,
+  type GenerateStage,
+  type RenderToSave,
+  type VoiceEstimator,
+  type VoiceScene,
+} from "./generate-jobs";
+export {
+  canTakeOverSpeech,
+  claimSpeech,
+  markSpeechFailed,
+  markSpeechReady,
+  readySpeech,
+  saveSpeechResponse,
+  SPEECH_ARTIFACT_SCHEMA_VERSION,
+  SPEECH_ARTIFACTS_COLLECTION,
+  SPEECH_LOCK_STALE_MS,
+  type SpeechArtifactDocument,
+  type SpeechClaim,
+  type SpeechRecordDoc,
+  type SpeechSetup,
+} from "./speech-artifacts";
+export { getRender, latestReadyRenderOf, RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, rendersForCards, type RenderDocument } from "./renders";
 export {
   canRetryReviseJob,
   completeReviseJob,

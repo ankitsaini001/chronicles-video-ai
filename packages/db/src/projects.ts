@@ -195,12 +195,16 @@ export function displayStateOf(doc: Pick<ProjectDocument, "state" | "stateBefore
   return doc.state === "archived" ? (doc.stateBeforeArchive ?? "draft") : doc.state;
 }
 
-/** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
-export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "archive";
+/**
+ * API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. F23 adds `generate_video`
+ * (D8 on a version that is already approved but has no video job yet) and `cancel_job` (E3).
+ */
+export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "generate_video" | "cancel_job" | "archive";
 
 /**
- * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs,
- * nothing on an archived project.
+ * What the creator may do now (API.md §11.1, "the server owns state"). While a job runs: only
+ * `cancel_job` for a video job (F23) that hasn't been asked to stop yet; nothing for the storyboard
+ * jobs. Nothing on an archived project.
  * - F21: `rename` (C4 title) first and `archive` (C5) last, in every state (archive not while
  *   `publishing`, ARCHITECTURE §7.2).
  * - F15, after a failed storyboard: `edit_idea` (C4), and `retry_job` (E2) while the last plan job
@@ -208,34 +212,52 @@ export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storybo
  * - F17, with a storyboard: `edit_storyboard` (D3 narration edit, D4 voice, D7 undo/restore).
  * - F18: `request_revision` (D5) while under the 20 AI requests; `retry_job` (E2) when the last
  *   change request failed with a retryable error and the storyboard is still the one it was made on.
- * - F20: `approve_storyboard` (D8) in storyboard_ready / generate_failed while the current version
- *   isn't the approved one (whether it passes the checks is on the version: `valid`).
+ * - F20/F23: `approve_storyboard` (D8 "Approve & generate video") in storyboard_ready /
+ *   generate_failed while the current version isn't the approved one (whether it passes the checks
+ *   is on the version: `valid`).
+ * - F23: `generate_video` (D8 "Generate video") in storyboard_ready when the current version IS
+ *   approved and has no video job running (an approval from F20, a cancelled job), unless its last
+ *   job said the storyboard must change (needs_input). `retry_job` (E2) in generate_failed when the
+ *   newest video job failed with a retryable error and is still for the approved current version.
+ * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
+ *   loses every action that costs AI or voice: `retry_job`, `request_revision`, `edit_idea` (only
+ *   useful for its Try again), and since F23 `approve_storyboard` / `generate_video` (approving now
+ *   starts the voice + video job). It stays viewable; the free actions stay.
  * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
  *   loses every action that costs AI or voice: `retry_job`, `request_revision`, and `edit_idea`
  *   (only useful for its Try again). It stays viewable; the free actions stay.
  */
-export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
-  if (doc.activeJobId || doc.state === "archived") return [];
-  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob);
+export function allowedActionsFor(
+  doc: ProjectDocument,
+  latestPlanJob: JobDocument | null | undefined,
+  latestReviseJob?: JobDocument | null,
+  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null } = {},
+): AllowedAction[] {
+  if (doc.state === "archived") return [];
+  if (doc.activeJobId) {
+    const active = more.activeJob && more.activeJob._id.equals(doc.activeJobId) ? more.activeJob : null;
+    return active?.type === "generate" && (active.state === "queued" || active.state === "running") && !active.cancelRequestedAt ? ["cancel_job"] : [];
+  }
+  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob, more.latestGenerateJob);
   const actions: AllowedAction[] = ["rename", ...(isLanguageEnabled(doc.language) ? stepActions : stepActions.filter((a) => !AI_ACTIONS.includes(a)))];
   if (doc.state !== "publishing") actions.push("archive");
   return actions;
 }
 
-/** Actions that start an AI job (or lead only to one): refused for a switched-off language. */
-const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea"];
+/** Actions that start an AI or voice job (or lead only to one): refused for a switched-off language. */
+const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea", "approve_storyboard", "generate_video"];
 
 /**
  * Throws 422 LANGUAGE_UNAVAILABLE when the language is switched off (languages.ts). Every action
- * that costs AI or voice calls this BEFORE counting anything or starting a job: C2, D5, E2 (and
- * the F23 video job).
+ * that costs AI or voice calls this BEFORE counting anything or starting a job: C2, D5, D8, E2 (and
+ * the F23 video job's worker).
  */
 export function assertLanguageEnabled(language: string): void {
   if (!isLanguageEnabled(language)) throw new ProjectActionError("LANGUAGE_UNAVAILABLE", languageUnavailableMessage(), { language });
 }
 
 /** The actions of the step the project is on (F15–F20), without rename/archive. */
-function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
+function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null, latestGenerateJob?: JobDocument | null): AllowedAction[] {
   const underLimit = doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject;
   if (doc.state === "plan_failed") {
     const actions: AllowedAction[] = ["edit_idea"];
@@ -251,7 +273,12 @@ function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null 
     latestReviseJob.error?.retryable === true &&
     latestReviseJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true;
   if (reviseRetry && underLimit) actions.push("retry_job");
-  if ((doc.state === "storyboard_ready" || doc.state === "generate_failed") && !doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId)) actions.push("approve_storyboard");
+  const approved = doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId) === true;
+  if ((doc.state === "storyboard_ready" || doc.state === "generate_failed") && !approved) actions.push("approve_storyboard");
+  // F23: the video job of the current (approved) version.
+  const videoJob = latestGenerateJob?.type === "generate" && latestGenerateJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true ? latestGenerateJob : null;
+  if (doc.state === "storyboard_ready" && approved && videoJob?.state !== "needs_input") actions.push("generate_video");
+  if (doc.state === "generate_failed" && approved && videoJob?.state === "failed" && videoJob.error?.retryable === true && !actions.includes("retry_job")) actions.push("retry_job");
   return actions;
 }
 
@@ -264,11 +291,13 @@ export interface ProjectRelated {
   latestPlanJob?: JobDocument | null;
   /** The project's newest revise job (for `retry_job` on the storyboard, F18). */
   latestReviseJob?: JobDocument | null;
+  /** The project's newest generate job (F23: `generate_video`, `retry_job` on the video step). */
+  latestGenerateJob?: JobDocument | null;
 }
 
 /**
- * Database document → API resource. Posts and thumbnails don't exist yet (F23, F30), so those
- * fields are null.
+ * Database document → API resource. Posts don't exist yet (F30); the thumbnail is only on the My
+ * videos cards (C1, F23), so here it is null.
  */
 export function toProjectResource(doc: ProjectDocument, related: ProjectRelated = {}): ProjectResource {
   const activeJob = related.activeJob && doc.activeJobId && related.activeJob._id.equals(doc.activeJobId) ? related.activeJob : null;
@@ -291,7 +320,7 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     activeJobId: hexOrNull(doc.activeJobId),
     activeJob: activeJob && related.embedActiveJob !== false ? toJobResource(activeJob) : null,
     lastError: doc.lastError ? { code: doc.lastError.code, message: doc.lastError.message, at: doc.lastError.at.toISOString() } : null,
-    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob),
+    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob, { activeJob, latestGenerateJob: related.latestGenerateJob ?? null }),
     archivedAt: doc.archivedAt ? doc.archivedAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -411,7 +440,9 @@ export class ProjectActionError extends Error {
       | "INVALID_INPUT"
       | "APPROVAL_STALE"
       | "PLAN_INVALID"
-      | "LANGUAGE_UNAVAILABLE",
+      | "LANGUAGE_UNAVAILABLE"
+      | "APPROVAL_REQUIRED"
+      | "SPEND_CEILING",
     message: string,
     readonly details?: Record<string, unknown>,
   ) {

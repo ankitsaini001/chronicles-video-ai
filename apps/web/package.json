@@ -12,6 +12,7 @@
   "dependencies": {
     "@bytereel/db": "0.0.0",
     "@bytereel/pipeline": "0.0.0",
+    "@bytereel/storage": "0.0.0",
     "better-auth": "1.7.14",
     "inngest": "4.26.2",
     "mongodb": "7.7.0",

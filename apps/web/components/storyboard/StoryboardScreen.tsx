@@ -15,7 +15,7 @@ import { SceneCard } from "./SceneCard";
 import { VersionMenu } from "./VersionMenu";
 import { VoiceMenu } from "./VoiceMenu";
 
-// ② Review storyboard (F16–F20; Stitch "Step 2 Storyboard"): the title strip (title, language,
+// ② Review storyboard (F16–F20, F23; Stitch "Step 2 Storyboard"): the title strip (title, language,
 // voice, about N seconds, scene count), "Version N ▾" and Undo (F17), the scene cards with inline
 // narration editing (F17), the notes for the whole storyboard and the bottom bar.
 // The data is the C3 project and the D2 current version, read by the server page. After any change
@@ -163,7 +163,11 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
     router.refresh();
   }
 
-  /** D8: approve this exact version (id + plan hash). F20: the video job comes with F23. */
+  /**
+   * D8: approve this exact version (id + plan hash) and start the video (F23). The same call is the
+   * "Generate video" button for a version that is already approved but has no video job.
+   * Then straight to ③ Video ("Making your video", or the existing video when this version has one).
+   */
   const approveKey = useRef<string | null>(null);
   const [approving, setApproving] = useState(false);
   async function approve() {
@@ -181,14 +185,19 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
       }
       return fail(answer);
     }
-    announce(`Storyboard approved (version ${version.versionNumber}).`);
-    router.refresh();
+    announce(`Storyboard approved (version ${version.versionNumber}). Making your video.`);
+    router.push(`/projects/${project.id}/video`);
   }
 
   const locked = busy || !canEdit;
   const approved = project.approvedPlanVersionId === version.id;
   const changeRunning = project.activeJob !== null;
   const canApprove = project.allowedActions.includes("approve_storyboard") && version.valid && !busy && editing === null;
+  const canGenerate = approved && project.allowedActions.includes("generate_video") && version.valid && !busy && editing === null;
+  // F23: the video job stopped because the storyboard must change (too long/short, unclear wording).
+  const needsChange = project.lastError?.code === "NEEDS_INPUT" ? project.lastError.message : null;
+  // F23 (founder decision 5): an older video stays the project's video until a new one is made.
+  const hasOlderVideo = project.currentRenderId !== null && project.state === "storyboard_ready";
 
   return (
     <div className="flex flex-col">
@@ -242,6 +251,17 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
               Refresh
             </button>
           )}
+        </div>
+      )}
+
+      {(needsChange || hasOlderVideo) && (
+        <div className="mt-4 flex flex-col gap-2">
+          {needsChange && (
+            <Note tone="problem">
+              We couldn&apos;t make the video yet. {needsChange}
+            </Note>
+          )}
+          {hasOlderVideo && <Note tone="warning">Your earlier video (made from an older version) is kept until you make a new one.</Note>}
         </div>
       )}
 
@@ -328,16 +348,22 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
           {project.state === "archived" ? (
             <p className="ml-auto text-sm text-muted">Archived. This storyboard is read-only.</p>
           ) : approved ? (
-            <p className="ml-auto inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
-              <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
-            </p>
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">
+              <p className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
+                <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
+              </p>
+              {project.allowedActions.includes("generate_video") && (
+                <Button type="button" onClick={() => void approve()} disabled={!canGenerate} className="whitespace-nowrap">
+                  {approving ? "Starting…" : "Generate video"}
+                </Button>
+              )}
+            </div>
           ) : (
             <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
               {!version.valid && <p className="text-xs text-danger">Fix the scenes marked in red first.</p>}
               {version.valid && changeRunning && <p className="text-xs text-muted">Wait for your change to finish.</p>}
               <Button type="button" onClick={() => void approve()} disabled={!canApprove} className="whitespace-nowrap">
-                {/* F23 MUST rename it "Approve & generate video" when approving starts the video. */}
-                {approving ? "Approving…" : "Approve storyboard"}
+                {approving ? "Starting…" : "Approve & generate video"}
               </Button>
             </div>
           )}
