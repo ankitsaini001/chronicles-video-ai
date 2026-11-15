@@ -723,7 +723,7 @@ Scene = {
   objects: VisualObject[];                // count per pattern (COMPONENT_CATALOG min/maxObjects)
   events: SceneEvent[];                   // ≤ 8 (SCENE_LIMITS.maxEvents)
 }
-NarrationBlock = { id: SafeId; text: string /*1–300*/; speech: string | null; display: string | null; hero?: HeroName /*the big object shown while it is spoken (F22b); omitted when none*/ }
+NarrationBlock = { id: SafeId; text: string /*1–300*/; speech: string | null; display: string | null; hero?: HeroName | null /*the big object shown while it is spoken (F22b); null = the planner's "none" (scene icon); omitted = keyword fallback (old plans, edited words)*/ }
 VisualObject  = { id: SafeId; kind: ObjectKind; label: string /*≤32 or ≤60 by kind*/; icon?: IconName /*omitted when none*/; value: number | null /*chart kinds only*/ }
 SceneEvent    = { id: SafeId; anchor: { narrationId: SafeId; phrase: string }; action: EventAction; target: SafeId /*object id in the same scene*/ }
 ValidationIssue = { sceneId: string | null; path: string; message: string }   // packages/pipeline/src/planning/validation-issue.ts

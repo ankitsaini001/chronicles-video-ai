@@ -40,10 +40,29 @@ the creator wait much longer.
   68 s video. Done by drawing glows as gradient shapes (no blur filters anywhere), a still background,
   JPEG frames and CRF 26. Measurements below.
 
+### Decisions from the code review (2026-11-15)
+- **Temporary files never go to `/tmp`** (shared on the founder's machine): every pipeline and tool process
+  runs with `TMPDIR=<project>/runs/.tmp` (npm scripts, `tools/project-tmp.ts`, `apps/web/scripts/dev.mjs`),
+  because Remotion and Chrome use the process temp folder, not `RenderJob.workDir` (now required).
+- **Long words:** a caption word too wide for a line is shown a little smaller (down to 75%) or broken after
+  a hyphen, slash or dot; plan validation reports only a word that can't be shown at all, on the storyboard,
+  before any voice cost (so "telecommunications" is fine, a 45-letter word is a plan problem).
+- **The planner's "none"** is stored as `hero: null` (the scene icon in a medallion, no keyword guess). A
+  revision keeps "no hero at all" for old blocks; a narration edit that changes a block's words drops its hero.
+- **Keyword fallback:** generic words (time, monthly, steps, fresh, heat, flow, account, sip, signal, cup, …)
+  are label-only: they count in an on-screen object label, never as a spoken cue; "card" is gone. A spoken
+  word may switch to a hero of **another group** only after 3 s on screen. A flat 3 s hold for every switch
+  was not used: the approved water-cycle video switches river → groundwater 1.3 s apart (same group), and
+  its hero sequence must stay exactly as approved (test with its recorded timing).
+- **Safe zone:** one `LAYOUT.safeRight` (920): every lower-half right edge, with its own pop/active scale,
+  stays left of it, so the camera's zoom and drift keep it left of the Reels buttons (x 940).
+- **Hook:** the big opening words must be a natural short unit (a short question or sentence, words up to a
+  comma, or "Did you know…" / "Have you ever…"); otherwise the hook's title is on screen from frame 1.
+
 ## Steps
 - [x] 1. Hero catalog (46 objects with titles, keywords, families) shared by planner, compiler, renderer and
   storyboard; optional `hero` per narration block in the plan contract; planner response schema, prompt
-  (hero set + rule, F15 delimiting unchanged), assembly ("none" dropped), revision view, review page
+  (hero set + rule, F15 delimiting unchanged), assembly ("none" stored as null since the review), revision view, review page
 - [x] 2. Timeline v2: hero track per scene (planner pick → keyword fallback → label → icon medallion);
   captions grouped into 3–5 word phrases with word timings and key-term flags
 - [x] 3. Video engine v4 replaces the old composition: backdrop, camera, hero layer, 8 pattern layouts,
@@ -57,7 +76,7 @@ the creator wait much longer.
 - [x] 7b. Hook: the whole opening question (up to 3 words) is on screen within the first frames, and the
   hero sits below it (no overlap)
 - [x] 8. Docs: PRD decision #28, ARCHITECTURE §15.6, BRAND §7.1, API §11.2, DATABASE planVersions, F23 note
-- [ ] 9. Code review (code-reviewer agent)
+- [x] 9. Code review (code-reviewer agent); every finding fixed (progress log, 2026-11-15)
 - [ ] 10. Founder watches the renders and says OK
 
 ## Removed / not in this feature
@@ -72,10 +91,10 @@ the creator wait much longer.
 ## Layouts per scene type
 | Pattern | v4 layout |
 |---|---|
-| Title / hook | The first words slam in big over the hero from frame 1; then the gold title with an underline and a subtitle pill |
+| Title / hook | A natural opening ("Did you know…", up to 3 words) slams in big over the hero from frame 1, otherwise the gold title is there from frame 1; then the title with an underline and a subtitle pill |
 | Labeled diagram | The thing's name as the title, the hero inside a glowing ring, its parts as big cards (2 columns) appearing in sync, the part being said glows. No pointer lines: the hero is a generic picture, so a line could point at the wrong spot |
 | Process flow | The current step (node or arrow) in a big card at the top (icon hidden if it repeats the hero), the hero in the middle, a numbered rail with self-drawing arrows and a travelling light |
-| Comparison | Two columns, each with its own hero (planner pick for that part of the narration → label keyword → medallion; never the same twice), a VS badge, points with ✓/✗ marks; the column being talked about glows |
+| Comparison | Two columns, each with its own hero (planner pick for that part of the narration → label keyword → medallion; never the same twice), a VS badge, every point with ✓/✗ marks (more than 3 in a column, or long ones, make the heroes smaller); the column being talked about glows |
 | Timeline | Title, the hero for the event being told, a line that draws from milestone to milestone with a travelling light; the current milestone is named big under the line |
 | Chart | Shares: a ring that grows around the hero + a big count-up card. Bars or line points: big bars / a self-drawing line with values, a smaller hero above, the current label under the chart. Counters: hero + count-up card |
 | Step sequence | "STEP 2 OF 4" and a segmented progress bar, the hero, the current step in a big numbered card (a check when the narration says it is done) |
@@ -91,13 +110,15 @@ the creator wait much longer.
 
 ## How to try it (founder)
 Nothing here costs money or calls Gemini/ElevenLabs.
-1. Watch the approved water-cycle video re-made with the real engine (your recorded narration):
-   `runs/local-dev/how-the-water-cycle-works-85b912/v1/water-cycle-final-v4.mp4`, and its contact sheet
-   `runs/local-dev/how-the-water-cycle-works-85b912/v1/review-sheets/water-cycle-final-v4-sheet.png`.
-   Compare with `water-cycle-v4-hero.mp4` (the sample you approved).
-2. Watch the three fixture videos (silent, made-up timing, marked FIXTURE): every scene type appears once.
+1. Watch the approved water-cycle video re-made with the real engine and all code-review fixes (your
+   recorded narration): `runs/local-dev/how-the-water-cycle-works-85b912/v1/water-cycle-final-v4-fixed.mp4`,
+   and its contact sheet `runs/local-dev/how-the-water-cycle-works-85b912/v1/review-sheets/water-cycle-final-v4-fixed-sheet.png`.
+   Compare with `water-cycle-final-v4.mp4` (before the review fixes) and `water-cycle-v4-hero.mp4` (the
+   sample you approved). Same heroes at the same moments; the step rail sits a little more to the left.
+2. Watch the fixture videos (silent, made-up timing, marked FIXTURE): every scene type appears once in the
+   first three; `long-labels` shows the longest labels a plan allows, a 7-step rail and 7 bars.
    Videos: `runs/fixture-owner/fixture-<name>/v1/output.mp4` for `water-cycle`, `sip-vs-fd`,
-   `internet-journey`; contact sheets: `runs/f22b-work/sheets/<name>-sheet.png`.
+   `internet-journey`, `long-labels`; contact sheets: `runs/f22b-work/sheets/<name>-sheet.png`.
 3. See the whole hero library: `runs/f22b-work/gallery-all/page-1-f40.png` … `page-4-f40.png`.
 4. To make them again yourself:
    - `npm run video:rerender -- --run runs/local-dev/how-the-water-cycle-works-85b912/v1 --out <file.mp4> --sheet <file.png>`
@@ -109,7 +130,7 @@ Nothing here costs money or calls Gemini/ElevenLabs.
 - [x] Unit tests: hero contract and validation, fallback matching, backward compatibility (old plan renders), planner wiring, hero track, captions, storyboard line
 - [x] `npm test`, typecheck, `next build`
 - [x] Re-render of the approved run and fixture renders; every contact sheet checked (no empty frames, overlaps, cut-offs or duplicates; readable at phone size)
-- [ ] Code review passed (code-reviewer agent)
+- [x] Code review passed (code-reviewer agent; all findings fixed 2026-11-15)
 - [ ] Founder watched the renders and said OK
 
 ## Render time and file size (measured 2026-11-15, this machine, 8 threads)
@@ -122,6 +143,7 @@ change with other people's load, so the load average is noted. Remotion's defaul
 | v4 sample (`exp/video-style-v2`) | ~241 s | 17.9 MB | blur filters everywhere; music synthesis 11.8 s on top |
 | v4 engine, first port | **104.4 s** | 9.83 MB | idle machine; no filters, music loop 1.5 s, CRF 23, moving background glow |
 | v4 engine, final (still glow, CRF 26) | **139.4 s** (earlier runs: 127.9 s, 130.0 s) | **6.62 MB** | final code; busy machine (load average 7.3 before the render and up to 17 during it, from desktop browsers and other work; 3.8–7.9 for the earlier runs). The partial test below shows the same per-frame cost as the first port, so about 105 s when idle |
+| v4 engine + code-review fixes (`water-cycle-final-v4-fixed.mp4`) | **193.0 s** (repeat runs: 194.4 s, 244.2 s) | **6.57 MB** | very busy machine all afternoon: load average 9 → 16, 8 → 21 and 7 → 19 during these three renders (desktop browsers, VS Code, a MongoDB shell and other work). **Not slower than before the review:** the same 20 s (frames 600–1199) rendered back to back, alternating the pre-review code (d09dcba) and the fixed code, 3 rounds at load 14–25: pre-review 87.3 / 84.1 / 76.4 s (average 82.6 s, 2.04 MB), fixed 96.6 / 82.0 / 70.8 s (average 83.1 s, 2.01 MB); the same range took 30.3 s on a quiet machine. So about 105 s idle and about 140 s at load ~7 still hold; re-measure when the machine is quiet (and in the Sandbox benchmark) |
 
 Per change, frames 600–1199 (20 s) of the same run:
 
@@ -143,7 +165,17 @@ Fixture renders with the final code (silent, synthetic timing, same settings, `r
 | `sip-vs-fd` | 70.7 s (2122 frames) | 109.1 s | 5.31 MB | 2 |
 | `internet-journey` | 73.1 s (2194 frames) | 133.9 s | 5.41 MB | 13 |
 
+After the code-review fixes (same settings; all MP4 checks pass; machine very busy, see above):
+
+| Fixture | Length | Render | MP4 size | Load average before → after |
+|---|---|---|---|---|
+| `water-cycle` | 85.2 s (2555 frames) | 255.9 s | 6.73 MB | 8.8 → 15.9 |
+| `sip-vs-fd` | 70.7 s (2122 frames) | 206.7 s | 5.11 MB | 14.1 → 18.8 |
+| `internet-journey` | 73.1 s (2194 frames) | 212.7 s | 5.36 MB | 15.9 → 14.2 |
+| `long-labels` (new) | 82.4 s (2473 frames) | 241.2 s | 7.18 MB | 14.3 → 14.6 |
+
 ## Progress log
 | Date | What happened |
 |---|---|
 | 2026-11-15 | Built: hero catalog + optional `hero` per narration block (planner, prompt, validation, revision, review page); timeline v2 with a hero track and 3–5 word captions with word timings; the v4 engine with 8 layouts replacing the old composition; the 46-object hero library (34 new objects drawn by three helper agents in parallel, reviewed in the hero gallery); the music bed; review tools; two new fixtures; the storyboard "Visual:" line names the heroes. Render speed and size tuned and measured (table above). Contact-sheet review rounds fixed: comparison and part-card text too small, a chart opening on an empty baseline, a labeled diagram whose hero wandered off the diagram's object, a hook whose question was not all visible in the first second and touched the hero, weak-cue flicker in the fallback. 776 tests pass; typecheck and `next build` pass. Ready for code review and the founder's check. |
+| 2026-11-15 | Code review: every finding fixed, in small commits on `dev`. Temporary files: renders and tools never write to `/tmp` (`TMPDIR=<project>/runs/.tmp` in the npm scripts, `tools/project-tmp.ts`, `dev.mjs`; `workDir` required; F23 MUST line); checked before and after every render. Long words: shown smaller or broken at `-` `/` `.`, a plan problem only when they can't be shown; never a failed paid-for video. Heroes: the planner's "none" is `hero: null` (scene icon), generic keywords are label-only, opening and 3 s other-group hold rules, takeaway keeps the planner's pick, narration edits drop a stale hero, storyboard line matches the video; the approved water-cycle run keeps its exact hero sequence (test). Layout: one `LAYOUT.safeRight`, rail/timeline/cards/hook subtitle inside the Reels safe zone (test), 6–7 step rails, long card labels step down and never spill, every comparison point and chart bar drawn, new `long-labels` fixture. Hook: opening words end at a natural break ("Did you know…" kept; "SIP or FD?" title instead of "Should your monthly…"). Captions: overflow safety net back, one lit word at a time, a lone leftover hook word shown. Globe clip ids, tighter key terms, test gaps (old-plan hash value, music bytes/WAV, fixture renders silent with work folder in the run, real caption layout), PRD #28 sound effects, docs. Re-rendered the water-cycle run (`water-cycle-final-v4-fixed.mp4`) and the four fixtures; every contact sheet checked. 832 tests pass; typecheck and `next build` pass. Render time measured on a very busy machine (table above): no slower than before the review in a back-to-back test. Waiting for the founder's check. |
