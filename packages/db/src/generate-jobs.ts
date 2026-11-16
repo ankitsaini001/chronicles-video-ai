@@ -670,9 +670,14 @@ export interface RenderToSave {
   music: boolean;
 }
 
-/** sha256 of what went into the video: the plan, the recordings and the music switch. */
-export function renderInputHash(input: { planHash: string; cacheKeys: readonly string[]; music: boolean }): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify([input.planHash, [...input.cacheKeys], input.music]), "utf8").digest("hex")}`;
+/**
+ * sha256 of what went into the video: the plan, the recordings and the music switch, and (F25) the
+ * caption fixes. Without fixes the hash is exactly the F23 one.
+ */
+export function renderInputHash(input: { planHash: string; cacheKeys: readonly string[]; music: boolean; captionOverrides?: readonly { sceneId: string; phraseIndex: number; text: string }[] }): string {
+  const parts: unknown[] = [input.planHash, [...input.cacheKeys], input.music];
+  if (input.captionOverrides?.length) parts.push(input.captionOverrides.map((o) => [o.sceneId, o.phraseIndex, o.text]));
+  return `sha256:${createHash("sha256").update(JSON.stringify(parts), "utf8").digest("hex")}`;
 }
 
 /**
@@ -850,17 +855,25 @@ export async function endGenerateJob(
 
 // ---------- the queue (one video at a time) ----------
 
-/** How many other videos are being made or wait before this one (shown as "Waiting to start…"). */
+/**
+ * The jobs that render a video and share the ONE render queue (Inngest VIDEO_CONCURRENCY): making a
+ * video (`generate`, F23) and re-rendering it after caption fixes (`caption`, F25).
+ */
+export const VIDEO_JOB_TYPES: readonly JobDocument["type"][] = ["generate", "caption"];
+
+/** How many other video jobs are being made or wait before this one (shown as "Waiting to start…"). */
 export async function generateJobsAhead(db: Db, job: Pick<JobDocument, "_id" | "queuedAt">): Promise<number> {
   return db.collection<JobDocument>(JOBS_COLLECTION).countDocuments({
-    type: "generate",
+    type: { $in: [...VIDEO_JOB_TYPES] },
     _id: { $ne: job._id },
     $or: [{ state: "running" }, { state: "queued", queuedAt: { $lt: job.queuedAt } }],
   });
 }
 
-/** When any OTHER generate job last moved (progress, start, finish), or null: the queue's heartbeat. */
+/** When any OTHER video job (generate or caption) last moved (progress, start, finish), or null: the queue's heartbeat. */
 export async function lastGenerateActivity(db: Db, exceptJobId: ObjectId): Promise<Date | null> {
-  const other = await db.collection<JobDocument>(JOBS_COLLECTION).findOne({ type: "generate", _id: { $ne: exceptJobId } }, { sort: { updatedAt: -1 }, projection: { updatedAt: 1 } });
+  const other = await db
+    .collection<JobDocument>(JOBS_COLLECTION)
+    .findOne({ type: { $in: [...VIDEO_JOB_TYPES] }, _id: { $ne: exceptJobId } }, { sort: { updatedAt: -1 }, projection: { updatedAt: 1 } });
   return other?.updatedAt ?? null;
 }

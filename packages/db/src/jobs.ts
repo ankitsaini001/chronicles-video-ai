@@ -109,8 +109,12 @@ export interface JobDocument {
   projectId: ObjectId;
   schemaVersion: number;
   type: JobType;
-  /** What the job works on. Revise jobs (F18): the base version and the revision. */
-  inputRef: { planVersionId?: ObjectId; revisionId?: ObjectId; postId?: ObjectId };
+  /**
+   * What the job works on. Revise jobs (F18): the base version and the revision. Caption jobs
+   * (F25): the video's storyboard version, the video the fixes were made on (`renderId`) and the
+   * saved fixes (`captionOverrideSetId`).
+   */
+  inputRef: { planVersionId?: ObjectId; revisionId?: ObjectId; postId?: ObjectId; renderId?: ObjectId; captionOverrideSetId?: ObjectId };
   /** Plan jobs: sha256 of the idea the job plans from (part of the key). Revise jobs: of the request. */
   inputHash: string;
   state: JobState;
@@ -121,7 +125,7 @@ export interface JobDocument {
   needsInput: JobNeedsInput | null;
   /** Revise jobs carry `revisionId` from the start (API.md §8.2). Generate jobs (F23): `renderId` on success. */
   result: { planVersionId?: ObjectId; revisionId?: ObjectId; renderId?: ObjectId } | null;
-  /** `plan:{projectId}:{inputHash}`, `rev:{revisionId}` or `gen:{planVersionId}` (unique). */
+  /** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}` or `cap:{captionOverrideSetId}` (unique). */
   idempotencyKey: string;
   inngestRunId: string | null;
   cancelRequestedAt: Date | null;
@@ -139,7 +143,7 @@ export interface JobDocument {
    *   another month they no longer cover anything and are reserved again.
    */
   voice?: { cacheKeys: string[]; characters: number; sentKeys?: string[]; period?: { user: string; app: string } | null } | null;
-  /** Generate jobs (F23): the render attempt in progress. Every attempt gets a NEW renderId (R2 folder). */
+  /** Generate and caption jobs (F23, F25): the render attempt in progress. Every attempt gets a NEW renderId (R2 folder). */
   render?: { renderId: ObjectId; startedAt: Date } | null;
   /** When the job last became `queued` (C2 or E2), for the stuck-job rule. */
   queuedAt: Date;
@@ -162,8 +166,9 @@ export type JobResource = {
   needsInput: JobNeedsInput | null;
   result: { planVersionId?: string; revisionId?: string; renderId?: string } | null;
   /**
-   * Generate jobs waiting for their turn (F23, additive): how many videos are being made or wait
-   * before this one (only one video is rendered at a time). Null when not waiting or not known.
+   * Generate and caption jobs waiting for their turn (F23, F25; additive): how many video jobs are
+   * running or wait before this one (only one video is rendered at a time). Null when not waiting
+   * or not known.
    */
   queue: { ahead: number } | null;
   cancelRequestedAt: string | null;
@@ -296,6 +301,11 @@ export async function getLatestPlanJob(db: Db, projectId: ObjectId): Promise<Job
 /** The project's newest generate job (F23: the video), or null. */
 export async function getLatestGenerateJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
   return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "generate" }, { sort: { createdAt: -1 } });
+}
+
+/** The project's newest caption job (F25: the caption fixes, Try again after a failure), or null. */
+export async function getLatestCaptionJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
+  return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "caption" }, { sort: { createdAt: -1 } });
 }
 
 /** The project's newest revise job (F18: Try again after a failed change request), or null. */

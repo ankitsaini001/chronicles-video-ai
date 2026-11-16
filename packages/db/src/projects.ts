@@ -199,7 +199,7 @@ export function displayStateOf(doc: Pick<ProjectDocument, "state" | "stateBefore
  * API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. F23 adds `generate_video`
  * (D8 on a version that is already approved but has no video job yet) and `cancel_job` (E3).
  */
-export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "generate_video" | "cancel_job" | "archive";
+export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "generate_video" | "edit_captions" | "cancel_job" | "archive";
 
 /**
  * What the creator may do now (API.md §11.1, "the server owns state"). While a job runs: only
@@ -220,30 +220,36 @@ export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storybo
  *   job said the storyboard must change (needs_input) or failed with an error that can't be retried
  *   as it is (D8 refuses both, like E2). `retry_job` (E2) in generate_failed when the
  *   newest video job failed with a retryable error and is still for the approved current version.
+ * - F25: `edit_captions` (F4 caption fixes) in video_ready when the project has a video. While a
+ *   caption job waits or runs: `cancel_job` (like a video job). `retry_job` (E2) in video_ready when
+ *   the newest caption job failed with a retryable error or was cancelled, and the video it was made
+ *   on is still the project's video.
  * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
  *   loses every action that costs AI or voice: `retry_job`, `request_revision`, `edit_idea` (only
  *   useful for its Try again), and since F23 `approve_storyboard` / `generate_video` (approving now
- *   starts the voice + video job). It stays viewable; the free actions stay.
+ *   starts the voice + video job), and since F25 `edit_captions` (the Hindi/Hinglish script rule for
+ *   caption text comes back with those languages). It stays viewable; the free actions stay.
  */
 export function allowedActionsFor(
   doc: ProjectDocument,
   latestPlanJob: JobDocument | null | undefined,
   latestReviseJob?: JobDocument | null,
-  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null } = {},
+  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null; latestCaptionJob?: JobDocument | null } = {},
 ): AllowedAction[] {
   if (doc.state === "archived") return [];
   if (doc.activeJobId) {
     const active = more.activeJob && more.activeJob._id.equals(doc.activeJobId) ? more.activeJob : null;
-    return active?.type === "generate" && (active.state === "queued" || active.state === "running") && !active.cancelRequestedAt ? ["cancel_job"] : [];
+    const videoJob = active?.type === "generate" || active?.type === "caption";
+    return active && videoJob && (active.state === "queued" || active.state === "running") && !active.cancelRequestedAt ? ["cancel_job"] : [];
   }
-  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob, more.latestGenerateJob);
+  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob, more.latestGenerateJob, more.latestCaptionJob);
   const actions: AllowedAction[] = ["rename", ...(isLanguageEnabled(doc.language) ? stepActions : stepActions.filter((a) => !AI_ACTIONS.includes(a)))];
   if (doc.state !== "publishing") actions.push("archive");
   return actions;
 }
 
 /** Actions that start an AI or voice job (or lead only to one): refused for a switched-off language. */
-const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea", "approve_storyboard", "generate_video"];
+const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea", "approve_storyboard", "generate_video", "edit_captions"];
 
 /**
  * Throws 422 LANGUAGE_UNAVAILABLE when the language is switched off (languages.ts). Every action
@@ -255,7 +261,13 @@ export function assertLanguageEnabled(language: string): void {
 }
 
 /** The actions of the step the project is on (F15–F20), without rename/archive. */
-function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null, latestGenerateJob?: JobDocument | null): AllowedAction[] {
+function stepActionsFor(
+  doc: ProjectDocument,
+  latestPlanJob: JobDocument | null | undefined,
+  latestReviseJob?: JobDocument | null,
+  latestGenerateJob?: JobDocument | null,
+  latestCaptionJob?: JobDocument | null,
+): AllowedAction[] {
   const underLimit = doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject;
   if (doc.state === "plan_failed") {
     const actions: AllowedAction[] = ["edit_idea"];
@@ -278,6 +290,13 @@ function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null 
   const videoNeedsChange = videoJob?.state === "needs_input" || (videoJob?.state === "failed" && videoJob.error?.retryable !== true);
   if (doc.state === "storyboard_ready" && approved && !videoNeedsChange) actions.push("generate_video");
   if (doc.state === "generate_failed" && approved && videoJob?.state === "failed" && videoJob.error?.retryable === true && !actions.includes("retry_job")) actions.push("retry_job");
+  // F25: caption fixes on the project's video, and Try again for the last caption job made on it.
+  if (doc.state === "video_ready" && doc.currentRenderId) {
+    actions.push("edit_captions");
+    const captionJob = latestCaptionJob?.type === "caption" && latestCaptionJob.inputRef.renderId?.equals(doc.currentRenderId) === true ? latestCaptionJob : null;
+    const captionRetry = captionJob !== null && ((captionJob.state === "failed" && captionJob.error?.retryable === true) || captionJob.state === "cancelled");
+    if (captionRetry && !actions.includes("retry_job")) actions.push("retry_job");
+  }
   return actions;
 }
 
@@ -292,6 +311,8 @@ export interface ProjectRelated {
   latestReviseJob?: JobDocument | null;
   /** The project's newest generate job (F23: `generate_video`, `retry_job` on the video step). */
   latestGenerateJob?: JobDocument | null;
+  /** The project's newest caption job (F25: `retry_job` after a failed or cancelled caption fix). */
+  latestCaptionJob?: JobDocument | null;
 }
 
 /**
@@ -319,7 +340,7 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     activeJobId: hexOrNull(doc.activeJobId),
     activeJob: activeJob && related.embedActiveJob !== false ? toJobResource(activeJob) : null,
     lastError: doc.lastError ? { code: doc.lastError.code, message: doc.lastError.message, at: doc.lastError.at.toISOString() } : null,
-    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob, { activeJob, latestGenerateJob: related.latestGenerateJob ?? null }),
+    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob, { activeJob, latestGenerateJob: related.latestGenerateJob ?? null, latestCaptionJob: related.latestCaptionJob ?? null }),
     archivedAt: doc.archivedAt ? doc.archivedAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

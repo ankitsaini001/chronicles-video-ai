@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { endCaptionJob } from "./caption-fixes";
 import { endGenerateJob, lastGenerateActivity } from "./generate-jobs";
 import { getJob, JOBS_COLLECTION, type JobDocument } from "./jobs";
 import { failPlanJob, STUCK_JOB_RULES } from "./plan-jobs";
@@ -16,6 +17,9 @@ import { failReviseJob } from "./revisions";
 // progress, or since it was queued) nor any other video job (their progress, start or finish). A
 // render writes progress every few seconds, so a long render keeps the whole queue alive. A running
 // video job whose Cancel was pressed and that hasn't moved for a minute is ended as cancelled.
+// `caption` jobs (F25) re-render a video and share the SAME queue, so the same rule applies to them
+// (the queue counts both types); a stuck or abandoned caption job ends with the project back at
+// `video_ready` and the previous video still its video.
 // For all three: queued and its start event not handed over (or sent but not started after 2 min)
 // → the caller sends the event again; the same event id means Inngest drops it if the first one
 // did arrive. Only one reader claims a resend (conditional update on `event.lastTriedAt`).
@@ -42,21 +46,23 @@ export function isGenerateJobStuck(job: Pick<JobDocument, "state" | "updatedAt" 
 export type StuckCheck = { job: JobDocument; resendEventId: string | null };
 
 export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Date()): Promise<StuckCheck> {
-  if (job.type !== "plan" && job.type !== "revise" && job.type !== "generate") return { job, resendEventId: null };
+  if (job.type !== "plan" && job.type !== "revise" && job.type !== "generate" && job.type !== "caption") return { job, resendEventId: null };
   const at = now.getTime();
   const reload = async () => (await getJob(db, job._id)) ?? job;
 
-  if (job.type === "generate") {
+  if (job.type === "generate" || job.type === "caption") {
+    // The job's own end: generate → generate_failed / the storyboard; caption → back to video_ready.
+    const endJob = job.type === "caption" ? endCaptionJob : endGenerateJob;
     // Cancel was pressed but nothing stopped the job (the worker died between steps): end it as cancelled.
     if (job.state === "running" && job.cancelRequestedAt && at - job.updatedAt.getTime() >= GENERATE_CANCEL_GRACE_MS) {
-      await endGenerateJob(db, { jobId: job._id, attempt: job.attempt, outcome: "cancelled", staleBefore: new Date(at - GENERATE_CANCEL_GRACE_MS), now });
+      await endJob(db, { jobId: job._id, attempt: job.attempt, outcome: "cancelled", staleBefore: new Date(at - GENERATE_CANCEL_GRACE_MS), now });
       return { job: await reload(), resendEventId: null };
     }
     const own = (job.state === "running" ? job.updatedAt : job.queuedAt).getTime();
     // Cheap first: only look at the rest of the queue when this job itself has been still that long.
     if ((job.state === "running" || job.state === "queued") && at - own >= GENERATE_IDLE_LIMIT_MS && isGenerateJobStuck(job, await lastGenerateActivity(db, job._id), now)) {
       const cutoff = new Date(at - GENERATE_IDLE_LIMIT_MS);
-      await endGenerateJob(db, {
+      await endJob(db, {
         jobId: job._id,
         attempt: job.attempt,
         outcome: "failed",
