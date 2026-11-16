@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeElevenLabsSpeech, silentMp3 } from "../apps/web/lib/video/fake-elevenlabs";
 import { ensureProjectTmp, isInside, projectRoot, renderChildEnv, startRenderProcess } from "../apps/web/lib/video/render-process";
-import { descendantsOf } from "../packages/pipeline/src/pipeline/process-tree";
+import { descendantsOf, killProcessGroup, ownProcessGroup } from "../packages/pipeline/src/pipeline/process-tree";
 import { fakeVoiceProblem, voiceEstimatorFor, voiceSetupFromEnv, VoiceNotConfiguredError } from "../apps/web/lib/video/voice";
 import type { Plan } from "../packages/pipeline/src/contracts";
 import { hashPlan } from "../packages/pipeline/src/planning";
@@ -284,13 +284,14 @@ describe("the render child process (code review, findings 11 and 12)", () => {
    * in its group like ffmpeg, one detached in its own group like Chrome), writes the ids and its
    * environment's names, notes a "cancel" but keeps running.
    */
-  async function fakeChildRoot(dir: string) {
+  async function fakeChildRoot(dir: string, script?: string) {
     const root = path.join(dir, "root");
     await mkdir(path.join(root, "packages", "pipeline", "src", "pipeline"), { recursive: true });
     await symlink(path.join(ROOT, "node_modules"), path.join(root, "node_modules"));
     await writeFile(
       path.join(root, "packages", "pipeline", "src", "pipeline", "render-child.ts"),
-      `import { spawn } from "node:child_process";
+      script ??
+        `import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 const out = process.env.TMPDIR as string;
 // Like ffmpeg: in the child's process group. Like Chrome: detached, in a process group of its own.
@@ -354,6 +355,54 @@ setInterval(() => {}, 1000);
       expect(await until(() => !alive(ids.grandchild) && !alive(ids.chrome) && !alive(ids.child))).toBe(true);
     });
   }, 30_000);
+
+  /** A render child that answers and exits by itself (a normal finish). */
+  const finishingChild = `import { writeFileSync } from "node:fs";
+process.on("message", (m: { type?: string }) => {
+  if (m?.type !== "start") return;
+  writeFileSync((process.env.TMPDIR as string) + "/pids.json", JSON.stringify({ child: process.pid }));
+  process.send!({ type: "result", result: { status: "failed", stage: "render", detail: "finished by itself" } }, () => process.exit(0));
+});
+`;
+
+  it("after the render finished: only the child's process GROUP is killed (never its bare process ID); Cancel then does nothing (second review, finding 2)", async () => {
+    await withTempDir(async (dir) => {
+      const { root, tmp } = await fakeChildRoot(dir, finishingChild);
+      const kill = vi.spyOn(process, "kill").mockImplementation(() => true); // record only: nothing is really signalled
+      try {
+        const run = startRenderProcess({} as RenderJobSpec, { root, tmp, onProgress: () => undefined, graceMs: 50 });
+        expect(await run.result).toMatchObject({ status: "failed", detail: "finished by itself" });
+        const { child } = JSON.parse(await readFile(path.join(tmp, "pids.json"), "utf8")) as { child: number };
+        // On exit: its group only (-pid), never `child` itself (Node reaped it; the ID may be reused).
+        expect(kill.mock.calls).toEqual([[-child, "SIGKILL"]]);
+        kill.mockClear();
+        // A late Cancel (e.g. a progress write that was already under way): no message, no kill timer.
+        run.cancel();
+        await new Promise((r) => setTimeout(r, 300));
+        expect(kill).not.toHaveBeenCalled();
+      } finally {
+        kill.mockRestore();
+      }
+    });
+  }, 30_000);
+
+  it("never the caller's own process group, never 0 or 1 (second review, finding 2)", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      expect(killProcessGroup(4242, 4242)).toBe(false);
+      expect(killProcessGroup(1, null)).toBe(false);
+      expect(killProcessGroup(0, null)).toBe(false);
+      expect(killProcessGroup(-7, null)).toBe(false);
+      const own = ownProcessGroup();
+      expect(own).not.toBeNull(); // read with ps (Linux, macOS)
+      expect(killProcessGroup(own!)).toBe(false);
+      expect(kill).not.toHaveBeenCalled();
+      expect(killProcessGroup(4243, 4242)).toBe(true);
+      expect(kill.mock.calls).toEqual([[-4243, "SIGKILL"]]);
+    } finally {
+      kill.mockRestore();
+    }
+  });
 
   it("the process tree: every descendant, with the groups they lead (pure)", () => {
     const table = [

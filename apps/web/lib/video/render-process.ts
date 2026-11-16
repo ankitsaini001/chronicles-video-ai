@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { killProcessTree } from "@bytereel/pipeline/pipeline/process-tree";
+import { killProcessGroup, killProcessTree } from "@bytereel/pipeline/pipeline/process-tree";
 import type { RenderChildMessage, RenderJobResult, RenderJobSpec, RenderParentMessage, RenderPhase } from "@bytereel/pipeline/pipeline/render-protocol";
 
 // Rendering on this computer (F23, founder 2026-11-15; Vercel Sandbox is decided at go-live, F38):
@@ -12,7 +12,8 @@ import type { RenderChildMessage, RenderJobResult, RenderJobSpec, RenderParentMe
 // - Stopping (Cancel, or the 20-minute limit): a "cancel" message first (Remotion's cancel signal);
 //   if it hasn't stopped within 20 s, its whole process tree is killed: the child (detached, so it
 //   leads its own group, with ffmpeg in it) and everything below it, including Chrome, which puts
-//   itself in a group of its own (killProcessTree).
+//   itself in a group of its own (killProcessTree). Once the child has exited, Cancel does nothing
+//   and only its process group is killed (never its process ID, which the system may reuse).
 // - The result resolves exactly once, when the process is gone (exit) or can't be used (error).
 // - Environment: only what rendering needs (renderChildEnv): no database, voice, storage, login or
 //   AI secrets reach the child or Chrome.
@@ -101,13 +102,23 @@ export function startRenderProcess(
   });
   let stopping: "cancelled" | "timed-out" | null = null;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Kill the child, everything below it (Chrome, ffmpeg) and their process groups; nothing left is fine. */
+  /** The child process is gone (Node reaped it: its process ID may already belong to another process). */
+  let exited = false;
+  /** The result was answered (the render is over). */
+  let done = false;
+  /**
+   * While the child runs: kill it, everything below it (Chrome, ffmpeg) and their process groups.
+   * After it exited: only its process group (what it left running), never its bare process ID.
+   */
   const killGroup = () => {
-    if (child.pid !== undefined) killProcessTree(child.pid);
+    if (child.pid === undefined) return;
+    if (exited) killProcessGroup(child.pid);
+    else killProcessTree(child.pid);
   };
   /** Ask the renderer to stop (Remotion's cancel signal); kill its group if it hasn't stopped in time. */
   const stop = (why: "cancelled" | "timed-out") => {
-    if (stopping) return;
+    // Already stopping, or the render is over (a late Cancel from a progress write): nothing to stop.
+    if (stopping || done || exited) return;
     stopping = why;
     if (child.connected) {
       try {
@@ -121,7 +132,6 @@ export function startRenderProcess(
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const result = new Promise<RenderJobResult>((resolve) => {
     let answer: RenderJobResult | null = null;
-    let done = false;
     const finish = (value: RenderJobResult) => {
       if (done) return;
       done = true;
@@ -140,7 +150,9 @@ export function startRenderProcess(
       finish(stopping === "cancelled" ? { status: "cancelled" } : { status: "failed", stage: "render", detail: `the render process failed: ${error.message}` });
     });
     child.on("exit", (code, signal) => {
-      killGroup(); // anything it left running (Chrome, ffmpeg)
+      exited = true;
+      clearTimeout(killTimer); // a pending kill would hit a process ID that may be reused
+      killGroup(); // only its process group: anything it left running there (ffmpeg)
       if (stopping === "timed-out") return finish({ status: "failed", stage: "render", detail: `the render took longer than ${Math.round(maxMs / 60_000)} minutes and was stopped` });
       if (answer) return finish(answer);
       finish(stopping === "cancelled" ? { status: "cancelled" } : { status: "failed", stage: "render", detail: `the render process stopped without an answer (code ${code}, signal ${signal})` });

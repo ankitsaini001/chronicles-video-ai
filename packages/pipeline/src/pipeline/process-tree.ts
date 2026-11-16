@@ -42,11 +42,31 @@ export function descendantsOf(root: number, table: Row[] | null = processTable()
   return found;
 }
 
-/** SIGKILL `root`, everything below it and the process groups they lead (never the caller's group). */
+/** The caller's own process group (from `ps`), or null when it can't be read. */
+export function ownProcessGroup(table: Row[] | null = processTable()): number | null {
+  return table?.find((row) => row.pid === process.pid)?.pgid ?? null;
+}
+
+/**
+ * SIGKILL one process group only: for a render child that has already EXITED. Its bare process ID
+ * may already belong to another process (Node reaped it), so it is never killed by ID; its group
+ * (what it left running, e.g. ffmpeg) is. Never the caller's own group, never 0 or 1. True = sent.
+ */
+export function killProcessGroup(group: number, ownGroup: number | null = ownProcessGroup()): boolean {
+  if (!Number.isInteger(group) || group <= 1 || group === ownGroup) return false;
+  try {
+    process.kill(-group, "SIGKILL");
+    return true;
+  } catch {
+    return false; // that group is already gone
+  }
+}
+
+/** SIGKILL `root`, everything below it and the process groups they lead (never the caller's group). Only while `root` is alive. */
 export function killProcessTree(root: number): void {
   const table = processTable();
   const below = descendantsOf(root, table);
-  const ownGroup = table?.find((row) => row.pid === process.pid)?.pgid ?? null;
+  const ownGroup = ownProcessGroup(table);
   const groups = new Set([root, ...below.map((row) => row.pgid)]);
   for (const group of groups) {
     if (group <= 1 || group === ownGroup) continue;
