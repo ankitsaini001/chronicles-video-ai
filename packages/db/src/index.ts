@@ -303,7 +303,20 @@ export {
   type SpeechSaveTarget,
   type SpeechSetup,
 } from "./speech-artifacts";
-export { getRender, latestReadyRenderOf, RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, rendersForCards, type RenderDocument } from "./renders";
+export {
+  findProjectRender,
+  getRender,
+  latestReadyRenderOf,
+  listProjectRenders,
+  RENDER_SCHEMA_VERSION,
+  RENDERS_COLLECTION,
+  rendersForCards,
+  toRenderSummary,
+  type RenderDocument,
+  type RenderProject,
+  type RenderStatus,
+  type RenderSummaryResource,
+} from "./renders";
 export {
   canRetryReviseJob,
   completeReviseJob,
