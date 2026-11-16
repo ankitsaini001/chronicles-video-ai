@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (built 2026-11-16; code review fixed; unit tests 960 pass; e2e 29/29; waiting for the founder's test) |
+| **Status** | ✅ Done (built and code review fixed 2026-11-16; e2e 29/29; founder played and downloaded the real video and said OK 2026-11-17) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F23 |
 | **Design** | Stitch: ByteReel — Step 3 Review video (`docs/design/stitch/step3-review-video.html`) |
@@ -65,7 +65,7 @@ No restart is needed: your `npm run dev` picks up the new files by itself. Nothi
 - [x] Video plays (e2e: the play link streams, a Range request answers 206 with MP4 bytes; the page has the player)
 - [x] Download gives the same MP4 (e2e: the downloaded bytes' SHA-256 equals `renders.mp4Sha256`, for version 2 and the older version 1)
 - [x] Code review passed (code-reviewer agent; no blockers, all five findings fixed 2026-11-16)
-- [ ] Founder tested it and said OK
+- [x] Founder tested it and said OK (2026-11-17: "Why is the sky blue?" played in the review screen; Download MP4 works)
 
 ## Progress log
 | Date | What happened |
@@ -73,3 +73,4 @@ No restart is needed: your `npm run dev` picks up the new files by itself. Nothi
 | 2026-11-16 | Plan approved by the founder (decisions 1–4). Started building. |
 | 2026-11-16 | **Built** in small commits on `dev`: database list/find of a project's videos; API F1 and F3; the Step 3 review screen (player, video versions, Download MP4, older-storyboard note, Publish coming soon); MakingVideoScreen keeps only its waiting/making/failed states. Found and fixed while testing: raw invisible characters in the download-name code (now escapes), and an error's text could have reached the log (now only a plain reason). Unit tests: **952 pass** (27 new in `tests/review-video.test.ts`); typecheck and `next build` clean. **E2E `tools/e2e/f24-review.ts`: 29/29 pass** on `bytereel_test` (port 3234; no Inngest; two real F23 test videos in the dev bucket, read only): F1 newest first with `isCurrent` and paging; the play link streams (206); the download is an attachment named `Why is the sky blue - F24 e2e.mp4` and its SHA-256 equals `mp4Sha256` (8,944,350 bytes); version 1 too (8,810,929 bytes); another user 404 everywhere; not ready 409; the page has the player and the Download link; the Ready card opens it. No link printed in any output or server log. Test server stopped by pid, test database dropped. Zero ElevenLabs and zero Gemini calls; nothing uploaded to or deleted from R2; TMPDIR inside the project throughout. The F23 e2e's ready-page check now expects the player. Ready for code review and the founder's test. |
 | 2026-11-16 | **Code review fixed** (no blockers, 5 findings): Download MP4 asks F3 for the link as JSON and shows a plain message on a problem instead of a raw error page (href kept for middle-click); the player's renew-or-give-up and which-answer-counts decisions moved to a small helper (`apps/web/lib/video/player-link.ts`) with unit tests, the 10-second guard now counts from when a link is applied, and a recovered video drops the old message; the download name keeps ZWJ/ZWNJ between two visible characters (emoji sequences, Devanagari half-forms) in both the name and the download header (`removeInvisible` in `packages/storage`), bidi and other invisible characters still removed; API.md fixed (Windows-forbidden characters become a space); the unused `getRender` removed. Unit tests: **960 pass**; typecheck and `next build` clean. **E2E `tools/e2e/f24-review.ts`: 29/29 pass** on `bytereel_test` (port 3234, no Inngest); no link in any output or server log; test server stopped by pid, test database dropped. Zero ElevenLabs and zero Gemini calls; R2 read only; TMPDIR inside the project throughout. Ready for the founder's test. |
+| 2026-11-17 | **Founder OK, marked Done.** The founder played the real "Why is the sky blue?" video in the review screen (player, version picker, Download MP4) and said it works. The header shows "Videos today: 1 of 3" (F23 fix). |
