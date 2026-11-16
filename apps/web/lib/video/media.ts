@@ -8,7 +8,7 @@ import {
   type RenderDocument,
   type RenderSummaryResource,
 } from "@bytereel/db";
-import { isStorageKey, StorageError } from "@bytereel/storage";
+import { isStorageKey, removeInvisible, StorageError } from "@bytereel/storage";
 import type { Db } from "mongodb";
 import { ApiProblem } from "../api/v1";
 import { pageQuery } from "../storyboard/api";
@@ -150,16 +150,16 @@ function toWellFormed(value: string): string {
 }
 
 /**
- * The downloaded MP4's name, from the project title: control and invisible characters out, double
- * quotes and backticks out, slashes and backslashes become "-", the characters Windows refuses in
- * names (: * ? < > |) out; spaces, apostrophes, accents, Hindi and emoji stay. No leading dots or
- * dashes (no hidden files, no "../"), at most 80 characters, always ending in ".mp4" ("video.mp4"
- * when nothing is left). The storage layer adds the ASCII fallback + UTF-8 `filename*` header.
+ * The downloaded MP4's name, from the project title: control and invisible characters out (bidi
+ * controls too; the joiners ZWJ/ZWNJ stay only between two visible characters, for emoji sequences
+ * and Devanagari half-forms: removeInvisible), double quotes and backticks out, slashes and
+ * backslashes become "-", the characters Windows refuses in names (: * ? < > |) become a space;
+ * spaces, apostrophes, accents, Hindi and emoji stay. No leading dots or dashes (no hidden files,
+ * no "../"), at most 80 characters, always ending in ".mp4" ("video.mp4" when nothing is left).
+ * The storage layer adds the ASCII fallback + UTF-8 `filename*` header.
  */
 export function downloadFilename(title: string): string {
-  let name = toWellFormed(title)
-    .normalize("NFC")
-    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "")
+  let name = removeInvisible(toWellFormed(title).normalize("NFC"))
     .replace(/["`\u201C\u201D]/g, "")
     .replace(/[/\\]/g, "-")
     .replace(/[:*?<>|]/g, " ")
@@ -167,6 +167,10 @@ export function downloadFilename(title: string): string {
     .trim()
     .replace(/(\.mp4)+$/i, "");
   name = [...name].slice(0, MAX_NAME_CHARS).join("");
-  name = name.replace(/^[\s.-]+/, "").replace(/[\s.]+$/, "");
+  // Tidy both ends until nothing changes (trimming can leave a joiner at an end, and the other way round).
+  for (let before = ""; before !== name; ) {
+    before = name;
+    name = removeInvisible(name).replace(/^[\s.-]+/, "").replace(/[\s.]+$/, "");
+  }
   return `${name || FALLBACK_NAME}.mp4`;
 }

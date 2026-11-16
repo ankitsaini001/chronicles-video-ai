@@ -13,11 +13,22 @@ function toWellFormed(value: string): string {
   return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
 }
 
+/** The joiners ZWNJ (U+200C) and ZWJ (U+200D) when they are NOT between two visible characters. */
+const DANGLING_JOINER = /(?<![^\s\u200C\u200D])[\u200C\u200D]|[\u200C\u200D](?![^\s\u200C\u200D])/gu;
+
+/**
+ * Removes control characters (CR/LF, NUL, tab…), the line/paragraph separators and the invisible
+ * format characters (bidi controls U+202A–202E and U+2066–2069, zero-width space, BOM, soft hyphen…).
+ * The joiners U+200C/U+200D are kept between two visible characters, where they shape emoji (e.g.
+ * "woman technologist" = woman + ZWJ + laptop) and Devanagari half-forms; anywhere else they go.
+ */
+export function removeInvisible(value: string): string {
+  return value.replace(/[\p{Cc}\u2028\u2029]|(?![\u200C\u200D])\p{Cf}/gu, "").replace(DANGLING_JOINER, "");
+}
+
 /** Remove control characters and path separators; keep the visible name. */
 function cleanName(name: string): string {
-  const cleaned = toWellFormed(name)
-    .normalize("NFC")
-    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "")
+  const cleaned = removeInvisible(toWellFormed(name).normalize("NFC"))
     .replace(/[/\\]/g, "-")
     .replace(/\s+/g, " ")
     .trim()
@@ -27,7 +38,7 @@ function cleanName(name: string): string {
   if (chars.length <= MAX_NAME_CHARS) return cleaned;
   // Keep the extension when shortening.
   const ext = EXTENSION.exec(cleaned)?.[0] ?? "";
-  return [...cleaned.slice(0, cleaned.length - ext.length)].slice(0, MAX_NAME_CHARS - ext.length).join("").trim() + ext;
+  return removeInvisible([...cleaned.slice(0, cleaned.length - ext.length)].slice(0, MAX_NAME_CHARS - ext.length).join("")).trim() + ext;
 }
 
 /** A plain-ASCII version for old browsers: accents dropped, other non-ASCII removed, quotes replaced. */

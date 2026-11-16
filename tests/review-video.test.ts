@@ -338,6 +338,31 @@ describe("the download's file name (from the project title)", () => {
     expect(downloadFilename("Broken \uD83D surrogate")).toBe("Broken \uFFFD surrogate.mp4");
   });
 
+  it("joiners (ZWJ/ZWNJ) stay between two visible characters: emoji sequences and Devanagari half-forms survive", () => {
+    expect(downloadFilename("👩\u200D💻 coding tips")).toBe("👩\u200D💻 coding tips.mp4");
+    expect(downloadFilename("👨\u200D👩\u200D👧 family")).toBe("👨\u200D👩\u200D👧 family.mp4");
+    expect(downloadFilename("क्\u200Dष and क्\u200Cष")).toBe("क्\u200Dष and क्\u200Cष.mp4");
+    const header = attachmentContentDisposition(downloadFilename("👩\u200D💻 coding"));
+    expect(header).toContain("%F0%9F%91%A9%E2%80%8D%F0%9F%92%BB");
+  });
+
+  it("joiners anywhere else are removed: at the start or end, next to a space, doubled, left at the 80-character cut", () => {
+    expect(downloadFilename("\u200Dstart")).toBe("start.mp4");
+    expect(downloadFilename("end\u200C")).toBe("end.mp4");
+    expect(downloadFilename("a \u200Db c\u200D d")).toBe("a b c d.mp4");
+    expect(downloadFilename("a\u200D\u200Db")).toBe("ab.mp4");
+    expect(downloadFilename(".\u200Dhidden")).toBe("hidden.mp4");
+    expect(downloadFilename(`${"x".repeat(79)}\u200Dyyy`)).toBe(`${"x".repeat(79)}.mp4`);
+    expect(downloadFilename("\u200D\u200C")).toBe("video.mp4");
+  });
+
+  it("bidi controls and the other invisible characters are always removed", () => {
+    expect(downloadFilename("a\u202Ab\u202Bc\u202Cd\u202De\u202Ef")).toBe("abcdef.mp4");
+    expect(downloadFilename("a\u2066b\u2067c\u2068d\u2069e")).toBe("abcde.mp4");
+    expect(downloadFilename("zero\u200Bwidth \uFEFFbom soft\u00ADhyphen \u2060joiner")).toBe("zerowidth bom softhyphen joiner.mp4");
+    expect(downloadFilename("👩\u200D\u202E💻")).toBe("👩\u200D💻.mp4");
+  });
+
   it("an empty or nothing-left title → video.mp4", () => {
     for (const title of ["", "   ", '""', "../..", "\r\n", "///", ".mp4", "?*:"]) expect(downloadFilename(title), JSON.stringify(title)).toBe("video.mp4");
   });
