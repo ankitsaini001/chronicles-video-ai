@@ -38,7 +38,8 @@ import { assertCaptionJobsReady, assertGenerateReady } from "@/lib/video/api";
 // F25: a failed (retryable) or cancelled `caption` job (caption fixes) is retried the same way
 // (packages/db/src/caption-fixes.ts retryCaptionJob): only while the video the fixes were made on is
 // still the project's video and the project is `video_ready`; project → `generating`. Nothing is
-// counted and no voice set-up is needed (Inngest and R2 only).
+// counted and no voice set-up is needed (Inngest and R2 only). Like a video job, its project's
+// language is checked first (422 LANGUAGE_UNAVAILABLE, the same rule as F4).
 // After the commit the event `{jobId}:retry:{attempt}` goes to Inngest. Answer: 202 Job.
 
 const EmptyBody = z.strictObject({});
@@ -52,7 +53,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     handle: async ({ db, user, idempotencyLock }) => {
       const owned = await getOwnedJob(db, user.id, jobId);
       if (!owned) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
-      if (owned.type === "generate") {
+      if (owned.type === "generate" || owned.type === "caption") {
         const project = await getOwnedProject(db, user.id, owned.projectId.toHexString());
         if (!project) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
         try {
