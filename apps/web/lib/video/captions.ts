@@ -23,10 +23,11 @@ import { VIDEO_MESSAGES, videoMediaDeps } from "./media";
 // - F2: one video with its caption phrases, read from the video's captions.json in R2 (owner check
 //   first: another user's video, a missing one and a malformed id are all 404).
 // - F4 (before its transaction, packages/db/src/caption-fixes.ts saveCaptionFixes): the owner's video,
-//   the state checks, then every fix against THAT video's captions: the phrase exists, and the text
-//   fits on screen with the compiler's own line breaking (at most 2 lines at the normal size, and
-//   inside the caption box as the renderer draws it). A fix that doesn't fit is refused here, so it
-//   can never fail later in the render or run into the Reels buttons.
+//   the state checks, then every fix against THAT video's captions: the phrase exists, no emoji
+//   ("Emoji can't be used in captions."), and the text fits on screen with the compiler's own line
+//   breaking (at most 2 lines at the normal size, unknown characters counted wide, and inside the
+//   caption box as the renderer draws it: packages/pipeline/src/timing/caption-fit.ts). A fix that
+//   doesn't fit is refused here, so it can never fail later in the render or run into the Reels buttons.
 
 /** API.md §11.3 `CaptionPhrase`. */
 export type CaptionPhrase = { sceneId: string; phraseIndex: number; text: string; originalText: string; startMs: number; endMs: number; overridden: boolean };
@@ -118,15 +119,17 @@ export async function checkCaptionFixes(deps: CaptionDeps, userId: string, proje
       });
       return;
     }
-    if (captionFixProblem(found.caption, edit.text)) {
-      issues.push({ path: `edits[${i}].text`, message: CAPTION_MESSAGES.TOO_LONG });
+    const problem = captionFixProblem(found.caption, edit.text);
+    if (problem) {
+      issues.push({ path: `edits[${i}].text`, message: problem === "emoji" ? CAPTION_MESSAGES.EMOJI : CAPTION_MESSAGES.TOO_LONG });
       return;
     }
     edits.push({ sceneId: edit.sceneId, phraseIndex: edit.phraseIndex, text: edit.text, originalText: found.caption.originalText ?? found.caption.text });
   });
   if (issues.length > 0) {
-    const allTooLong = issues.every((issue) => issue.message === CAPTION_MESSAGES.TOO_LONG);
-    throw new ApiProblem(400, "INVALID_INPUT", allTooLong ? CAPTION_MESSAGES.TOO_LONG : "Please check the highlighted captions.", { issues });
+    // One kind of text problem: its own message on top (e.g. "This caption is too long to fit on screen. …").
+    const textOnly = issues.every((issue) => issue.path.endsWith(".text") && issue.message === issues[0]!.message);
+    throw new ApiProblem(400, "INVALID_INPUT", textOnly ? issues[0]!.message : "Please check the highlighted captions.", { issues });
   }
   return { project, render, edits };
 }

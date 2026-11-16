@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { type ClientSession, type Db, ObjectId } from "mongodb";
 import { z } from "zod";
+import { CAPTION_MESSAGES } from "./caption-messages";
 import { renderInputHash, type RenderToSave } from "./generate-jobs";
 import { cleanIdeaText } from "./idea-text";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
@@ -38,25 +39,19 @@ const STAGE_INDEX = Object.fromEntries(CAPTION_STAGES.map((name, i) => [name, i]
 /** Most fixes in one save, and the longest fix (API.md F4). */
 export const CAPTION_FIX_LIMITS = { edits: 50, chars: 200 } as const;
 
-/** What the creator reads (shown as is). */
-export const CAPTION_MESSAGES = {
-  WAITING: "Waiting to start…",
-  UPDATING: "Updating captions…",
-  CHECKING: "Checking the video…",
-  SAVING: "Saving your video…",
-  DONE: "Your captions are fixed.",
-  CANCELLED: "Cancelled. Your video wasn't changed.",
-  TOO_LONG: "This caption is too long to fit on screen. Please shorten it.",
-  NOTHING_CHANGED: "These captions already read like this.",
-} as const;
+/** What the creator reads (shown as is): caption-messages.ts, shared with the Captions tab. */
+export { CAPTION_MESSAGES };
 
-export type CaptionErrorCode = "RENDER_FAILED" | "NARRATION_MISSING" | "INTERNAL";
+export type CaptionErrorCode = "RENDER_FAILED" | "NARRATION_MISSING" | "FIX_NOT_APPLICABLE" | "INTERNAL";
 
 /** The error a failed caption job shows, and whether Try again (E2) is offered. */
 export const CAPTION_ERRORS: Record<CaptionErrorCode, { message: string; retryable: boolean }> = {
   RENDER_FAILED: { message: "We couldn't render your caption fixes. They are saved; please try again.", retryable: true },
   // Never recorded again here (a caption fix makes no voice call): the storyboard must make a new video.
   NARRATION_MISSING: { message: "This video's narration couldn't be found, so its captions can't be changed. Please edit the storyboard to make a new video.", retryable: false },
+  // F25 review: a failure that would happen again on every try (the phrase no longer reads the same,
+  // or a fixed line was wider than the caption box in the browser). The Captions tab stays open.
+  FIX_NOT_APPLICABLE: { message: "This caption fix can't be applied. Please fix the captions again.", retryable: false },
   INTERNAL: { message: "Something went wrong on our side. Please try again.", retryable: true },
 };
 
@@ -322,7 +317,7 @@ function requeueFields(job: JobDocument, now: Date): Partial<JobDocument> {
 }
 
 /**
- * E2 on a failed or cancelled caption job, ONE transaction: archived, a job running, retryable (or
+ * E2 on a failed or cancelled caption job, ONE transaction: the language switch (422), archived, a job running, retryable (or
  * cancelled), the video the fixes were made on is still the project's video and the project is
  * `video_ready` (else 409 INVALID_STATE: fix the captions again). The same job → `queued`, attempt
  * + 1; project → `generating`. Nothing is counted.
@@ -345,6 +340,8 @@ export async function retryCaptionJob(
       if (!job) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
       const project = await projects.findOne({ _id: job.projectId, ownerId }, { session });
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
+      // The same 422 rule as F4 (caption fixes are switched off with Hindi/Hinglish).
+      assertLanguageEnabled(project.language);
       if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
       if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");
       if (!canRetryCaptionJob(job)) {

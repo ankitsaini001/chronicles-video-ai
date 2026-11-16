@@ -63,7 +63,17 @@ export type RenderJobResult =
       bundleMs: number;
     }
   | { status: "needs_input"; reason: "duration_out_of_range" | "alignment_uncertain"; message: string; sceneId: string | null; detail: string }
-  | { status: "failed"; stage: "compile" | "render" | "validate"; detail: string }
+  | {
+      status: "failed";
+      stage: "compile" | "render" | "validate";
+      detail: string;
+      /**
+       * F25 review: failures that would happen again on every try. `caption_fix`: a caption fix
+       * can't be applied (its phrase no longer reads the same); `caption_width`: a caption line was
+       * wider than the caption box in the browser (Captions.tsx, CAPTION_TOO_WIDE).
+       */
+      reason?: "caption_fix" | "caption_width";
+    }
   | { status: "cancelled" };
 
 /** Worker → child. */
@@ -74,3 +84,9 @@ export type RenderChildMessage = { type: "progress"; phase: RenderPhase; percent
 
 /** The thumbnail: 1.5 s in, when the hook's question or picture is on screen (F23). */
 export const THUMBNAIL_SECONDS = 1.5;
+
+/**
+ * Marker in the error the caption safety net raises in the browser (packages/video/src/Captions.tsx)
+ * when a caption line is wider than the caption box; the render job reports it as `caption_width`.
+ */
+export const CAPTION_TOO_WIDE = "[caption-too-wide]";

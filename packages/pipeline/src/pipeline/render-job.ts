@@ -17,7 +17,7 @@ import {
 import { evaluateProbe, probeMp4, PROBED_WITH, type Mp4Probe, type QaReport } from "../validation";
 import { AudioProbeError, probeAudioFile, type AudioProbe } from "../validation/audio";
 import type { RenderJob, RenderReport } from "./render";
-import type { RenderJobResult, RenderJobSpec, RenderPhase } from "./render-protocol";
+import { CAPTION_TOO_WIDE, type RenderJobResult, type RenderJobSpec, type RenderPhase } from "./render-protocol";
 import { buildSceneAlignment } from "./speech";
 
 /**
@@ -102,7 +102,7 @@ export async function runRenderJob(spec: RenderJobSpec, hooks: RenderJobHooks = 
     try {
       compiled = { ...compiled, captions: applyCaptionOverrides(compiled.captions, spec.captionOverrides) };
     } catch (error) {
-      if (error instanceof CaptionOverrideError) return { status: "failed", stage: "compile", detail: `caption fix: ${error.message}` };
+      if (error instanceof CaptionOverrideError) return { status: "failed", stage: "compile", reason: "caption_fix", detail: `caption fix: ${error.message}` };
       throw error;
     }
   }
@@ -136,7 +136,9 @@ export async function runRenderJob(spec: RenderJobSpec, hooks: RenderJobHooks = 
     });
   } catch (error) {
     if (cancelled()) return { status: "cancelled" };
-    return { status: "failed", stage: "render", detail: error instanceof Error ? error.message : String(error) };
+    const detail = error instanceof Error ? error.message : String(error);
+    // The browser's caption width safety net (Captions.tsx): the same captions would fail again.
+    return { status: "failed", stage: "render", detail, ...(detail.includes(CAPTION_TOO_WIDE) ? { reason: "caption_width" as const } : {}) };
   }
   if (cancelled()) return { status: "cancelled" };
 

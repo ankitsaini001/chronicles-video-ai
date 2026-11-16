@@ -2,6 +2,7 @@ import type React from "react";
 import { useLayoutEffect, useRef } from "react";
 import { cancelRender } from "remotion";
 import type { CaptionTrack } from "@bytereel/pipeline/contracts";
+import { CAPTION_TOO_WIDE } from "@bytereel/pipeline/pipeline/render-protocol";
 import { CAPTION_STYLE } from "@bytereel/pipeline/theme";
 import { pop } from "./motion";
 import { C, FONT, LAYOUT } from "./theme";
@@ -28,7 +29,7 @@ export const Captions: React.FC<{ track: CaptionTrack; frame: number; skipBefore
       if (el && el.offsetWidth > LAYOUT.captionWidth + 0.5) {
         cancelRender(
           new Error(
-            `Caption "${caption.id}" line ${(lineIndexes.current[i] ?? i) + 1} ("${caption.lines[lineIndexes.current[i] ?? i]}") is ${el.offsetWidth}px wide; the caption box fits ${LAYOUT.captionWidth}px. ` +
+            `${CAPTION_TOO_WIDE} Caption "${caption.id}" line ${(lineIndexes.current[i] ?? i) + 1} ("${caption.lines[lineIndexes.current[i] ?? i]}") is ${el.offsetWidth}px wide; the caption box fits ${LAYOUT.captionWidth}px. ` +
               "Lower CAPTION_STYLE.maxLineWidthPx or the caption font size.",
           ),
         );

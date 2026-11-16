@@ -4,7 +4,7 @@ import { CAPTION_MESSAGES, renderingMessage, type CaptionErrorCode, type Caption
 import type { Plan } from "@bytereel/pipeline/contracts";
 import { BACKGROUND_MUSIC } from "@bytereel/pipeline/pipeline/music";
 import { THUMBNAIL_SECONDS, type RenderJobResult, type RenderJobSpec, type RenderPhase } from "@bytereel/pipeline/pipeline/render-protocol";
-import { speechCacheKey, speechConfigFromRecord, type SpeechConfig } from "@bytereel/pipeline/pipeline/speech";
+import { speechCacheKey, speechConfigFromRecord, type SpeechConfig } from "@bytereel/pipeline/pipeline/speech-key";
 import { SpeechCacheRecordSchema } from "@bytereel/pipeline/storage";
 import { StorageKeys, type StorageKey } from "@bytereel/storage";
 import { ObjectId } from "mongodb";
@@ -15,8 +15,9 @@ import { ensureProjectTmp, isInside, type RenderRun } from "./render-process";
 // correction → compile captions + render, no speech"): the creator fixed caption text (API F4); the
 // video is rendered again with the SAME recorded narration and the fixes applied.
 //
-// ZERO voice calls, by construction: this worker has no voice dependency and imports no voice or
-// provider module (tests/caption-fixes.test.ts checks the imports). It reads the recordings the video
+// ZERO voice calls, by construction: this worker has no voice dependency and its whole import graph
+// loads no voice or provider module (the cache key comes from pipeline/speech-key.ts, not speech.ts;
+// tests/caption-fixes.test.ts walks the real import graph). It reads the recordings the video
 // already used (`renders.speech` → speechArtifacts, owner scoped), downloads their audio and timing
 // files from R2 and checks each one against its saved SHA-256 and cache key. If any narration is
 // missing or changed, the job fails with a plain message (NARRATION_MISSING): it never records.
@@ -76,6 +77,12 @@ const RENDER_FAILURE: Record<"compile" | "render" | "validate", { code: CaptionE
   compile: { code: "INTERNAL", detail: "Updating the captions failed (see the server log)" },
   render: { code: "RENDER_FAILED", detail: "The render stopped with an error (see the server log)" },
   validate: { code: "RENDER_FAILED", detail: "The finished video didn't pass its checks (see the server log)" },
+};
+
+/** The fixed line stored for a failure that would happen again on every try (FIX_NOT_APPLICABLE, not retryable). */
+const NOT_APPLICABLE_LINE: Record<"caption_fix" | "caption_width", string> = {
+  caption_fix: "A caption fix no longer matches its phrase (see the server log)",
+  caption_width: "A fixed caption was too wide for the caption box (see the server log)",
 };
 
 /** Progress shown for each render phase: timing + captions → Updating captions; rendering + checking → Rendering. */
@@ -178,9 +185,16 @@ export async function runCaptionJob(input: { event: { jobId: string; attempt: nu
       const audio = await files.get(doc.audioKey as StorageKey);
       if (!audio || sha256(audio) !== doc.audioSha256) throw new NarrationMissing(`scene ${n}: its audio file is missing or changed`);
       const json = await files.get(doc.alignmentKey as StorageKey);
-      const parsed = json ? SpeechCacheRecordSchema.safeParse(JSON.parse(Buffer.from(json).toString("utf8"))) : null;
-      const record = parsed?.success ? parsed.data : null;
-      if (!record || record.audioSha256 !== doc.audioSha256 || record.cacheKey !== doc.cacheKey) throw new NarrationMissing(`scene ${n}: its timing file is missing or doesn't match the audio`);
+      if (!json) throw new NarrationMissing(`scene ${n}: its timing file is missing`);
+      let raw: unknown;
+      try {
+        raw = JSON.parse(Buffer.from(json).toString("utf8"));
+      } catch {
+        throw new NarrationMissing(`scene ${n}: its timing file is unreadable`);
+      }
+      const parsed = SpeechCacheRecordSchema.safeParse(raw);
+      const record = parsed.success ? parsed.data : null;
+      if (!record || record.audioSha256 !== doc.audioSha256 || record.cacheKey !== doc.cacheKey) throw new NarrationMissing(`scene ${n}: its timing file is unreadable or doesn't match the audio`);
       let sceneConfig: SpeechConfig;
       try {
         sceneConfig = speechConfigFromRecord(plan, record);
@@ -281,6 +295,8 @@ export async function runCaptionJob(input: { event: { jobId: string; attempt: nu
       }
       if (result.status === "failed") {
         log("error", `${label}: ${result.stage} failed: ${result.detail}`);
+        // A fix that can't be applied, or a fixed line too wide in the browser: the same again on every try.
+        if (result.reason) return end("failed", { code: "FIX_NOT_APPLICABLE", stage: result.stage, detail: NOT_APPLICABLE_LINE[result.reason] });
         return end("failed", { code: RENDER_FAILURE[result.stage].code, stage: result.stage, detail: RENDER_FAILURE[result.stage].detail });
       }
 
