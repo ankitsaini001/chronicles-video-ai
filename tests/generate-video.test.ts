@@ -1380,6 +1380,55 @@ describe("waiting for a recording held by another run (code review, findings 9 a
   });
 });
 
+describe("step ids (second review, finding 9)", () => {
+  /** Records every step id in order: step.run and step.sleep share Inngest's id space. */
+  function recordingSteps() {
+    const inner = plainSteps();
+    const ids: string[] = [];
+    return { ids, sleeps: inner.sleeps, run: <T>(id: string, fn: () => Promise<T>) => (ids.push(id), inner.run(id, fn)), sleep: async (id: string) => void ids.push(id) };
+  }
+  /** Every scene's recording is held by another run for its first `busy` looks. */
+  const busyFor = (bundle: ReturnType<typeof fakeStore>, busy: number): GenerateJobStore => {
+    const looks = new Map<string, number>();
+    return {
+      ...bundle.store,
+      claimSpeech: async (input) => {
+        looks.set(input.cacheKey, (looks.get(input.cacheKey) ?? 0) + 1);
+        return looks.get(input.cacheKey)! <= busy ? { kind: "busy", doc: {} as SpeechArtifactDocument } : bundle.store.claimSpeech(input);
+      },
+    };
+  };
+  const idsOf = async (root: string, scenario: "waits" | "gave-up" | "render-throws") => {
+    const bundle = fakeStore([]);
+    const steps = recordingSteps();
+    const store = busyFor(bundle, scenario === "waits" ? 2 : scenario === "gave-up" ? 1000 : 0);
+    const render = scenario === "render-throws" ? ((() => { throw new Error("renderer missing"); }) as never) : (fakeRenderer([], readyResult) as never);
+    await run({ ...bundle, store }, { files: sameFiles(fakeFiles()), voice: voiceWith({ calls: 0 }), render, root }, { step: steps });
+    return steps.ids;
+  };
+
+  it("are unique and the same on every run, including the lock-wait loop, giving up and the failure step", async () => {
+    await withTempDir(async (root) => {
+      const scenes = scenesOf();
+      const waits = await idsOf(root, "waits");
+      const perScene = (n: number) => [`speech-${n}`, `speech-${n}-wait-1`, `speech-${n}-again-1`, `speech-${n}-wait-2`, `speech-${n}-again-2`];
+      expect(waits).toEqual(["start", "reserve-voice", ...Array.from({ length: scenes }, (_x, i) => perScene(i + 1)).flat(), "render"]);
+
+      const gaveUp = await idsOf(root, "gave-up");
+      const loop = Array.from({ length: SPEECH_BUSY_MAX_WAITS }, (_x, i) => [`speech-1-wait-${i + 1}`, `speech-1-again-${i + 1}`]).flat();
+      expect(gaveUp).toEqual(["start", "reserve-voice", "speech-1", ...loop, "speech-1-gave-up"]);
+
+      const failed = await idsOf(root, "render-throws");
+      expect(failed).toEqual(["start", "reserve-voice", ...Array.from({ length: scenes }, (_x, i) => `speech-${i + 1}`), "render", "fail-internal"]);
+
+      for (const [scenario, ids] of [["waits", waits], ["gave-up", gaveUp], ["render-throws", failed]] as const) {
+        expect(new Set(ids).size).toBe(ids.length); // unique
+        expect(await idsOf(root, scenario)).toEqual(ids); // deterministic: a replay asks for the same ids
+      }
+    });
+  });
+});
+
 describe("the start step (code review, finding 4)", () => {
   it("R2 refusing the bucket check ends the job at once, before any cost (never left 'running')", async () => {
     await withTempDir(async (root) => {
