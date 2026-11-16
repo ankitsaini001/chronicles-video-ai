@@ -1,0 +1,171 @@
+"use client";
+
+import type { RenderSummaryResource } from "@bytereel/db";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { apiSend } from "@/components/storyboard/client";
+import { Note } from "@/components/storyboard/Note";
+import { Button } from "@/components/ui";
+import { VideoVersionMenu } from "./VideoVersionMenu";
+
+// ③ Video when it is ready (F24; Stitch "ByteReel — Step 3 Review video"): the real MP4 in the phone
+// frame (HTML5 player, the thumbnail as its poster), and on the right the title, "Video ready", the
+// "Video version N ▾" picker (F1), Download MP4 (a plain link to F3 kind=download&redirect=true),
+// Back to My videos and Edit storyboard. Publishing comes later (F28+), so it shows "coming soon".
+// The Captions tab and "Ask for changes" are F25/F26.
+//
+// The player's address is a 15-minute private link (F3 kind=video). When it has expired, the browser
+// fails as soon as it needs more of the file (play after a long pause, seeking): the screen quietly
+// gets a fresh link and goes on at the same second. A second failure within 10 s shows a message
+// instead (no endless loop).
+
+export type ReviewVideoScreenProps = {
+  projectId: string;
+  title: string;
+  /** The project's current storyboard version (the note when a video was made from an older one). */
+  currentPlanVersionId: string | null;
+  /** The project's video (`currentRenderId`). */
+  render: RenderSummaryResource;
+  /** Its 15-minute private link, made by the page after the owner check (null → fetched here). */
+  videoUrl: string | null;
+  canEditStoryboard: boolean;
+};
+
+const RENEW_AGAIN_AFTER_MS = 10_000;
+const PLAY_PROBLEM = "We couldn't play this video. Please reload the page.";
+
+type Resume = { time: number; play: boolean };
+
+export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
+  const [shown, setShown] = useState(props.render);
+  const [src, setSrc] = useState<string | null>(props.videoUrl);
+  const [problem, setProblem] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const resume = useRef<Resume | null>(null);
+  const lastRenewal = useRef(0);
+  /** Only the newest link request counts (choosing another version while one loads). */
+  const request = useRef(0);
+
+  async function loadLink(renderId: string, then: Resume) {
+    const mine = ++request.current;
+    const answer = await apiSend<{ url: string }>("GET", `/api/v1/projects/${props.projectId}/renders/${renderId}/media?kind=video`);
+    if (mine !== request.current) return;
+    if (!answer.ok) return setProblem(answer.message);
+    resume.current = then;
+    setSrc(answer.json.url);
+  }
+
+  useEffect(() => {
+    // The page couldn't make the link (e.g. a short storage hiccup): try once from here.
+    if (props.videoUrl === null) void loadLink(props.render.id, { time: 0, play: false });
+  }, []);
+
+  function choose(render: RenderSummaryResource) {
+    if (render.id === shown.id) return;
+    setShown(render);
+    setSrc(null);
+    setProblem(null);
+    lastRenewal.current = 0;
+    void loadLink(render.id, { time: 0, play: true });
+  }
+
+  function onError() {
+    const video = videoRef.current;
+    if (!video || src === null) return;
+    if (Date.now() - lastRenewal.current < RENEW_AGAIN_AFTER_MS) return setProblem(PLAY_PROBLEM);
+    lastRenewal.current = Date.now();
+    void loadLink(shown.id, { time: video.currentTime, play: !video.paused });
+  }
+
+  function onLoadedMetadata() {
+    const video = videoRef.current;
+    const then = resume.current;
+    resume.current = null;
+    if (!video || !then) return;
+    if (then.time > 0) video.currentTime = then.time;
+    if (then.play) void video.play().catch(() => undefined);
+  }
+
+  const fromOlderStoryboard = props.currentPlanVersionId !== null && shown.planVersionId !== props.currentPlanVersionId;
+  const downloadHref = `/api/v1/projects/${props.projectId}/renders/${shown.id}/media?kind=download&redirect=true`;
+
+  return (
+    <div className="mx-auto grid w-full max-w-4xl grid-cols-1 items-center gap-10 md:grid-cols-12 lg:gap-14">
+      <div className="flex justify-center md:col-span-5">
+        <div className="relative aspect-[9/16] w-[240px] rounded-[28px] border border-line bg-surface-2 p-2.5 shadow-card sm:w-[280px]">
+          <div className="relative size-full overflow-hidden rounded-[20px] border border-line bg-screen">
+            <video
+              // A new player for each version; a renewed link on the same version keeps it.
+              key={shown.id}
+              ref={videoRef}
+              data-testid="video-player"
+              controls
+              playsInline
+              preload="metadata"
+              poster={shown.thumbnailUrl ?? undefined}
+              src={src ?? undefined}
+              onError={onError}
+              onLoadedMetadata={onLoadedMetadata}
+              aria-label={`Your video: ${props.title}`}
+              className="absolute inset-0 size-full bg-black object-contain"
+            />
+          </div>
+        </div>
+      </div>
+
+      <section aria-labelledby="video-heading" className="rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-10 md:col-span-7">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <h1 id="video-heading" className="font-display text-3xl font-bold tracking-tight break-words text-text sm:text-4xl">
+            {props.title}
+          </h1>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success-bg px-2.5 py-0.5 text-xs font-medium text-success">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-success motion-safe:animate-pulse" />
+            Video ready
+          </span>
+        </div>
+        <p className="mb-6 text-[15px] leading-relaxed text-muted">Watch it here, then download the MP4.</p>
+
+        <div className="mb-6">
+          <VideoVersionMenu projectId={props.projectId} shown={shown} onChoose={choose} />
+        </div>
+
+        {fromOlderStoryboard && (
+          <Note tone="warning" className="mb-6">
+            Made from an older version of your storyboard.
+          </Note>
+        )}
+        {problem && (
+          <p role="alert" className="mb-6 text-sm text-danger">
+            {problem}
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-4">
+          {/* A plain link (not next/link): the API answers with a redirect to the private file. */}
+          <a
+            href={downloadHref}
+            data-testid="download-mp4"
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2.5 rounded-full bg-button px-6 py-3 text-[15px] font-bold text-on-amber shadow-glow transition motion-safe:hover:-translate-y-0.5"
+          >
+            <span aria-hidden="true">⬇</span>
+            Download MP4
+          </a>
+          <Button type="button" variant="secondary" disabled>
+            Publish — coming soon
+          </Button>
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center gap-5 border-t border-line pt-6">
+          <Button href="/dashboard" variant="secondary">
+            Back to My videos
+          </Button>
+          {props.canEditStoryboard && (
+            <Link href={`/projects/${props.projectId}/storyboard`} className="inline-flex min-h-11 items-center px-1 text-sm font-medium text-muted transition-colors hover:text-text">
+              Edit storyboard
+            </Link>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

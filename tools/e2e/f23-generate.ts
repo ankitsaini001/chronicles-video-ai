@@ -226,7 +226,7 @@ async function main(): Promise<void> {
   const redirected = await page(a.cookie, `/projects/${p1}`);
   check("/projects/[id] sends the video step to /video", (redirected.status >= 300 && redirected.status < 400 && redirected.location.endsWith(`/projects/${p1}/video`)) || redirected.html.includes(`/projects/${p1}/video`), `${redirected.status}`);
   view = await page(a.cookie, `/projects/${p1}/video`);
-  check("video page: 'Your video is ready' (watching comes in F24)", view.status === 200 && view.html.includes("Your video is ready") && view.html.includes("Watching and downloading"));
+  check("video page (ready): the player and Download MP4 (F24)", view.status === 200 && view.html.includes('data-testid="video-player"') && view.html.includes("Download MP4"));
   check("video page (ready): 'Edit storyboard' opens the storyboard", view.html.includes("Edit storyboard") && view.html.includes(`href="/projects/${p1}/storyboard"`));
   const readyBoard = await page(a.cookie, `/projects/${p1}/storyboard`);
   check("…and the storyboard of a ready video opens (no redirect) with 'Back to video'", readyBoard.status === 200 && readyBoard.html.includes("Back to video") && readyBoard.html.includes("Approved · Version"), `${readyBoard.status} ${readyBoard.location}`);

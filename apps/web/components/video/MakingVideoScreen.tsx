@@ -12,20 +12,17 @@ import { videoSteps, waitingText, type VideoStepStatus } from "@/lib/video/steps
 // the four steps on the right (Recording narration → Timing animations → Adding captions →
 // Rendering). It polls C6 every 2 s (every 15 s while the tab is hidden; it stops when the job ends
 // or the page is left), like the storyboard job panel; the work continues on the server, so coming
-// back shows the live state. Cancel (E3) and Try again (E2). When the video is ready: its thumbnail
-// in the phone and "Your video is ready"; watching and downloading it here is F24. After a failure or
-// when ready: "Edit storyboard" (a muted text link, like Cancel) opens the storyboard, so a failure
-// that can't be retried as it is never leaves the creator stuck. (A cancelled video goes straight back
-// to the storyboard.)
+// back shows the live state. Cancel (E3) and Try again (E2). When the video is ready the page shows
+// ReviewVideoScreen instead (F24: watch and download). After a failure: "Edit storyboard" (a muted
+// text link, like Cancel) opens the storyboard, so a failure that can't be retried as it is never
+// leaves the creator stuck. (A cancelled video goes straight back to the storyboard.)
 
 export type MakingVideoScreenProps = {
   projectId: string;
   title: string;
-  state: "generating" | "generate_failed" | "video_ready";
+  state: "generating" | "generate_failed";
   /** The video job (the running one, or the newest one after it ended). */
   job: JobResource | null;
-  /** The ready video's thumbnail (a short-lived private link), when there is one. */
-  thumbnailUrl: string | null;
   /** The failure shown after a failed job (`project.lastError`). */
   error: { code: string; message: string } | null;
   allowedActions: string[];
@@ -127,18 +124,17 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
 
   const waiting = generating && (!job || job.state === "queued");
   const cancelling = generating && job?.cancelRequestedAt != null;
-  const steps = videoSteps(props.state === "video_ready" ? { state: "succeeded", stages: [], progress: { stage: "", percent: 100, message: "" } } : job);
-  const ready = props.state === "video_ready";
+  const steps = videoSteps(job);
   const failed = props.state === "generate_failed";
   const canRetry = failed && actions.includes("retry_job") && job !== null && !props.archived;
   const canCancel = generating && actions.includes("cancel_job") && !cancelling;
-  const canEditStoryboard = (failed || ready) && actions.includes("edit_storyboard") && !props.archived;
+  const canEditStoryboard = failed && actions.includes("edit_storyboard") && !props.archived;
 
-  const heading = ready ? "Your video is ready" : failed ? "We couldn't finish your video" : "Making your video";
+  const heading = failed ? "We couldn't finish your video" : "Making your video";
   return (
     <div className="mx-auto grid w-full max-w-4xl grid-cols-1 items-center gap-10 md:grid-cols-12 lg:gap-14">
       <div className="flex justify-center md:col-span-5">
-        <Phone thumbnailUrl={ready ? props.thumbnailUrl : null} working={generating} />
+        <Phone working={generating} />
       </div>
       <section aria-labelledby="video-heading" className="rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-10 md:col-span-7">
         <p className="mb-2 text-sm font-medium break-words text-muted">{props.title}</p>
@@ -146,15 +142,13 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
           {heading}
         </h1>
         <p role="status" aria-live="polite" className="mb-8 text-[15px] leading-relaxed text-muted">
-          {ready
-            ? "Watching and downloading it here comes in the next update."
-            : failed
-              ? "Your storyboard and any recorded narration are saved."
-              : cancelling
-                ? "Stopping…"
-                : waiting
-                  ? `${waitingText(job?.queue?.ahead)} You can leave this page; we'll start it for you.`
-                  : "You can leave this page. We'll keep working and save everything."}
+          {failed
+            ? "Your storyboard and any recorded narration are saved."
+            : cancelling
+              ? "Stopping…"
+              : waiting
+                ? `${waitingText(job?.queue?.ahead)} You can leave this page; we'll start it for you.`
+                : "You can leave this page. We'll keep working and save everything."}
         </p>
 
         <ol aria-label="Steps" className="mb-9 flex flex-col gap-4">
@@ -235,8 +229,8 @@ function StepIcon({ status }: { status: VideoStepStatus }) {
   );
 }
 
-/** The 9:16 phone frame: a soft shimmering placeholder while working, the thumbnail when ready. */
-function Phone({ thumbnailUrl, working }: { thumbnailUrl: string | null; working: boolean }) {
+/** The 9:16 phone frame: a soft shimmering placeholder (still after a failure). */
+function Phone({ working }: { working: boolean }) {
   return (
     <div aria-hidden="true" className="relative aspect-[9/16] w-[240px] rounded-[28px] border border-line bg-surface-2 p-2.5 shadow-card sm:w-[280px]">
       <div className="absolute top-4 left-1/2 z-10 flex h-4 w-20 -translate-x-1/2 items-center justify-center rounded-full bg-bg/80">
@@ -244,28 +238,21 @@ function Phone({ thumbnailUrl, working }: { thumbnailUrl: string | null; working
         <span className="h-1 w-8 rounded-full bg-surface-2" />
       </div>
       <div className="relative flex size-full flex-col justify-between overflow-hidden rounded-[20px] border border-line bg-screen p-6">
-        {thumbnailUrl ? (
-          // A short-lived signed address: a plain <img>, nothing for Next.js to optimise.
-          <img src={thumbnailUrl} alt="" className="absolute inset-0 size-full object-cover" />
-        ) : (
-          <>
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-amber/5 via-transparent to-amber/5" />
-            <div className="mt-6 flex items-center justify-between">
-              <span className="h-1.5 w-8 rounded-full bg-surface-2" />
-              <span className="size-3 rounded-full bg-surface-2" />
-            </div>
-            <div className={cn("my-auto flex flex-col items-center gap-3", working && "motion-safe:animate-pulse")}>
-              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-24 text-amber/40">
-                <path d="M18 42h28a12 12 0 0 0 2-23.8 16 16 0 0 0-31.5-2.2A10 10 0 0 0 18 42z" />
-              </svg>
-              <span className="h-px w-24 bg-gradient-to-r from-transparent via-amber/20 to-transparent" />
-            </div>
-            <div className="flex flex-col gap-2.5 pb-2">
-              <span className={cn("h-3.5 w-full rounded-full bg-progress-bg", working && "motion-safe:animate-pulse")} />
-              <span className={cn("mx-auto h-3 w-3/4 rounded-full bg-progress-bg", working && "motion-safe:animate-pulse")} />
-            </div>
-          </>
-        )}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-amber/5 via-transparent to-amber/5" />
+        <div className="mt-6 flex items-center justify-between">
+          <span className="h-1.5 w-8 rounded-full bg-surface-2" />
+          <span className="size-3 rounded-full bg-surface-2" />
+        </div>
+        <div className={cn("my-auto flex flex-col items-center gap-3", working && "motion-safe:animate-pulse")}>
+          <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-24 text-amber/40">
+            <path d="M18 42h28a12 12 0 0 0 2-23.8 16 16 0 0 0-31.5-2.2A10 10 0 0 0 18 42z" />
+          </svg>
+          <span className="h-px w-24 bg-gradient-to-r from-transparent via-amber/20 to-transparent" />
+        </div>
+        <div className="flex flex-col gap-2.5 pb-2">
+          <span className={cn("h-3.5 w-full rounded-full bg-progress-bg", working && "motion-safe:animate-pulse")} />
+          <span className={cn("mx-auto h-3 w-3/4 rounded-full bg-progress-bg", working && "motion-safe:animate-pulse")} />
+        </div>
       </div>
     </div>
   );
