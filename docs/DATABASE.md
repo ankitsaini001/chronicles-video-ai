@@ -922,6 +922,8 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 
 **As built (F23)** (`packages/db/src/renders.ts`, written by `completeGenerateJob` in `generate-jobs.ts`): a render document is inserted **only when the video is ready**, in the same transaction that points the project's `currentRenderId` to it, so `status` is always `ready` and failed or cancelled attempts never take a video number (the attempt in progress is `jobs.render.renderId`; every attempt gets a new `renderId`, i.e. its own R2 folder). Extra field `qaKey` (the MP4 checks in R2). `previewFrameKeys: []` (no preview frames yet). `metrics { renderMs, bundleMs, bytes, durationMs, frames }` (no `sandboxMs`: rendered on this computer, F23 decision 3). `renderInputHash` = sha256 of the plan hash, the recordings and the music switch (reusing an identical render by it comes later). `mp4Sha256` is also saved on the R2 object; publishing (F30) must check it before sending the video to Instagram.
 
+**As built (F24):** read only, by the Step 3 review screen and API F1/F3 (`listProjectRenders`, `findProjectRender` in `renders.ts`): always filtered by `ownerId` **and** `projectId`; F1 sorts by `renderNumber` desc (served by the F23 index `projectId_renderNumber_unique`). No new index.
+
 **Indexes**
 - unique `{ projectId, renderNumber }`: no two "video 2"s in a project.
 - `{ ownerId: 1, projectId: 1 }`: owner-scoped list.
