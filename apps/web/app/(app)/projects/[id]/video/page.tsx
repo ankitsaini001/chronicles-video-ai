@@ -20,7 +20,8 @@ import { videoMediaDeps } from "@/lib/video/media";
 // project opens read-only.
 // F25: the ready video has the Captions tab (caption fixes); while a fix is rendered the progress
 // screen shows its two steps (Updating captions → Rendering). A failed or cancelled fix leaves the
-// project `video_ready`: the review screen shows a note with Try again.
+// project `video_ready`; after a FAILED one the review screen shows a note (Try again only when
+// trying again can help). A cancelled fix shows no note.
 
 export const metadata: Metadata = { title: "Your video" };
 
@@ -61,13 +62,12 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
       media.presign(render.thumbnailKey).then((link) => link.url, () => null),
       media.presign(render.mp4Key).then((link) => link.url, () => null),
     ]);
-    // The last caption fix made on THIS video, when it failed or was cancelled.
+    // The last caption fix made on THIS video, when it FAILED (a fix the creator cancelled shows no note).
     const captionJob = loaded.latestCaptionJob;
     const lastCaptionJob =
-      captionJob && (captionJob.state === "failed" || captionJob.state === "cancelled") && captionJob.inputRef.renderId?.equals(render._id)
+      captionJob && captionJob.state === "failed" && captionJob.inputRef.renderId?.equals(render._id)
         ? {
             id: captionJob._id.toHexString(),
-            state: captionJob.state,
             message: captionJob.error?.message ?? "Something went wrong on our side. Please try again.",
             canRetry: resource.allowedActions.includes("retry_job") && canRetryCaptionJob(captionJob) && !archived,
           }

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CAPTION_MESSAGES } from "@bytereel/db/caption-messages";
+import { captionTextProblem } from "@bytereel/pipeline/timing/caption-fit";
 import { apiSend, newIdempotencyKey } from "@/components/storyboard/client";
 import { Button, cn } from "@/components/ui";
 import type { CaptionPhrase, RenderDetailResource } from "@/lib/video/captions";
@@ -15,11 +17,14 @@ import type { CaptionPhrase, RenderDetailResource } from "@/lib/video/captions";
 // - A changed row is marked "Edited" with its own Undo, until saved.
 // - Save caption fixes (F4) sends only the changed rows, with an Idempotency-Key per save attempt
 //   (the same key again only when the same fixes are sent again after a network or server problem).
-//   The server checks each fix (the phrase exists, the text fits on screen) and its messages are shown
+//   Before sending, each changed row is checked here with the SAME rule as the server (caption-fit.ts:
+//   no emoji, fits on screen), so most mistakes never use up one of the 10 saves an hour. The server
+//   stays the authority: it checks again (the phrase exists, the timing) and its messages are shown
 //   on the row. Then the page shows the progress (Updating captions → Rendering).
-// - After a failed or cancelled caption fix: a note with Try again (E2) while that is allowed.
+// - After a failed caption fix: a note, with Try again (E2) only when trying again can help; a fix
+//   that can't be applied asks to fix the captions again here. A cancelled fix shows no note.
 
-export type LastCaptionJob = { id: string; state: "failed" | "cancelled"; message: string; canRetry: boolean };
+export type LastCaptionJob = { id: string; message: string; canRetry: boolean };
 
 export type CaptionsPanelProps = {
   projectId: string;
@@ -85,9 +90,17 @@ export function CaptionsPanel(props: CaptionsPanelProps) {
 
   async function save() {
     if (busy || changed.length === 0) return;
-    setBusy("save");
     setProblem(null);
-    setRowErrors({});
+    // The same rule as the server, before sending (a refusal would still count toward the hourly limit).
+    const local: Record<string, string> = {};
+    for (const phrase of changed) {
+      const text = clean(drafts[keyOf(phrase)]!);
+      const found = text === "" ? "empty" : captionTextProblem(text);
+      if (found) local[keyOf(phrase)] = found === "empty" ? CAPTION_MESSAGES.EMPTY : found === "emoji" ? CAPTION_MESSAGES.EMOJI : CAPTION_MESSAGES.TOO_LONG;
+    }
+    setRowErrors(local);
+    if (Object.keys(local).length > 0) return;
+    setBusy("save");
     const edits = changed.map((p) => ({ sceneId: p.sceneId, phraseIndex: p.phraseIndex, text: clean(drafts[keyOf(p)]!) }));
     const body = JSON.stringify(edits);
     if (saveKey.current?.body !== body) saveKey.current = { body, key: newIdempotencyKey() };
@@ -141,7 +154,7 @@ export function CaptionsPanel(props: CaptionsPanelProps) {
 
         {props.lastJob && (
           <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-text">
-            <span className="min-w-0 flex-1 break-words">{props.lastJob.state === "cancelled" ? "Your caption fix was cancelled. Your video wasn't changed." : `We couldn't update your captions. ${props.lastJob.message}`}</span>
+            <span className="min-w-0 flex-1 break-words">{`We couldn't update your captions. ${props.lastJob.message}`}</span>
             {props.lastJob.canRetry && (
               <button type="button" onClick={() => void retry()} disabled={busy !== null} className="min-h-11 cursor-pointer px-1 text-sm font-medium text-amber-light hover:underline disabled:opacity-50">
                 {busy === "retry" ? "Starting…" : "Try again"}
