@@ -72,7 +72,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 |---|---|---|---|
 | F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | ✅ Done |
 | F22b | [Video style upgrade (v4 hero visuals)](F22b-video-style-v4.md) | F22, F00 | ✅ Done |
-| F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | 🧪 Testing |
+| F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ✅ Done |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ⬜ Not started |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ⬜ Not started |
 | F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | ⬜ Not started |
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F23 — Generate video** is 🧪 Testing (built 2026-11-15: English only, free ElevenLabs plan, render on this computer, one video at a time, app-wide voice guard of 9,000 characters a month). Code review findings fixed 2026-11-16 (narration never paid twice, every voice request counted first, Edit storyboard from the video page); second review fixed and the e2e passed on the final code (71/71); waiting for the founder's test ("How to try it" in the F23 file). **Next up after its OK:** F24 — watch and download the video. Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22 and F22b done (v4 hero style is the only video style).
+**Now:** **F23 — Generate video** is ✅ Done (founder made the first real video 2026-11-16: English only, free ElevenLabs plan, render on this computer, one video at a time, app-wide voice guard of 9,000 characters a month). **Next up:** F24 — watch and download the video. Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b and F23 done (v4 hero style is the only video style).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
@@ -110,6 +110,9 @@ Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision
 ## Open decisions (must be settled before the named feature)
 - **Before Hindi/Hinglish come back on: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) F23 was built English-only with the free voices Matilda and Brian (founder, 2026-11-15). Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
 - **Before F38 (go-live): where videos are rendered online** (Vercel Sandbox, a small render server, …). F23 renders on this computer (founder, 2026-11-15).
+
+## Follow-ups to re-check in manual testing
+- **Narration and pictures in sync (founder, 2026-11-16, after the first real F23 video):** "the explanation and the picturization somewhere might not be in sync, or some visualization part is missing." Known part: the test storyboard (2026-11-14) predates the planner's hero picks (F22b), so heroes came from single spoken words (a map pin for "every single direction", a steam picture for "nitrogen and oxygen"). In the manual testing phase, make a new storyboard on the same topic and check scene by scene; fix then if it still shows. Video and frame sheet: `runs/f23-work/real-video/`.
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.
