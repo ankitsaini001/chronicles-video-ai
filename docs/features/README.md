@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F23 — Generate video** is ✅ Done (founder made the first real video 2026-11-16: English only, free ElevenLabs plan, render on this computer, one video at a time, app-wide voice guard of 9,000 characters a month). **Now:** F24 — watch and download the video is 🧪 Testing (built 2026-11-16; waiting for code review and the founder's test). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b and F23 done (v4 hero style is the only video style).
+**Now:** **F23 — Generate video** is ✅ Done (founder made the first real video 2026-11-16: English only, free ElevenLabs plan, render on this computer, one video at a time, app-wide voice guard of 9,000 characters a month). **Now:** F24 — watch and download the video is 🧪 Testing (built and code review fixed 2026-11-16; waiting for the founder's test). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b and F23 done (v4 hero style is the only video style).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
