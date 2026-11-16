@@ -503,13 +503,18 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
         await store.markSpeechFailed({ ...lock, message: line });
         return end("failed", { code, stage: "speech", detail: `Scene ${n}: ${line}` });
       }
-      await finishUsage("final", "ok", response.characterCost ?? characters);
       const cached = cacheRecordFor(cacheKey, request, response, new Date());
       const ends = cached.alignment?.character_end_times_seconds ?? [];
       const durationMs = ends.length ? Math.round(ends[ends.length - 1]! * 1000) : null;
       const fresh = cached as unknown as SpeechRecordDoc;
-      // The answer AND the paid bytes in ONE write, BEFORE any upload (a few quick tries).
-      const saved = await withTries(`saving scene ${n}'s answer`, SAVE_TRIES, SAVE_RETRY_WAIT_MS, () => store.saveSpeechResponse({ ...lock, response: fresh, audio: response.audio, durationMs }));
+      // The answer AND the paid bytes in ONE write, BEFORE any upload (a few quick tries). The usage
+      // row comes after it: nothing (a slow or failing usage write) stands between paying and saving.
+      let saved: SpeechSaveTarget | null;
+      try {
+        saved = await withTries(`saving scene ${n}'s answer`, SAVE_TRIES, SAVE_RETRY_WAIT_MS, () => store.saveSpeechResponse({ ...lock, response: fresh, audio: response.audio, durationMs }));
+      } finally {
+        await finishUsage("final", "ok", response.characterCost ?? characters);
+      }
       if (saved === "released") {
         // The job ended while ElevenLabs was answering: the answer is kept on the released recording;
         // the next try uploads it (no second payment). This run stops here.

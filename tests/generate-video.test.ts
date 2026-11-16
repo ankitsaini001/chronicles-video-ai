@@ -1223,6 +1223,23 @@ describe("every ElevenLabs request is counted before it is sent (code review, fi
     });
   });
 
+  it("the paid answer is saved BEFORE its usage row is finished; a failing usage write never loses it (second review, finding 3)", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events);
+      const store: GenerateJobStore = {
+        ...bundle.store,
+        finishUsage: async () => {
+          events.push("usage-final");
+          throw new Error("usage write failed");
+        },
+      };
+      expect(await run({ ...bundle, store }, { files: sameFiles(fakeFiles()), voice: voiceWith({ calls: 0 }), render: fakeRenderer(events, readyResult) as never, root })).toBe("done");
+      expect(events.indexOf("save-answer")).toBeGreaterThan(-1);
+      expect(events.indexOf("save-answer")).toBeLessThan(events.indexOf("usage-final"));
+    });
+  });
+
   it("ElevenLabs' own quota answer → 'Voice limit reached this month.' (retryable); the request was counted", async () => {
     await withTempDir(async (root) => {
       const bundle = fakeStore([]);
