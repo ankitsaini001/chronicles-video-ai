@@ -296,9 +296,11 @@ export {
   SPEECH_ARTIFACT_SCHEMA_VERSION,
   SPEECH_ARTIFACTS_COLLECTION,
   SPEECH_LOCK_STALE_MS,
+  speechSaveTarget,
   type SpeechArtifactDocument,
   type SpeechClaim,
   type SpeechRecordDoc,
+  type SpeechSaveTarget,
   type SpeechSetup,
 } from "./speech-artifacts";
 export { getRender, latestReadyRenderOf, RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, rendersForCards, type RenderDocument } from "./renders";

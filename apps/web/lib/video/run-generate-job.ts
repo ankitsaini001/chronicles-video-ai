@@ -14,6 +14,7 @@ import {
   type SpeechArtifactDocument,
   type SpeechClaim,
   type SpeechRecordDoc,
+  type SpeechSaveTarget,
   type SpeechSetup,
   type VoiceReservation,
   type VoiceScene,
@@ -42,7 +43,9 @@ import { voiceEstimatorFor, VoiceNotConfiguredError, type VoiceSetup } from "./v
 //                    claimed, EVERY request counted right before it is sent (reserveVoiceSend) and
 //                    logged in providerUsage, the answer AND its audio bytes saved in one write, then
 //                    uploaded create-only (a few quick tries). A saved answer is never paid for again:
-//                    a retry, a Try again or another job uploads the saved bytes.
+//                    a retry, a Try again or another job uploads the saved bytes. While a request is
+//                    in flight the progress line is rewritten every 20 s (the stuck rule's heartbeat);
+//                    an answer that arrives after the job ended is still saved (then the run stops).
 //   render           a NEW renderId; narration downloaded and checked; the render child process does
 //                    Timing animations → Adding captions → Rendering → Checking; results uploaded to
 //                    R2 create-only; the video saved and the project made `video_ready`
@@ -73,7 +76,8 @@ export interface GenerateJobStore {
   reserveUsage(input: { ownerId: string; projectId: string; jobId: string; model: string; characters: number }): Promise<unknown>;
   finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; characters: number; latencyMs: number }): Promise<void>;
   claimSpeech(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; setup: SpeechSetup }): Promise<SpeechClaim>;
-  saveSpeechResponse(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; audio: Uint8Array; durationMs: number | null }): Promise<boolean>;
+  /** "held": go on and upload; "released": the job ended mid-request, the answer is kept for the next try; null: not saved. */
+  saveSpeechResponse(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; audio: Uint8Array; durationMs: number | null }): Promise<SpeechSaveTarget | null>;
   markSpeechReady(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number }): Promise<boolean>;
   markSpeechFailed(input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; message: string }): Promise<void>;
   progress(input: { jobId: ObjectId; attempt: number; stage: GenerateStage; percent: number; message: string; stages?: Partial<Record<GenerateStage, "running" | "succeeded">> }): Promise<{ cancelRequested: boolean } | null>;
@@ -102,6 +106,8 @@ export interface GenerateJobDeps {
   log?: (level: "info" | "warn" | "error", message: string) => void;
   /** How often the render step writes progress and checks Cancel (default 2 s). */
   heartbeatMs?: number;
+  /** How often a recording in flight rewrites its progress line (default SPEECH_HEARTBEAT_MS). */
+  speechHeartbeatMs?: number;
   /** Short in-process waits (save/upload tries, the provider's own quick retries). Tests: no real waiting. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -113,6 +119,12 @@ type StepResult = { status: "ok" } | { status: "ended"; outcome: GenerateJobOutc
 export const SPEECH_BUSY_WAIT_MS = 60_000;
 /** Enough waits to outlast an abandoned claim (SPEECH_LOCK_STALE_MS), then a little more. */
 export const SPEECH_BUSY_MAX_WAITS = Math.ceil(SPEECH_LOCK_STALE_MS / SPEECH_BUSY_WAIT_MS) + 2;
+/**
+ * While an ElevenLabs request is in flight, the scene's progress line is written again this often
+ * (same text), so the job's `updatedAt` stays fresh and the stuck rule's 60-second Cancel grace
+ * (GENERATE_CANCEL_GRACE_MS) never ends a worker that is still waiting for a paid answer.
+ */
+export const SPEECH_HEARTBEAT_MS = 20_000;
 
 /** Saving a paid answer, and each upload, is tried this many times in-process before the step fails. */
 const SAVE_TRIES = 3;
@@ -373,7 +385,8 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
     };
     const request = speechRequestFor(plan, index, config);
     const characters = countCharacters(request.text);
-    if ((await store.progress({ jobId, attempt, stage: "speech", percent: 5 + (30 * index) / plan.scenes.length, message: recordingMessage(n, plan.scenes.length) })) === null) return { status: "stale" };
+    const sceneLine = { stage: "speech" as const, percent: 5 + (30 * index) / plan.scenes.length, message: recordingMessage(n, plan.scenes.length) };
+    if ((await store.progress({ jobId, attempt, ...sceneLine })) === null) return { status: "stale" };
 
     // The speech lock: claimed BEFORE any call; ready → reused; held by another run → wait.
     const claim = await store.claimSpeech({
@@ -465,9 +478,21 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
         },
         ...(deps.sleep ? { retry: { sleep: deps.sleep } } : {}),
       };
+      /** While the request is in flight (retries included), the same progress line is written every 20 s: the stuck rule never ends a live worker waiting for a paid answer. */
+      const synthesize = async () => {
+        const heartbeat = setInterval(
+          () => void store.progress({ jobId, attempt, ...sceneLine }).catch((e: unknown) => log("warn", `Video job ${event.jobId}: progress not saved: ${String(e)}`)),
+          deps.speechHeartbeatMs ?? SPEECH_HEARTBEAT_MS,
+        );
+        try {
+          return await setup.provider(plan.language).synthesize(request, options);
+        } finally {
+          clearInterval(heartbeat);
+        }
+      };
       let response: SpeechResponse;
       try {
-        response = await setup.provider(plan.language).synthesize(request, options);
+        response = await synthesize();
       } catch (error) {
         // A broken answer (bad JSON, bad timings) may have been billed: logged with its characters.
         await finishUsage("failed", usageOutcomeOf(error), error instanceof ProviderError && error.kind === "bad-response" ? characters : 0);
@@ -485,7 +510,13 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       const fresh = cached as unknown as SpeechRecordDoc;
       // The answer AND the paid bytes in ONE write, BEFORE any upload (a few quick tries).
       const saved = await withTries(`saving scene ${n}'s answer`, SAVE_TRIES, SAVE_RETRY_WAIT_MS, () => store.saveSpeechResponse({ ...lock, response: fresh, audio: response.audio, durationMs }));
-      if (!saved) throw new Error(`Scene ${n}: lost the recording lock while saving`);
+      if (saved === "released") {
+        // The job ended while ElevenLabs was answering: the answer is kept on the released recording;
+        // the next try uploads it (no second payment). This run stops here.
+        log("warn", `Video job ${event.jobId}, scene ${n}: the job ended while the voice was answering; the paid answer is kept for the next try`);
+        return { status: "stale" };
+      }
+      if (saved !== "held") throw new Error(`Scene ${n}: lost the recording lock while saving`);
       return { record: fresh, audio: response.audio };
     }
   }

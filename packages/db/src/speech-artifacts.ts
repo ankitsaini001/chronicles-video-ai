@@ -14,7 +14,8 @@ import { Binary, type ClientSession, type Db, ObjectId } from "mongodb";
 //   - by its own job at once when the answer is saved (no call is ever made for it again);
 //   - otherwise only when older than SPEECH_LOCK_STALE_MS, even by the same job: somebody may be
 //     calling ElevenLabs right now (e.g. Inngest re-running a step whose first run is still alive).
-// A job that ends releases its pending claims (releaseSpeechClaims), so others don't wait.
+// A job that ends releases its pending claims (releaseSpeechClaims), so others don't wait. An answer
+// that arrives after that is still saved on the released recording (saveSpeechResponse "released").
 // Reuse never crosses owners.
 // NEEDS the unique index { ownerId, cacheKey } (npm run db -- indexes --feature F23 --apply).
 
@@ -156,32 +157,51 @@ export async function claimSpeech(
 }
 
 const claimedBy = (jobId: ObjectId, attempt: number) => ({ status: "pending" as const, "claim.jobId": jobId, "claim.attempt": attempt });
+/** A recording whose claim was released before any answer was saved (its job ended mid-request). */
+const RELEASED_WITHOUT_ANSWER = { status: "failed" as const, claim: null, response: null };
+
+/** Where a paid answer was saved: "held" = this job still holds the claim; "released" = see speechSaveTarget. */
+export type SpeechSaveTarget = "held" | "released";
 
 /**
- * Step 2: save the paid answer AND its audio bytes in ONE write, BEFORE uploading anything (only
- * while this job still holds the claim). From here on this recording is never paid for again.
+ * Pure: where may this job save a paid answer? The same rule as saveSpeechResponse's filters.
+ * "held": this job and attempt still hold the pending claim (go on and upload it).
+ * "released": the claim was released while the request was in flight (the job ended: Cancel and the
+ * 60-second rule, the stuck rule…), and no answer is saved yet: the answer and bytes are saved there
+ * anyway, its status left `failed`, so the next job uploads them instead of paying again.
+ * Null: another run holds it, it already has an answer, or it is ready.
+ */
+export function speechSaveTarget(doc: Pick<SpeechArtifactDocument, "status" | "claim" | "response">, jobId: ObjectId, attempt: number): SpeechSaveTarget | null {
+  if (doc.status === "pending" && doc.claim?.jobId.equals(jobId) && doc.claim.attempt === attempt) return "held";
+  if (doc.status === "failed" && !doc.claim && !doc.response) return "released";
+  return null;
+}
+
+/**
+ * Step 2: save the paid answer AND its audio bytes in ONE write, BEFORE uploading anything. From here
+ * on this recording is never paid for again. Saved while this job holds the claim ("held"), or on the
+ * released recording when the job ended while ElevenLabs was answering ("released": status unchanged;
+ * the worker then stops). Null = nothing saved (speechSaveTarget).
  */
 export async function saveSpeechResponse(
   db: Db,
   input: { ownerId: ObjectId; cacheKey: string; jobId: ObjectId; attempt: number; response: SpeechRecordDoc; audio: Uint8Array; durationMs: number | null; now?: Date },
-): Promise<boolean> {
+): Promise<SpeechSaveTarget | null> {
   const now = input.now ?? new Date();
-  const result = await collection(db).updateOne(
-    { ownerId: input.ownerId, cacheKey: input.cacheKey, ...claimedBy(input.jobId, input.attempt) },
-    {
-      $set: {
-        response: input.response,
-        audio: new Binary(input.audio),
-        audioSha256: input.response.audioSha256,
-        characters: input.response.charactersSent,
-        durationMs: input.durationMs,
-        paidByJobId: input.jobId,
-        "claim.at": now,
-        updatedAt: now,
-      },
-    },
-  );
-  return result.matchedCount === 1;
+  const key = { ownerId: input.ownerId, cacheKey: input.cacheKey };
+  const answer = {
+    response: input.response,
+    audio: new Binary(input.audio),
+    audioSha256: input.response.audioSha256,
+    characters: input.response.charactersSent,
+    durationMs: input.durationMs,
+    paidByJobId: input.jobId,
+    updatedAt: now,
+  };
+  const held = await collection(db).updateOne({ ...key, ...claimedBy(input.jobId, input.attempt) }, { $set: { ...answer, "claim.at": now } });
+  if (held.matchedCount === 1) return "held";
+  const released = await collection(db).updateOne({ ...key, ...RELEASED_WITHOUT_ANSWER }, { $set: answer });
+  return released.matchedCount === 1 ? "released" : null;
 }
 
 /** Step 3: the files are in R2: ready for everyone of this owner (the saved answer and bytes are removed). */

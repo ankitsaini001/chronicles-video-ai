@@ -8,6 +8,7 @@ import {
   canTakeOverSpeech,
   claimSpeech,
   endGenerateJob,
+  GENERATE_CANCEL_GRACE_MS,
   GENERATE_ERRORS,
   generateJobKey,
   isGenerateJobStuck,
@@ -17,10 +18,12 @@ import {
   planVoiceReservation,
   planVoiceSend,
   ProjectActionError,
+  recordingMessage,
   reserveVoiceSend,
   savedAudioOf,
   saveSpeechResponse,
   SPEECH_LOCK_STALE_MS,
+  speechSaveTarget,
   startGenerateAttempt,
   voiceCredits,
   voiceLimitError,
@@ -47,6 +50,7 @@ import {
   runGenerateJob,
   SPEECH_BUSY_MAX_WAITS,
   SPEECH_BUSY_WAIT_MS,
+  SPEECH_HEARTBEAT_MS,
   speechFailureCode,
   type FileStore,
   type GenerateJobDeps,
@@ -365,13 +369,55 @@ describe("the speech lock (speechArtifacts)", () => {
     const writes: any[] = [];
     const { db } = fakeDb({ "speechArtifacts.updateOne": (filter: unknown, update: unknown) => (writes.push({ filter, update }), { matchedCount: 1 }) });
     const audio = new Uint8Array([1, 2, 3]);
-    expect(await saveSpeechResponse(db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, response: { audioSha256: "sha256:x", charactersSent: 10 }, audio, durationMs: 900, now: NOW })).toBe(true);
+    expect(await saveSpeechResponse(db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, response: { audioSha256: "sha256:x", charactersSent: 10 }, audio, durationMs: 900, now: NOW })).toBe("held");
     expect(writes[0].filter).toMatchObject({ status: "pending", "claim.jobId": JOB, "claim.attempt": 1 });
     expect(writes[0].update.$set).toMatchObject({ response: { audioSha256: "sha256:x" }, audioSha256: "sha256:x", paidByJobId: JOB });
     expect(savedAudioOf({ audio: writes[0].update.$set.audio })).toEqual(audio);
     expect(await markSpeechReady(db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, now: NOW })).toBe(true);
     expect(writes[1].update.$unset).toEqual({ audio: "" });
     expect(writes[1].update.$set).toMatchObject({ status: "ready", response: null });
+  });
+
+  it("where a paid answer may be saved (second review, finding 1): this job's claim, or a claim released before any answer", () => {
+    const answer = { audioSha256: "sha256:x", charactersSent: 10 };
+    const mine = { jobId: JOB, attempt: 2, at: NOW };
+    expect(speechSaveTarget({ status: "pending", claim: mine, response: null }, JOB, 2)).toBe("held");
+    // The job ended mid-request (Cancel + the 60-second rule): released, no answer yet → still saved.
+    expect(speechSaveTarget({ status: "failed", claim: null, response: null }, JOB, 2)).toBe("released");
+    expect(speechSaveTarget({ status: "pending", claim: mine, response: null }, JOB, 1)).toBeNull(); // an older attempt
+    expect(speechSaveTarget({ status: "pending", claim: { ...mine, jobId: new ObjectId() }, response: null }, JOB, 2)).toBeNull(); // another run holds it
+    expect(speechSaveTarget({ status: "failed", claim: null, response: answer }, JOB, 2)).toBeNull(); // it has an answer already
+    expect(speechSaveTarget({ status: "ready", claim: null, response: null }, JOB, 2)).toBeNull();
+  });
+
+  it("an answer that arrives after the job released its claim is saved there (status untouched); nothing matches → null", async () => {
+    const writes: any[] = [];
+    const matches = [0, 1];
+    const { db } = fakeDb({ "speechArtifacts.updateOne": (filter: unknown, update: unknown) => (writes.push({ filter, update }), { matchedCount: matches.shift() ?? 0 }) });
+    const input = { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 1, response: { audioSha256: "sha256:x", charactersSent: 10 }, audio: new Uint8Array([7, 8]), durationMs: 900, now: NOW };
+    expect(await saveSpeechResponse(db, input)).toBe("released");
+    expect(writes[1].filter).toEqual({ ownerId: OWNER, cacheKey: "sha256:k", status: "failed", claim: null, response: null });
+    expect(writes[1].update.$set).toMatchObject({ response: { audioSha256: "sha256:x" }, audioSha256: "sha256:x", paidByJobId: JOB });
+    expect(savedAudioOf({ audio: writes[1].update.$set.audio })).toEqual(new Uint8Array([7, 8]));
+    expect(writes[1].update.$set).not.toHaveProperty("status");
+    expect(writes[1].update.$set).not.toHaveProperty("claim.at");
+    expect(await saveSpeechResponse(db, input)).toBeNull();
+  });
+
+  it("taking over a failed recording keeps its saved answer and bytes (the next job uploads them, no call)", async () => {
+    const saved = doc({ status: "failed", claim: null, response: { audioSha256: "sha256:x", charactersSent: 10 }, audio: new Uint8Array([1, 2]) });
+    const updates: any[] = [];
+    const { db } = fakeDb({
+      "speechArtifacts.updateOne": () => ({ upsertedCount: 0 }),
+      "speechArtifacts.findOne": () => saved,
+      "speechArtifacts.findOneAndUpdate": (_f: unknown, update: { $set: object }) => (updates.push(update), { ...saved, ...update.$set }),
+    });
+    const claim = await claimSpeech(db, { ownerId: OWNER, cacheKey: "sha256:k", jobId: JOB, attempt: 2, setup, now: NOW });
+    expect(claim.kind).toBe("claimed");
+    expect(updates[0].$set).not.toHaveProperty("response");
+    expect(updates[0].$set).not.toHaveProperty("audio");
+    expect(claim.doc.response).toMatchObject({ audioSha256: "sha256:x" });
+    expect(savedAudioOf(claim.doc)).toEqual(new Uint8Array([1, 2]));
   });
 
   it("a job that ends releases its pending claims (answers and bytes kept), so no other job waits for them", async () => {
@@ -669,10 +715,13 @@ function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; 
       return { kind: "claimed", doc: existing };
     },
     saveSpeechResponse: async (input) => {
-      const doc = speech.get(input.cacheKey)!;
+      // The real matching rule: this job's claim ("held"), or released without an answer ("released").
+      const doc = speech.get(input.cacheKey);
+      const target = doc ? speechSaveTarget(doc, input.jobId, input.attempt) : null;
+      if (!doc || !target) return null;
       Object.assign(doc, { response: input.response, audio: input.audio, audioSha256: input.response.audioSha256 });
-      events.push("save-answer");
-      return true;
+      events.push(target === "held" ? "save-answer" : "save-answer-released");
+      return target;
     },
     markSpeechReady: async (input) => {
       Object.assign(speech.get(input.cacheKey)!, { status: "ready", claim: null, response: null, audio: null });
@@ -703,8 +752,11 @@ function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; 
   return { store, speech, state, jobId: job._id.toHexString() };
 }
 
-/** A counting stand-in voice: one request per synthesize call, counted (beforeAttempt) before it "sends". */
-function voiceWith(provider: { calls: number; texts?: string[]; fail?: Error }) {
+/**
+ * A counting stand-in voice: one request per synthesize call, counted (beforeAttempt) before it
+ * "sends". `during` runs while the request is in flight (after it was sent, before the answer).
+ */
+function voiceWith(provider: { calls: number; texts?: string[]; fail?: Error; during?: (call: number) => Promise<void> }) {
   const setup = voiceSetupFromEnv(STAND_IN_ENV);
   if (!setup.ok) throw new Error(setup.problem);
   return () => ({
@@ -715,6 +767,7 @@ function voiceWith(provider: { calls: number; texts?: string[]; fail?: Error }) 
         await options?.beforeAttempt?.(1);
         provider.calls++;
         provider.texts?.push(request.text);
+        await provider.during?.(provider.calls);
         if (provider.fail) throw provider.fail;
         return new FakeElevenLabsSpeech("en").synthesize(request);
       },
@@ -1056,6 +1109,56 @@ describe("paid narration is never paid for again (code review, finding 1)", () =
       expect(provider.calls).toBe(scenesOf());
       // The saved recording is free for the other job: its up-front reservation skipped it.
       expect(other.state.voice?.characters).toBeLessThan(first.state.voice!.characters);
+    });
+  });
+
+  it("the job ends while a request is in flight (Cancel + the 60-second rule): the paid answer is still saved; the next job makes ZERO provider calls", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events);
+      const files = fakeFiles();
+      const scenes = scenesOf();
+      // The last scene's request is slow: the job is ended (its claims released) before ElevenLabs answers.
+      const provider = {
+        calls: 0,
+        during: async (call: number) => {
+          if (call === scenes) await bundle.store.end({ jobId: new ObjectId(bundle.jobId), attempt: 1, outcome: "cancelled" });
+        },
+      };
+      expect(await run(bundle, { files: () => files, voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root })).toBe("skipped");
+      expect(provider.calls).toBe(scenes);
+      expect(events).toContain("save-answer-released");
+      const last = [...bundle.speech.values()].at(-1)!;
+      // Saved on the released recording (still `failed`, no claim): the answer and the paid bytes.
+      expect(last).toMatchObject({ status: "failed", claim: null });
+      expect(last.response).not.toBeNull();
+      expect(savedAudioOf(last)).not.toBeNull();
+      expect(bundle.state.usage.at(-1)).toMatchObject({ status: "final", outcome: "ok" });
+
+      // "Generate video" again (attempt 2): the saved bytes are uploaded; nothing is sent or counted.
+      const again: Events = [];
+      const next = fakeStore(again, { ready: bundle.speech });
+      provider.during = async () => undefined;
+      expect(await run(next, { files: () => files, voice: voiceWith(provider), render: fakeRenderer(again, readyResult) as never, root }, { attempt: 2 })).toBe("done");
+      expect(provider.calls).toBe(scenes);
+      expect(next.state.sends).toHaveLength(0);
+      expect(again).toContain("reserve:0");
+      expect(sha(files.objects.get(last.audioKey)!)).toBe(last.audioSha256);
+      expect(last.status).toBe("ready");
+    });
+  });
+
+  it("while a request is in flight the scene's progress line is rewritten (heartbeat, same text) well inside the 60-second Cancel grace", async () => {
+    expect(SPEECH_HEARTBEAT_MS * 2).toBeLessThan(GENERATE_CANCEL_GRACE_MS);
+    await withTempDir(async (root) => {
+      const bundle = fakeStore([]);
+      const provider = { calls: 0, during: (call: number) => (call === 1 ? new Promise<void>((r) => setTimeout(r, 60)) : Promise.resolve()) };
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer([], readyResult) as never, root, speechHeartbeatMs: 10 })).toBe("done");
+      const scene1 = bundle.state.progress.filter((p) => p.message === recordingMessage(1, scenesOf()));
+      expect(scene1.length).toBeGreaterThan(2); // the scene's own write + heartbeats while it was in flight
+      expect(new Set(scene1.map((p) => JSON.stringify({ stage: p.stage, percent: p.percent, stages: p.stages ?? null }))).size).toBe(1);
+      // Nothing else was written while recording: only the scenes' own lines.
+      expect(bundle.state.progress.filter((p) => p.stage === "speech").every((p) => p.message.startsWith("Recording narration · scene "))).toBe(true);
     });
   });
 });
