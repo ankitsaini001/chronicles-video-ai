@@ -49,7 +49,9 @@ import { voiceEstimatorFor, VoiceNotConfiguredError, type VoiceSetup } from "./v
 //   render           a NEW renderId; narration downloaded and checked; the render child process does
 //                    Timing animations → Adding captions → Rendering → Checking; results uploaded to
 //                    R2 create-only; the video saved and the project made `video_ready`
-// Cancel: every step starts by checking `cancelRequestedAt`; during the render the worker checks it
+// Cancel: every step starts by checking `cancelRequestedAt`; no ElevenLabs request (not even a
+// provider retry) is sent after it (reserveVoiceSend refuses: the job ends as cancelled); a request
+// already in flight finishes and its paid answer is kept; during the render the worker checks it
 // every few seconds and stops the renderer. Characters already spent stay counted.
 // Try again (E2) runs the same steps: recordings made before are reused, never paid again.
 // What the creator sees is always a fixed plain line; provider text and stack traces go to the log.
@@ -166,8 +168,15 @@ async function putOnce(files: FileStore, key: StorageKey, data: Uint8Array | str
 class StorageRefused extends Error {}
 const isRefusal = (error: unknown) => error instanceof StorageError && (error.code === "access_denied" || error.code === "bucket_not_found");
 
-/** The job no longer runs this attempt (ended elsewhere): stop without sending anything. */
-class JobStopped extends Error {}
+/** The job no longer runs this attempt (ended elsewhere), or Cancel was pressed (`cancelled`): stop without sending anything. */
+class JobStopped extends Error {
+  constructor(
+    message: string,
+    readonly cancelled = false,
+  ) {
+    super(message);
+  }
+}
 
 /** A provider retry would pass a monthly voice limit (it is not sent). */
 export class VoiceLimitDuringRecording extends SpeechBudgetError {
@@ -334,6 +343,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       if (outcome === "quota") return end("failed", { code: "QUOTA_EXCEEDED", stage: "speech", detail: "The creator's monthly voice characters are used up" });
       if (outcome === "ceiling") return end("failed", { code: "SPEND_CEILING", stage: "speech", detail: "The app's monthly voice characters are used up" });
       if (outcome === "stale") return { status: "stale" };
+      if (outcome === "cancelled") return end("cancelled");
       return { status: "ok" };
     });
     const stopReserve = outcomeOf(reserved);
@@ -445,7 +455,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       if (refused(error)) return storageRefused(error, "speech");
       if (error instanceof JobStopped) {
         await store.markSpeechFailed({ ...lock, message: "The video job stopped before recording" }).catch(() => undefined);
-        return { status: "stale" };
+        return error.cancelled ? end("cancelled") : { status: "stale" };
       }
       // Nothing paid is kept: free the lock now, so the step's retry doesn't wait for it to go stale.
       if (!paidAnswerKept) await store.markSpeechFailed({ ...lock, message: "The recording stopped with an error" }).catch(() => undefined);
@@ -478,6 +488,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
           if (counted === "quota") throw new VoiceLimitDuringRecording("QUOTA_EXCEEDED");
           if (counted === "ceiling") throw new VoiceLimitDuringRecording("SPEND_CEILING");
           if (counted === "stale") throw new JobStopped("the job no longer runs this attempt");
+          if (counted === "cancelled") throw new JobStopped("Cancel was pressed: nothing more is sent", true);
           usage = await store.reserveUsage({ ownerId: ownerId.toHexString(), projectId, jobId: event.jobId, model, characters });
           sentAt = Date.now();
         },

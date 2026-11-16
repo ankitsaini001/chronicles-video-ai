@@ -646,7 +646,7 @@ type Events = string[];
  * voice counting (planVoiceReservation / planVoiceSend, in the creator's month), and a job's end
  * releasing its pending claims. One job; run it again with a higher attempt for "Try again".
  */
-function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; reserve?: "ok" | "quota" | "ceiling"; ready?: Map<string, SpeechArtifactDocument>; busyClaims?: number } = {}) {
+function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; reserve?: "ok" | "quota" | "ceiling" | "cancelled"; ready?: Map<string, SpeechArtifactDocument>; busyClaims?: number } = {}) {
   const job = generateJob({ state: "running" });
   const project = projectDoc({ state: "generating", activeJobId: job._id, approvedPlanVersionId: V1 });
   const speech = options.ready ?? new Map<string, SpeechArtifactDocument>();
@@ -679,6 +679,7 @@ function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; 
       return "ok";
     },
     reserveVoiceSend: async (input) => {
+      if (cancelRequested) return "cancelled"; // the real check: nothing is sent after Cancel
       const planned = planVoiceSend(state.voice, input.item, period());
       state.sends.push(input.item.cacheKey);
       state.counted += planned.count;
@@ -749,7 +750,9 @@ function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; 
       return true;
     },
   };
-  return { store, speech, state, jobId: job._id.toHexString() };
+  /** The creator presses Cancel (cancelRequestedAt set; the job keeps running until the worker stops). */
+  const cancel = () => void (cancelRequested = true);
+  return { store, speech, state, cancel, jobId: job._id.toHexString() };
 }
 
 /**
@@ -1256,6 +1259,36 @@ describe("every ElevenLabs request is counted before it is sent (code review, fi
     });
   });
 
+  it("Cancel while a request is in flight: the provider's retry is NOT sent; the job ends as cancelled (second review, finding 5)", async () => {
+    await withTempDir(async (root) => {
+      const events: Events = [];
+      const bundle = fakeStore(events);
+      const eleven = scriptedElevenLabs(["busy"]);
+      // The creator presses Cancel right after the first request went out; ElevenLabs answers "busy".
+      const store: GenerateJobStore = {
+        ...bundle.store,
+        reserveVoiceSend: async (input) => {
+          const out = await bundle.store.reserveVoiceSend(input);
+          bundle.cancel();
+          return out;
+        },
+      };
+      expect(await run({ ...bundle, store }, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer(events, readyResult) as never, root })).toBe("cancelled");
+      expect(eleven.requests).toHaveLength(1);
+      expect(bundle.state.sends).toHaveLength(1);
+      expect(events.at(-1)).toBe("end:cancelled:");
+      expect(bundle.state.usage).toEqual([{ status: "failed", outcome: "busy", characters: 0 }]);
+      expect([...bundle.speech.values()][0]).toMatchObject({ status: "failed", claim: null });
+
+      // Cancel pressed just as the up-front reservation runs: refused too, the job ends as cancelled, nothing sent.
+      const early: Events = [];
+      const provider = { calls: 0 };
+      expect(await run(fakeStore(early, { reserve: "cancelled" }), { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(early, readyResult) as never, root })).toBe("cancelled");
+      expect(provider.calls).toBe(0);
+      expect(early.at(-1)).toBe("end:cancelled:");
+    });
+  });
+
   it("ElevenLabs' own quota answer → 'Voice limit reached this month.' (retryable); the request was counted", async () => {
     await withTempDir(async (root) => {
       const bundle = fakeStore([]);
@@ -1308,6 +1341,15 @@ describe("voice counting: credits, sends and months (pure, and in the database)"
 
     const full = fakeDb({ "jobs.findOne": () => job, "usageCounters.findOneAndUpdate": () => ({ count: 3001 }) });
     expect(await reserveVoiceSend(full.db, { jobId: job._id, attempt: 1, item: b, timezone: "Asia/Kolkata", now: NOW })).toBe("quota");
+  });
+
+  it("after Cancel nothing is sent or counted, not even with a credit (second review, finding 5)", async () => {
+    const job = generateJob({ state: "running", cancelRequestedAt: NOW, voice: { cacheKeys: ["sha256:a"], characters: 100, sentKeys: [], period: november } });
+    for (const item of [a, b]) {
+      const cancelled = fakeDb({ "jobs.findOne": () => job });
+      expect(await reserveVoiceSend(cancelled.db, { jobId: job._id, attempt: 1, item, timezone: "Asia/Kolkata", now: NOW })).toBe("cancelled");
+      expect(cancelled.names()).toEqual(["jobs.findOne"]);
+    }
   });
 });
 

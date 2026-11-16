@@ -543,14 +543,15 @@ class VoiceLimitReached extends Error {
   }
 }
 
-export type VoiceReservation = "ok" | "quota" | "ceiling" | "stale";
+export type VoiceReservation = "ok" | "quota" | "ceiling" | "stale" | "cancelled";
 
 /**
  * Count voice characters in ONE transaction on both counters (the creator's month and the app's
  * month) and save the job's new `voice`, only while the job runs this attempt. Two runs at the same
  * moment both write the job document, so MongoDB lets one commit and re-runs the other, which then
  * sees the first one's change (a credit can be used only once).
- * "quota" = the creator's 3,000; "ceiling" = the app's 9,000; nothing is counted then.
+ * "quota" = the creator's 3,000; "ceiling" = the app's 9,000; "cancelled" = Cancel was pressed (no
+ * request is sent after Cancel, not even a provider retry); nothing is counted then.
  */
 async function countVoice(
   db: Db,
@@ -565,6 +566,10 @@ async function countVoice(
       const jobs = db.collection<JobDocument>(JOBS_COLLECTION);
       const job = await jobs.findOne({ _id: input.jobId, attempt: input.attempt, state: "running" }, { session });
       if (!job) return;
+      if (job.cancelRequestedAt) {
+        outcome = "cancelled";
+        return;
+      }
       const { total, next } = plan(job, voicePeriodOf(input.timezone, input.now));
       if (total > 0) {
         const user = await addUsageWithinLimit(db, session, { ownerId: job.ownerId.toHexString(), kind: "voiceChars", timezone: input.timezone, limit: USAGE_LIMITS.voiceCharactersPerMonth, amount: total, now: input.now });
@@ -595,7 +600,8 @@ export async function reserveVoice(db: Db, input: { jobId: ObjectId; attempt: nu
 
 /**
  * Right before EVERY ElevenLabs request (each attempt, retries included): use the recording's credit,
- * or count the request now with the same limits (planVoiceSend). Not "ok" = do not send it.
+ * or count the request now with the same limits (planVoiceSend). Not "ok" = do not send it
+ * ("cancelled": Cancel was pressed; the worker ends the job as cancelled).
  */
 export async function reserveVoiceSend(db: Db, input: { jobId: ObjectId; attempt: number; item: VoiceScene; timezone: string; now?: Date }): Promise<VoiceReservation> {
   return countVoice(db, { ...input, now: input.now ?? new Date() }, (job, period) => {
