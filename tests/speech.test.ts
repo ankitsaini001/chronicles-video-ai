@@ -17,7 +17,7 @@ import {
 } from "../packages/pipeline/src/pipeline";
 import type { RenderJob, RenderReport } from "../packages/pipeline/src/pipeline/render";
 import { classifySpeechError, ElevenLabsSpeech, ProviderError, type SpeechProvider, type SpeechRequest, type SpeechResponse } from "../packages/pipeline/src/providers";
-import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache } from "../packages/pipeline/src/storage";
+import { ArtifactKeys, LocalArtifactStore, LocalSpeechCache, SpeechCacheRecordSchema } from "../packages/pipeline/src/storage";
 import { AlignmentMappingError, AlignmentValidationError, resolveProviderAlignment, speechInputForScene, timeSceneBlocks } from "../packages/pipeline/src/timing";
 import { evaluateProbe, parseAudioProbe, type AudioProbe, type Mp4Probe } from "../packages/pipeline/src/validation";
 import { validPlan, withTempDir } from "./helpers";
@@ -224,6 +224,30 @@ describe("ElevenLabs speech adapter", () => {
     expect(response).toMatchObject({ characterCost: 12, requestId: "req-1", retries: 0 });
     expect(Buffer.from(response.audio).toString()).toBe("mp3");
     expect(response.normalizedAlignment?.characters.join("")).toBe(" Water rises.");
+  });
+
+  it("reads the answer loosely: unknown fields (top level and inside both alignments) are ignored and dropped; the stored record stays strict", async () => {
+    const extra = (alignment: CharacterAlignment) => ({ ...alignment, character_confidence: alignment.characters.map(() => 0.9), new_field: { nested: true } });
+    const fetchFn = (async () =>
+      new Response(
+        JSON.stringify({
+          audio_base64: Buffer.from("mp3").toString("base64"),
+          alignment: extra(alignText("Water rises.")),
+          normalized_alignment: extra(alignText(" Water rises.")),
+          voice_segments: [{ voice_id: "voiceF" }],
+          some_future_field: "x",
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const response = await new ElevenLabsSpeech("k", fetchFn).synthesize(request);
+    expect(response.alignment).toEqual(alignText("Water rises."));
+    expect(response.normalizedAlignment).toEqual(alignText(" Water rises."));
+    expect(Object.keys(response.alignment!).sort()).toEqual(["character_end_times_seconds", "character_start_times_seconds", "characters"]);
+    // What the app stores from it passes the strict schema.
+    expect(() => SpeechCacheRecordSchema.parse(cacheRecordFor(`sha256:${"b".repeat(64)}`, request, response, new Date("2026-11-16T10:00:00Z")))).not.toThrow();
+    // The three arrays are still checked: a wrong shape is a broken answer.
+    const broken = (async () => new Response(JSON.stringify({ audio_base64: "bXAz", alignment: { characters: "W", character_start_times_seconds: [0], character_end_times_seconds: [1] } }), { status: 200 })) as unknown as typeof fetch;
+    await expect(new ElevenLabsSpeech("k", broken).synthesize(request)).rejects.toMatchObject({ kind: "bad-response" });
   });
 
   it("retries transient errors at most twice, honoring Retry-After, and calls beforeAttempt for every attempt", async () => {
