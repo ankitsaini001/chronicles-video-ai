@@ -46,17 +46,22 @@ import { CaptionTrackSchema, type CaptionTrack, type Plan } from "../packages/pi
 import { hashPlan } from "../packages/pipeline/src/planning";
 import { durationMessage, runRenderJob } from "../packages/pipeline/src/pipeline/render-job";
 import type { RenderJob, RenderReport } from "../packages/pipeline/src/pipeline/render";
-import { THUMBNAIL_SECONDS, type RenderJobResult, type RenderJobSpec } from "../packages/pipeline/src/pipeline/render-protocol";
+import { CAPTION_TOO_WIDE, THUMBNAIL_SECONDS, type RenderJobResult, type RenderJobSpec } from "../packages/pipeline/src/pipeline/render-protocol";
 import { cacheRecordFor, speechCacheKey, speechConfigFor, speechConfigFromRecord, speechRequestFor } from "../packages/pipeline/src/pipeline/speech";
 import { ElevenLabsSpeech } from "../packages/pipeline/src/providers";
 import {
   applyCaptionOverrides,
+  breakLines,
   captionFixProblem,
+  captionTextProblem,
   CaptionOverrideError,
   compileTimeline,
+  DEFAULT_CAPTION_LAYOUT,
   fixCaption,
   fixedCaptionLines,
   indexCaptions,
+  estimateTextWidth,
+  hasEmoji,
   renderedLineWidth,
   spreadWordTimes,
   synthesizeSceneAlignment,
@@ -496,6 +501,48 @@ async function readyResult(spec: RenderJobSpec): Promise<RenderJobResult> {
   return { status: "ready", files, qa: { sha256: sha("video bytes"), ok: true } as never, durationMs: 70000, frames: 2100, renderMs: 1, bundleMs: 1 };
 }
 
+
+/** Files that can record narration or call a voice provider. */
+const VOICE_CODE = /packages\/pipeline\/src\/providers\/|apps\/web\/lib\/video\/(voice|fake-elevenlabs|run-generate-job)\.ts$|pipeline\/src\/pipeline\/speech\.ts$/;
+
+/**
+ * Every file a module loads at run time, following the REAL import graph: relative paths, the
+ * workspace packages' `exports` maps and the web app's "@/" alias. `import type` / `export type`
+ * lines are skipped (erased); any other import, even of types only, loads its module and counts.
+ * Third-party and node: modules are not followed.
+ */
+function runtimeImportGraph(entry: string): string[] {
+  const exportsOf = (pkg: string) => JSON.parse(readFileSync(path.join(ROOT, "packages", pkg, "package.json"), "utf8")).exports as Record<string, string>;
+  const asFile = (p: string) => [p, `${p}.ts`, `${p}.tsx`, path.join(p, "index.ts")].find((c) => existsSync(c) && !c.endsWith(path.sep) && (c.endsWith(".ts") || c.endsWith(".tsx")));
+  const resolve = (spec: string, from: string): string | undefined => {
+    if (spec.startsWith(".")) return asFile(path.resolve(path.dirname(from), spec));
+    if (spec.startsWith("@/")) return asFile(path.join(ROOT, "apps/web", spec.slice(2)));
+    const m = /^@bytereel\/([^/]+)(\/.*)?$/.exec(spec);
+    if (!m) return undefined;
+    const target = exportsOf(m[1]!)[m[2] ? `.${m[2]}` : "."];
+    if (!target) throw new Error(`unknown package export ${spec}`);
+    return path.join(ROOT, "packages", m[1]!, target);
+  };
+  const seen = new Set<string>();
+  const stack = [entry];
+  while (stack.length) {
+    const file = stack.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(file, "utf8");
+    const specs = [
+      ...[...source.matchAll(/^\s*(?:import|export)\s+(?!type\b)[^;]*?\sfrom\s+["']([^"']+)["']/gm)].map((x) => x[1]!),
+      ...[...source.matchAll(/^\s*import\s+["']([^"']+)["']/gm)].map((x) => x[1]!),
+      ...[...source.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g)].map((x) => x[1]!),
+    ];
+    for (const spec of specs) {
+      const next = resolve(spec, file);
+      if (next && !seen.has(next)) stack.push(next);
+    }
+  }
+  return [...seen].map((f) => path.relative(ROOT, f));
+}
+
 const quiet = { log: () => undefined, sleep: async () => undefined };
 const steps = { run: <T>(_id: string, fn: () => Promise<T>) => fn() };
 
@@ -532,10 +579,9 @@ describe("the caption worker: the SAME narration, zero voice calls", () => {
       expect(voiceCalls).toEqual({ real: 0, standIn: 0, injected: 0 });
       // The store the worker gets has no way to count or reserve voice characters.
       expect(Object.keys(bundle.store).sort()).toEqual(["beginRender", "complete", "end", "load", "progress", "speechByIds", "start"]);
-      // The worker module imports nothing that can record narration.
-      const source = readFileSync(path.join(ROOT, "apps/web/lib/video/run-caption-job.ts"), "utf8");
-      const imports = [...source.matchAll(/^import[^;]*?from "([^"]+)";/gms)].map((m) => m[1]);
-      expect(imports.some((m) => /voice|fake-elevenlabs|run-generate-job|providers|generate-video/.test(m!))).toBe(false);
+      // The worker's whole runtime import graph loads nothing that can record narration.
+      const graph = runtimeImportGraph(path.join(ROOT, "apps/web/lib/video/run-caption-job.ts"));
+      expect(graph.filter((f) => VOICE_CODE.test(f))).toEqual([]);
       // The render used the recordings exactly as saved, the fixes, the same style and music.
       expect(seen!.scenes.map((s) => s.record.audioSha256)).toEqual(video.docs.map((d) => d.audioSha256));
       expect(seen!.captionOverrides).toEqual(bundle.set.overrides);
@@ -781,5 +827,145 @@ describe("Try again (E2), allowedActions and the card", () => {
     expect(renderInputHash({ ...base, captionOverrides: [] })).toBe(renderInputHash(base));
     expect(renderInputHash({ ...base, captionOverrides: [{ sceneId: "s", phraseIndex: 0, text: "t" }] })).not.toBe(renderInputHash(base));
     expect(newGenerateJob).toBeTypeOf("function");
+  });
+});
+
+// ---------- code review fixes (2026-11-17) ----------
+
+describe("code review: emoji and unknown characters are never more lenient than the browser", () => {
+  const { track } = compiled();
+  const first = indexCaptions(track)[0]!;
+
+  it("emoji are refused (the font has none: the browser draws them about twice as wide)", () => {
+    for (const text of ["🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥 wow", "The sky is blue 🌈🌈🌈", "Love ❤\uFE0F it", "Hi 👩\u200D🔬 there", "Go 🇮🇳 team", "Press 1\uFE0F\u20E3 now"]) {
+      expect(hasEmoji(text)).toBe(true);
+      expect(captionTextProblem(text)).toBe("emoji");
+      expect(captionFixProblem(first.caption, text)).toBe("emoji");
+      expect(fixedCaptionLines(text)).toBeNull();
+    }
+    expect(hasEmoji("Rain falls fast. 97% — “quoted”")).toBe(false);
+  });
+
+  it("the example from the review: 10 fire emoji + 'wow' passed the old width rule (0.6 em each), refused now", () => {
+    expect(breakLines("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥 wow".split(" "), DEFAULT_CAPTION_LAYOUT)).not.toBeNull();
+    expect(() => fixCaption(first.caption, "🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥 wow")).toThrow(CaptionOverrideError);
+  });
+
+  it("a character the width table doesn't know counts 1.0 em in the fix check (0.6 em for the compiler)", () => {
+    expect(estimateTextWidth("ж", 100, { unknownCharEm: 1 })).toBeCloseTo(104);
+    expect(estimateTextWidth("ж", 100)).toBeCloseTo(62.4);
+    // 13 unknown letters fit one line by the compiler's estimate, but not by the fix check.
+    const unknown = "жжжжжжжжжжжжж";
+    expect(estimateTextWidth(unknown, 66)).toBeLessThan(650);
+    expect(estimateTextWidth(unknown, 66, { unknownCharEm: 1 })).toBeGreaterThan(650);
+    expect(captionTextProblem(unknown)).toBe("too_long");
+  });
+
+  it("F4 answers 400 'Emoji can't be used in captions.' on the row", async () => {
+    const problem = await refusal(checkCaptionFixes(captionDepsWith(track), OWNER.toHexString(), PROJECT.toHexString(), "current", body([{ sceneId: first.sceneId, phraseIndex: 0, text: "The sky is blue 🌈🌈🌈" }])));
+    expect(statusOf(problem)).toBe(400);
+    expect(problem.message).toBe("Emoji can't be used in captions.");
+    expect((problem as ApiProblem).details?.issues).toEqual([{ path: "edits[0].text", message: CAPTION_MESSAGES.EMOJI }]);
+  });
+});
+
+describe("code review: word times kept when the number of words is the same", () => {
+  const { track } = compiled();
+  it("a spelling fix keeps every word's own start and end; another word count spreads them", () => {
+    const { caption } = indexCaptions(track).find((c) => c.caption.words.length >= 3 && c.caption.fontSizePx === undefined)!;
+    const same = caption.words.map((w, i) => (i === 0 ? `X${w.text}` : w.text)).join(" ");
+    const fixed = fixCaption(caption, same);
+    expect(fixed.words.map((w) => [w.startFrame, w.endFrame])).toEqual(caption.words.map((w) => [w.startFrame, w.endFrame]));
+    const fewer = fixCaption(caption, "Two words");
+    expect(fewer.words).toHaveLength(2);
+    expect(fewer.words[0]!.startFrame).toBe(caption.words[0]!.startFrame);
+    expect(fewer.words[1]!.startFrame).toBe(fewer.words[0]!.endFrame);
+  });
+});
+
+describe("code review: failures that would always repeat are not offered Try again", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const failWith = async (result: RenderJobResult) => {
+    let ends: Parameters<CaptionJobStore["end"]>[0][] = [];
+    await withTempDir(async (root) => {
+      const video = await recordedVideo();
+      const bundle = captionStore(video, []);
+      await runCaptionJob({ event: { jobId: bundle.job._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { ...quiet, store: bundle.store, files: () => video.files, render: (() => ({ result: Promise.resolve(result), cancel: () => undefined })) as never, root });
+      ends = bundle.ends;
+    });
+    return ends[0]!;
+  };
+
+  it("a fix that no longer matches its phrase, and a fixed line too wide in the browser → FIX_NOT_APPLICABLE (not retryable)", async () => {
+    expect(await failWith({ status: "failed", stage: "compile", reason: "caption_fix", detail: "caption fix: phrase 1 now reads …" })).toMatchObject({ outcome: "failed", code: "FIX_NOT_APPLICABLE" });
+    expect(await failWith({ status: "failed", stage: "render", reason: "caption_width", detail: "[caption-too-wide] Caption …" })).toMatchObject({ outcome: "failed", code: "FIX_NOT_APPLICABLE" });
+    expect(await failWith({ status: "failed", stage: "render", detail: "chrome crashed" })).toMatchObject({ code: "RENDER_FAILED" });
+    expect(CAPTION_ERRORS.FIX_NOT_APPLICABLE).toEqual({ message: "This caption fix can't be applied. Please fix the captions again.", retryable: false });
+    const job: JobDocument = { ...newCaptionJob({ ownerId: OWNER, projectId: PROJECT, render: renderDoc(), set: { _id: new ObjectId(), overrides: [] }, now: NOW }), state: "failed", error: { code: "FIX_NOT_APPLICABLE", ...CAPTION_ERRORS.FIX_NOT_APPLICABLE } };
+    // The review screen then offers the Captions tab (edit_captions), not Try again.
+    const actions = allowedActionsFor(projectDoc(), null, null, { latestCaptionJob: job });
+    expect(actions).toContain("edit_captions");
+    expect(actions).not.toContain("retry_job");
+  });
+
+  it("the render job tags the browser's caption width error as caption_width", async () => {
+    await withTempDir(async (dir) => {
+      const plan = validPlan();
+      const config = speechConfigFor(plan, "e2eStandInFemale", "e2e_stand_in");
+      const scenes: RenderJobSpec["scenes"] = [];
+      const seconds: Record<string, number> = {};
+      for (const [i, scene] of plan.scenes.entries()) {
+        const request = speechRequestFor(plan, i, config);
+        const response = await new FakeElevenLabsSpeech("en").synthesize(request);
+        const audioFile = path.join(dir, `${scene.id}.mp3`);
+        await writeFile(audioFile, response.audio);
+        scenes.push({ sceneId: scene.id, audioFile, record: cacheRecordFor(speechCacheKey(scene, config), request, response, NOW) });
+        seconds[audioFile] = (response.audio.byteLength / 417) * (1152 / 44100);
+      }
+      const result = await runRenderJob(
+        { workDir: path.join(dir, "w"), plan, planHash: hashPlan(plan), speechConfig: config, scenes, music: true, thumbnailSeconds: THUMBNAIL_SECONDS },
+        { render: async () => Promise.reject(new Error(`${CAPTION_TOO_WIDE} Caption "x" line 1 ("…") is 900px wide`)), probeAudio: async (file: string) => ({ codec: "mp3", sampleRate: 44100, channels: 1, decodedSeconds: seconds[file]! }) },
+      );
+      expect(result).toMatchObject({ status: "failed", stage: "render", reason: "caption_width" });
+    });
+  });
+
+  it("a corrupt timing file is missing narration (not retryable), never a passing glitch", async () => {
+    await withTempDir(async (root) => {
+      const video = await recordedVideo();
+      video.files.objects.set(video.docs[1]!.alignmentKey, new Uint8Array(Buffer.from("{not json")));
+      const events: string[] = [];
+      const bundle = captionStore(video, events);
+      const outcome = await runCaptionJob({ event: { jobId: bundle.job._id.toHexString(), attempt: 1 }, runId: null, step: steps }, { ...quiet, store: bundle.store, files: () => video.files, render: (() => events.push("render")) as never, root });
+      expect(outcome).toBe("failed");
+      expect(events.at(-1)).toBe("end:failed:NARRATION_MISSING");
+      expect(events).not.toContain("render");
+    });
+  });
+});
+
+describe("code review: the import graph check really finds voice code", () => {
+  it("the video job's graph DOES reach the voice provider (so the caption worker's empty result means something)", () => {
+    const graph = runtimeImportGraph(path.join(ROOT, "apps/web/lib/video/run-generate-job.ts"));
+    expect(graph.some((f) => /packages\/pipeline\/src\/providers\//.test(f))).toBe(true);
+    const caption = runtimeImportGraph(path.join(ROOT, "apps/web/lib/video/run-caption-job.ts"));
+    expect(caption).toContain("packages/pipeline/src/pipeline/speech-key.ts");
+    expect(caption).toContain("packages/db/src/caption-fixes.ts");
+  });
+
+  it("the Captions tab's fit check is browser-safe: no database, Node or voice code", () => {
+    const graph = runtimeImportGraph(path.join(ROOT, "packages/pipeline/src/timing/caption-fit.ts"));
+    expect(graph.filter((f) => VOICE_CODE.test(f) || /packages\/db\//.test(f))).toEqual([]);
+    for (const file of graph) expect(readFileSync(path.join(ROOT, file), "utf8")).not.toMatch(/from "node:/);
+  });
+});
+
+describe("code review: the language switch also applies to Try again on a caption fix", () => {
+  it("E2 on a Hindi project's caption job → 422 LANGUAGE_UNAVAILABLE, nothing re-queued", async () => {
+    const job = { ...newCaptionJob({ ownerId: OWNER, projectId: PROJECT, render: renderDoc(), set: { _id: new ObjectId(), overrides: [] }, now: NOW }), state: "failed" as const, error: { code: "RENDER_FAILED", message: "", retryable: true } };
+    const fake = fakeDb({ "jobs.findOne": () => job, "projects.findOne": () => projectDoc({ language: "hi" }) });
+    const refused = await refusal(retryCaptionJob(fake.db, { ownerId: OWNER.toHexString(), jobId: job._id.toHexString(), respond: () => ({ status: 202, body: {} }) }));
+    expect((refused as ProjectActionError).code).toBe("LANGUAGE_UNAVAILABLE");
+    expect(fake.names()).toEqual(["jobs.findOne", "projects.findOne"]);
   });
 });

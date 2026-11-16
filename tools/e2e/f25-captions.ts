@@ -13,7 +13,7 @@ import { ObjectId } from "mongodb";
  * user's ids → video 2 is current, video 1 still downloads. It proves: the new captions.json in R2 has
  * the fixed text; ZERO new voice requests (providerUsage, the stand-in's own call log, the voice
  * counters); the narration used is the same recordings (same keys and SHA-256) as video 1; videos/day
- * unchanged; a too-long fix gets 400; another user gets 404. Also: Cancel while rendering, fixes that
+ * unchanged; a too-long fix and an emoji fix get 400; another user gets 404. Also: Cancel while rendering, fixes that
  * add up, Try again. The storyboard comes from the local Gemini stand-in (E2E_FAKE_GEMINI=1: ZERO
  * Gemini calls). Three full renders (about 3 min each on the dev machine): allow ~15 minutes.
  *
@@ -200,6 +200,8 @@ async function main(): Promise<void> {
   const fixUrl = `/api/v1/projects/${pid}/renders/current/caption-overrides`;
   r = await send(a.cookie, "POST", fixUrl, { edits: [{ sceneId: target.sceneId, phraseIndex: target.phraseIndex, text: "This caption is far too long to ever fit on the two short lines of a Reel" }], expectedStateVersion: stateVersion }, { "idempotency-key": key() });
   check("F4 too long to fit → 400 'This caption is too long to fit on screen. Please shorten it.' with the path", r.status === 400 && r.json.error?.message === "This caption is too long to fit on screen. Please shorten it." && r.json.error?.details?.issues?.[0]?.path === "edits[0].text", `${r.status} ${r.json.error?.message}`);
+  r = await send(a.cookie, "POST", fixUrl, { edits: [{ sceneId: target.sceneId, phraseIndex: target.phraseIndex, text: "The sky is blue \u{1F308}\u{1F308}\u{1F308}" }], expectedStateVersion: stateVersion }, { "idempotency-key": key() });
+  check("F4 with emoji → 400 'Emoji can't be used in captions.' on the row (code review)", r.status === 400 && r.json.error?.message === "Emoji can't be used in captions." && r.json.error?.details?.issues?.[0]?.path === "edits[0].text", `${r.status} ${r.json.error?.message}`);
   r = await send(a.cookie, "POST", fixUrl, { edits: [{ sceneId: target.sceneId, phraseIndex: 999, text: "Hi" }], expectedStateVersion: stateVersion }, { "idempotency-key": key() });
   check("F4 unknown phrase → 400 (edits[0].phraseIndex)", r.status === 400 && r.json.error?.details?.issues?.[0]?.path === "edits[0].phraseIndex", `${r.status}`);
   r = await send(a.cookie, "POST", fixUrl, { edits: [{ sceneId: target.sceneId, phraseIndex: target.phraseIndex, text: FIX }, { sceneId: target.sceneId, phraseIndex: target.phraseIndex, text: "again" }], expectedStateVersion: stateVersion }, { "idempotency-key": key() });
