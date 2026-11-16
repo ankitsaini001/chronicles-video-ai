@@ -6,6 +6,8 @@ import { sha256 } from "../shared/hash";
 import {
   AlignmentMappingError,
   AlignmentValidationError,
+  applyCaptionOverrides,
+  CaptionOverrideError,
   CompileInputError,
   compileTimeline,
   DEFAULT_HOLDS,
@@ -94,6 +96,15 @@ export async function runRenderJob(spec: RenderJobSpec, hooks: RenderJobHooks = 
     }
     if (error instanceof CompileInputError) return { status: "failed", stage: "compile", detail: error.message };
     throw error;
+  }
+  // F25: the creator's caption fixes, on the phrases the compiler just made (same narration timing).
+  if (spec.captionOverrides?.length) {
+    try {
+      compiled = { ...compiled, captions: applyCaptionOverrides(compiled.captions, spec.captionOverrides) };
+    } catch (error) {
+      if (error instanceof CaptionOverrideError) return { status: "failed", stage: "compile", detail: `caption fix: ${error.message}` };
+      throw error;
+    }
   }
   const files = {
     video: path.join(outDir, "output.mp4"),

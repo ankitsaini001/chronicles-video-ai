@@ -1,5 +1,6 @@
 import {
   SceneAlignmentSchema,
+  VoiceSettingsSchema,
   type Plan,
   type Scene,
   type SceneAlignment,
@@ -57,6 +58,32 @@ export function speechConfigFor(plan: Plan, voiceId: string, modelId: string): S
     outputFormat: SPEECH_OUTPUT_FORMAT,
     seed: SPEECH_SEED,
     applyTextNormalization: "auto",
+  };
+}
+
+/**
+ * F25 caption fixes: the voice setup a recording WAS made with, read from its saved request
+ * (alignment.json in R2), so a re-render of an existing video needs no voice settings (and no
+ * voice provider) at all. The caller checks that `speechCacheKey(scene, config)` is still the
+ * recording's cache key (the narration and voice really are the same). Throws when the request
+ * is incomplete.
+ */
+export function speechConfigFromRecord(plan: Pick<Plan, "voicePreset">, record: Pick<SpeechCacheRecord, "request">): SpeechConfig {
+  const request = record.request as Partial<SpeechRequest>;
+  const settings = VoiceSettingsSchema.parse(request.settings);
+  const normalization = request.applyTextNormalization;
+  if (typeof request.voiceId !== "string" || typeof request.modelId !== "string" || typeof request.outputFormat !== "string") {
+    throw new Error("the recording's saved request has no voice, model or output format");
+  }
+  if (normalization !== "auto" && normalization !== "on" && normalization !== "off") throw new Error("the recording's saved request has no text normalization mode");
+  return {
+    voicePreset: plan.voicePreset,
+    voiceId: request.voiceId,
+    modelId: request.modelId,
+    settings,
+    outputFormat: request.outputFormat,
+    seed: typeof request.seed === "number" ? request.seed : null,
+    applyTextNormalization: normalization,
   };
 }
 

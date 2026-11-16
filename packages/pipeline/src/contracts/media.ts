@@ -233,6 +233,12 @@ export const CaptionSchema = z.strictObject({
    * captionWordFit). Absent on every other caption, so other caption files are unchanged.
    */
   fontSizePx: z.number().positive().optional(),
+  /**
+   * Only on a caption the creator fixed (F25 caption fixes, timing/caption-overrides.ts): the text
+   * the compiler made from the narration. `text` is then the creator's text. Absent on every other
+   * caption, so other caption files are unchanged.
+   */
+  originalText: z.string().min(1).optional(),
 });
 export type Caption = z.infer<typeof CaptionSchema>;
 

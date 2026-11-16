@@ -1,5 +1,6 @@
 import type { Plan } from "../contracts";
 import type { SpeechCacheRecord } from "../storage/speech-cache";
+import type { CaptionOverride } from "../timing/caption-overrides";
 import type { QaReport } from "../validation/mp4";
 import type { SpeechConfig } from "./speech";
 
@@ -33,6 +34,11 @@ export interface RenderJobSpec {
   music: boolean;
   /** The thumbnail frame, in seconds from the start (the hook: title or picture on screen). */
   thumbnailSeconds: number;
+  /**
+   * F25 caption fixes: applied to the compiled captions right after compiling (timing/
+   * caption-overrides.ts). Absent for a normal video (F23).
+   */
+  captionOverrides?: CaptionOverride[];
 }
 
 /** Where the render is: Timing animations → Adding captions → Rendering → Checking. */

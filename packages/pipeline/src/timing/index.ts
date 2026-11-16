@@ -9,3 +9,4 @@ export * from "./compile";
 export * from "./provider-alignment";
 export * from "./heroes";
 export * from "./key-terms";
+export * from "./caption-overrides";
