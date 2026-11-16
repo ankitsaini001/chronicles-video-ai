@@ -6,18 +6,19 @@ import { useEffect, useRef, useState } from "react";
 import { apiSend } from "@/components/storyboard/client";
 import { Note } from "@/components/storyboard/Note";
 import { Button } from "@/components/ui";
+import { afterPlayerError, LinkRequests, type Resume } from "@/lib/video/player-link";
 import { VideoVersionMenu } from "./VideoVersionMenu";
 
 // ③ Video when it is ready (F24; Stitch "ByteReel — Step 3 Review video"): the real MP4 in the phone
 // frame (HTML5 player, the thumbnail as its poster), and on the right the title, "Video ready", the
 // "Video version N ▾" picker (F1), Download MP4 (a plain link to F3 kind=download&redirect=true),
-// Back to My videos and Edit storyboard. Publishing comes later (F28+), so it shows "coming soon".
-// The Captions tab and "Ask for changes" are F25/F26.
+// Back to My videos and Edit storyboard. Publishing
+// comes later (F28+), so it shows "coming soon". The Captions tab and "Ask for changes" are F25/F26.
 //
 // The player's address is a 15-minute private link (F3 kind=video). When it has expired, the browser
 // fails as soon as it needs more of the file (play after a long pause, seeking): the screen quietly
-// gets a fresh link and goes on at the same second. A second failure within 10 s shows a message
-// instead (no endless loop).
+// gets a fresh link and goes on at the same second. If a link applied less than 10 s ago fails too, it
+// shows a message instead (no endless loop). Both decisions live in lib/video/player-link.ts.
 
 export type ReviewVideoScreenProps = {
   projectId: string;
@@ -31,10 +32,7 @@ export type ReviewVideoScreenProps = {
   canEditStoryboard: boolean;
 };
 
-const RENEW_AGAIN_AFTER_MS = 10_000;
 const PLAY_PROBLEM = "We couldn't play this video. Please reload the page.";
-
-type Resume = { time: number; play: boolean };
 
 export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
   const [shown, setShown] = useState(props.render);
@@ -42,16 +40,18 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const resume = useRef<Resume | null>(null);
-  const lastRenewal = useRef(0);
-  /** Only the newest link request counts (choosing another version while one loads). */
-  const request = useRef(0);
+  /** When the current link was applied (0 = the page's own first link). */
+  const lastApplied = useRef(0);
+  const [requests] = useState(() => new LinkRequests());
 
   async function loadLink(renderId: string, then: Resume) {
-    const mine = ++request.current;
+    const mine = requests.start();
     const answer = await apiSend<{ url: string }>("GET", `/api/v1/projects/${props.projectId}/renders/${renderId}/media?kind=video`);
-    if (mine !== request.current) return;
+    if (!requests.isLatest(mine)) return;
     if (!answer.ok) return setProblem(answer.message);
     resume.current = then;
+    lastApplied.current = Date.now();
+    setProblem(null);
     setSrc(answer.json.url);
   }
 
@@ -65,16 +65,15 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
     setShown(render);
     setSrc(null);
     setProblem(null);
-    lastRenewal.current = 0;
     void loadLink(render.id, { time: 0, play: true });
   }
 
   function onError() {
     const video = videoRef.current;
     if (!video || src === null) return;
-    if (Date.now() - lastRenewal.current < RENEW_AGAIN_AFTER_MS) return setProblem(PLAY_PROBLEM);
-    lastRenewal.current = Date.now();
-    void loadLink(shown.id, { time: video.currentTime, play: !video.paused });
+    const next = afterPlayerError({ now: Date.now(), lastAppliedAt: lastApplied.current, currentTime: video.currentTime, paused: video.paused });
+    if (next.action === "give_up") return setProblem(PLAY_PROBLEM);
+    void loadLink(shown.id, next.resume);
   }
 
   function onLoadedMetadata() {

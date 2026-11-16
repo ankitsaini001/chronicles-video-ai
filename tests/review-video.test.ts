@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleApiRequest, type ApiDeps } from "../apps/web/lib/api/v1";
 import type { SessionUser } from "../apps/web/lib/auth/session";
 import { downloadFilename, listRenderSummaries, mediaQuery, renderMedia, videoMediaDeps, type VideoMediaDeps } from "../apps/web/lib/video/media";
+import { afterPlayerError, LinkRequests, RENEW_AGAIN_AFTER_MS } from "../apps/web/lib/video/player-link";
 
 // F24 "Step 3: watch and download the video": F1 (the project's video versions) and F3 (a private
 // link to play, download or show one) through the real /api/v1 pipeline with fakes for the session,
@@ -379,6 +380,44 @@ describe("the download's file name (from the project title)", () => {
     const header = attachmentContentDisposition(downloadFilename('Rain "in" India 🌧\r\nX: y'));
     expect(header).toBe(`attachment; filename="Rain in India X y.mp4"; filename*=UTF-8''Rain%20in%20India%20%F0%9F%8C%A7X%20y.mp4`);
     expect(header).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe("the player's link decisions (lib/video/player-link.ts)", () => {
+  const T = 1_000_000;
+
+  it("the page's first link (never renewed) failing → renew, going on at the same second", () => {
+    expect(afterPlayerError({ now: T, lastAppliedAt: 0, currentTime: 42.5, paused: false })).toEqual({ action: "renew", resume: { time: 42.5, play: true } });
+  });
+
+  it("resumes playing only if it was playing (a seek while paused stays paused)", () => {
+    expect(afterPlayerError({ now: T, lastAppliedAt: 0, currentTime: 12, paused: true })).toEqual({ action: "renew", resume: { time: 12, play: false } });
+  });
+
+  it("a link applied less than 10 s ago failing → give up (no endless loop); 10 s or more → renew", () => {
+    expect(RENEW_AGAIN_AFTER_MS).toBe(10_000);
+    expect(afterPlayerError({ now: T + 3_000, lastAppliedAt: T, currentTime: 5, paused: false })).toEqual({ action: "give_up" });
+    expect(afterPlayerError({ now: T + 9_999, lastAppliedAt: T, currentTime: 5, paused: false })).toEqual({ action: "give_up" });
+    expect(afterPlayerError({ now: T + 10_000, lastAppliedAt: T, currentTime: 5, paused: false })).toEqual({ action: "renew", resume: { time: 5, play: true } });
+    expect(afterPlayerError({ now: T + 20 * 60_000, lastAppliedAt: T, currentTime: 61, paused: true })).toEqual({ action: "renew", resume: { time: 61, play: false } });
+  });
+
+  it("the 10 s count from when the new link was APPLIED: a slow server (25 s) can't cause a renewal every 10 s", () => {
+    // Error at T → renew; the slow answer is applied at T + 25 s; the new link fails at T + 30 s.
+    expect(afterPlayerError({ now: T, lastAppliedAt: 0, currentTime: 30, paused: false }).action).toBe("renew");
+    const appliedAt = T + 25_000;
+    expect(afterPlayerError({ now: T + 30_000, lastAppliedAt: appliedAt, currentTime: 30, paused: false })).toEqual({ action: "give_up" });
+  });
+
+  it("only the newest link request's answer counts (a quick switch to another version)", () => {
+    const requests = new LinkRequests();
+    const version1 = requests.start();
+    const version2 = requests.start();
+    expect(requests.isLatest(version1)).toBe(false);
+    expect(requests.isLatest(version2)).toBe(true);
+    const renewal = requests.start();
+    expect(requests.isLatest(version2)).toBe(false);
+    expect(requests.isLatest(renewal)).toBe(true);
   });
 });
 
