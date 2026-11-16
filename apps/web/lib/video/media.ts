@@ -50,16 +50,33 @@ export function videoMediaDeps(db: Db): VideoMediaDeps {
     findRender: (project, renderId) => findProjectRender(db, project, renderId),
     presign: async (key, options = {}) => {
       const setup = storageFromEnv();
-      if (!setup.ok) throw new Error(`File storage (R2) is not set up: ${setup.problem}`);
-      if (!isStorageKey(key)) throw new Error("A stored video file key is not a valid storage key.");
-      try {
-        return await setup.store.presignedGet(key, options.downloadFilename !== undefined ? { downloadFilename: options.downloadFilename } : {});
-      } catch (error) {
-        // StorageError messages are plain and redacted (F22); anything else is not passed on.
-        throw new Error(`Could not make a private video link: ${error instanceof StorageError ? error.message : "unknown storage error"}`);
-      }
+      if (!setup.ok) throw new MediaLinkError(`File storage (R2) is not set up: ${setup.problem}`);
+      if (!isStorageKey(key)) throw new MediaLinkError("A stored video file key is not a valid storage key.");
+      return setup.store.presignedGet(key, options.downloadFilename !== undefined ? { downloadFilename: options.downloadFilename } : {});
     },
   };
+}
+
+/** A plain reason why a link couldn't be made (safe to log: no link, no key id). */
+export class MediaLinkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MediaLinkError";
+  }
+}
+
+/**
+ * Makes the link; a failure is passed on (to the 500 log line) with a plain reason only: our own
+ * MediaLinkError, a StorageError (plain and redacted, F22), or "unknown storage error". Any other
+ * error text could contain a signed address, so it is never passed on.
+ */
+async function presignSafely(deps: VideoMediaDeps, key: string, options?: { downloadFilename?: string }): Promise<{ url: string; expiresAt: Date }> {
+  try {
+    return await deps.presign(key, options);
+  } catch (error) {
+    const reason = error instanceof MediaLinkError || error instanceof StorageError ? error.message : "unknown storage error";
+    throw new MediaLinkError(`Could not make a private video link: ${reason}`);
+  }
 }
 
 // ---------- F1 GET /api/v1/projects/{projectId}/renders ----------
@@ -79,7 +96,7 @@ export async function listRenderSummaries(deps: VideoMediaDeps, userId: string, 
   const items = await Promise.all(
     listed.items.map(async (render) => {
       // A missing thumbnail link never hides the video from the list.
-      const thumbnailUrl = render.status === "ready" ? await deps.presign(render.thumbnailKey).then((link) => link.url, () => null) : null;
+      const thumbnailUrl = render.status === "ready" ? await presignSafely(deps, render.thumbnailKey).then((link) => link.url, () => null) : null;
       return toRenderSummary(render, project, thumbnailUrl);
     }),
   );
@@ -116,8 +133,8 @@ export async function renderMedia(deps: VideoMediaDeps, userId: string, projectI
   }
   const link =
     query.kind === "thumbnail"
-      ? await deps.presign(render.thumbnailKey)
-      : await deps.presign(render.mp4Key, query.kind === "download" ? { downloadFilename: downloadFilename(project.title) } : {});
+      ? await presignSafely(deps, render.thumbnailKey)
+      : await presignSafely(deps, render.mp4Key, query.kind === "download" ? { downloadFilename: downloadFilename(project.title) } : {});
   if (query.redirect) return new Response(null, { status: 302, headers: { Location: link.url } });
   return { kind: query.kind, url: link.url, expiresAt: link.expiresAt.toISOString() };
 }
@@ -129,7 +146,7 @@ const FALLBACK_NAME = "video";
 
 /** A lone surrogate becomes U+FFFD (String.prototype.toWellFormed, not in our TypeScript lib yet). */
 function toWellFormed(value: string): string {
-  return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+  return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
 }
 
 /**
@@ -142,8 +159,8 @@ function toWellFormed(value: string): string {
 export function downloadFilename(title: string): string {
   let name = toWellFormed(title)
     .normalize("NFC")
-    .replace(/[\p{Cc}\p{Cf}  ]/gu, "")
-    .replace(/["`“”]/g, "")
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "")
+    .replace(/["`\u201C\u201D]/g, "")
     .replace(/[/\\]/g, "-")
     .replace(/[:*?<>|]/g, " ")
     .replace(/\s+/g, " ")
