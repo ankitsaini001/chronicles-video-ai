@@ -60,20 +60,23 @@ export const CANCEL_GRACE_MS = 20_000;
 /** A render that takes longer than this is stopped (about 2–4 min is normal). */
 export const RENDER_MAX_MS = 20 * 60_000;
 
-/** The only environment variables the render child (and Chrome, ffmpeg) get, besides TMPDIR. */
-const CHILD_ENV_NAMES = ["PATH", "HOME", "NODE_ENV", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
-const CHILD_ENV_PREFIXES = ["REMOTION_"] as const;
+/**
+ * The only environment variables the render child (and Chrome, ffmpeg) get, besides TMPDIR. Exact
+ * names, no prefixes: of the REMOTION_* settings only REMOTION_SHARED_MEMORY_BACKEND is read (by
+ * @remotion/renderer); a REMOTION_* secret (e.g. REMOTION_AWS_SECRET_ACCESS_KEY for Lambda) never passes.
+ */
+const CHILD_ENV_NAMES = ["PATH", "HOME", "NODE_ENV", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "REMOTION_SHARED_MEMORY_BACKEND"] as const;
 
 /**
- * The render child's environment: an allowlist (PATH, HOME, NODE_ENV, the locale, TZ, REMOTION_*)
- * plus its own TMPDIR. Nothing else: the database, ElevenLabs, R2, login and Gemini secrets stay in
- * the web server.
+ * The render child's environment: an allowlist (PATH, HOME, NODE_ENV, the locale, TZ,
+ * REMOTION_SHARED_MEMORY_BACKEND) plus its own TMPDIR. Nothing else: the database, ElevenLabs, R2,
+ * login and Gemini secrets stay in the web server.
  */
 export function renderChildEnv(env: NodeJS.ProcessEnv, tmp: string): NodeJS.ProcessEnv {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined) continue;
-    if ((CHILD_ENV_NAMES as readonly string[]).includes(name) || CHILD_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))) out[name] = value;
+    if ((CHILD_ENV_NAMES as readonly string[]).includes(name)) out[name] = value;
   }
   out.TMPDIR = tmp;
   return out as NodeJS.ProcessEnv;

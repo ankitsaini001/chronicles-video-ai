@@ -264,6 +264,10 @@ describe("the render child process (code review, findings 11 and 12)", () => {
         HOME: "/home/x",
         NODE_ENV: "production",
         LANG: "en_US.UTF-8",
+        REMOTION_SHARED_MEMORY_BACKEND: "file",
+        // Only the REMOTION_* names the render reads pass (second review, finding 6): never a Lambda secret.
+        REMOTION_AWS_SECRET_ACCESS_KEY: "secret",
+        REMOTION_AWS_ACCESS_KEY_ID: "secret",
         REMOTION_CHROME_MODE: "headless-shell",
         MONGODB_URI: "mongodb+srv://u:p@c/",
         ELEVENLABS_API_KEY: "secret",
@@ -276,7 +280,7 @@ describe("the render child process (code review, findings 11 and 12)", () => {
       },
       "/project/runs/.tmp/generate/x/tmp",
     );
-    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/x", NODE_ENV: "production", LANG: "en_US.UTF-8", REMOTION_CHROME_MODE: "headless-shell", TMPDIR: "/project/runs/.tmp/generate/x/tmp" });
+    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/x", NODE_ENV: "production", LANG: "en_US.UTF-8", REMOTION_SHARED_MEMORY_BACKEND: "file", TMPDIR: "/project/runs/.tmp/generate/x/tmp" });
   });
 
   /**
