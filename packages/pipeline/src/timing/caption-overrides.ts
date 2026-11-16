@@ -1,8 +1,6 @@
 import { CaptionTrackSchema, type Caption, type CaptionTrack, type CaptionTrackWord } from "../contracts";
-import { CAPTION_STYLE } from "../theme";
-import { breakLines, type CaptionLayout } from "./captions";
-import { DEFAULT_CAPTION_LAYOUT } from "./compile";
-import { estimateTextWidth } from "./text-width";
+import { CAPTION_FIX_LAYOUT, captionFixProblem, fixedCaptionLines, spokenSpan } from "./caption-fit";
+import type { CaptionLayout } from "./captions";
 
 /**
  * Caption fixes (F25, PRD §6.3 "Caption correction", PIPELINE_DESIGN §9 "Caption display correction
@@ -14,13 +12,12 @@ import { estimateTextWidth } from "./text-width";
  *   the same recordings give the same phrases again; each fix also keeps the text it replaced
  *   (`originalText`), and a fix whose phrase no longer has that text is refused (never put on the
  *   wrong phrase).
- * - The phrase keeps its start and end frame. The new words share the time the old words were
- *   spoken in, each in proportion to its length (spreadWordTimes): no gaps, no overlaps.
- * - Lines are broken with the compiler's own rule (breakLines, the same width estimate) at the
- *   normal caption size, at most 2 lines. On top of that each line must fit the caption box the way
- *   the renderer really draws it (ExtraBold, a pill's padding around every word, the gaps between
- *   words: renderedLineWidth), so a fixed caption never fails the browser's width check later and
- *   never runs into the Reels buttons. The server checks this BEFORE starting the job.
+ * - The phrase keeps its start and end frame. With the same number of words, each word keeps its
+ *   own spoken times (a spelling fix stays in sync with the voice); with another number of words,
+ *   the new words share the time the old words were spoken in, each in proportion to its length
+ *   (spreadWordTimes): no gaps, no overlaps.
+ * - Whether a fix fits on screen (no emoji, the compiler's line breaking at the normal size, the
+ *   drawn width) is caption-fit.ts; the server checks it BEFORE starting the job.
  * - Amber key-term highlighting is kept only for words that still match a highlighted word of the
  *   phrase (same letters, any case or punctuation).
  */
@@ -37,47 +34,12 @@ export interface CaptionOverride {
 /** Longest caption fix (API.md F4). */
 export const CAPTION_FIX_MAX_CHARS = 200;
 
-/**
- * The renderer draws captions in ExtraBold; the width estimate is for SemiBold (+4%). ExtraBold is
- * about 7% wider (theme.ts CAPTION_STYLE); 8% keeps a little room.
- */
-export const EXTRA_BOLD_WIDTH_FACTOR = 1.08;
-
 /** A fix that can't be applied: unknown phrase, the phrase's text changed, or the text doesn't fit. */
 export class CaptionOverrideError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CaptionOverrideError";
   }
-}
-
-/** The words of a cleaned caption text (single spaces). */
-export function captionWordsOf(text: string): string[] {
-  return text.split(" ").filter((word) => word.length > 0);
-}
-
-/**
- * How wide one caption line really is in the video (packages/video/src/Captions.tsx): every word in
- * ExtraBold with the pill's padding on both sides, and the gap between words (no space character).
- */
-export function renderedLineWidth(words: readonly string[], fontSizePx: number = CAPTION_STYLE.fontSizePx): number {
-  if (words.length === 0) return 0;
-  const text = words.reduce((sum, word) => sum + estimateTextWidth(word, fontSizePx) * EXTRA_BOLD_WIDTH_FACTOR + 2 * CAPTION_STYLE.wordPaddingX, 0);
-  return text + (words.length - 1) * CAPTION_STYLE.wordGap;
-}
-
-/**
- * The lines a fixed caption is shown on (the compiler's breakLines at the normal size, 1 or 2
- * lines), or null when it doesn't fit: more than 2 lines, a word too wide for a line, or a line
- * wider than the caption box as the renderer draws it.
- */
-export function fixedCaptionLines(text: string, layout: CaptionLayout = DEFAULT_CAPTION_LAYOUT): string[][] | null {
-  const words = captionWordsOf(text);
-  if (words.length === 0) return null;
-  const lines = breakLines(words, layout);
-  if (!lines) return null;
-  if (lines.some((line) => renderedLineWidth(line, layout.fontSizePx) > CAPTION_STYLE.boxWidth)) return null;
-  return lines;
 }
 
 /** Each caption with its scene and its place in that scene (from 0), in track order. */
@@ -88,26 +50,6 @@ export function indexCaptions(track: Pick<CaptionTrack, "captions">): { caption:
     counts.set(caption.sceneId, phraseIndex + 1);
     return { caption, sceneId: caption.sceneId, phraseIndex };
   });
-}
-
-/** The frames the phrase's words were spoken in: from its first word's start to its last word's end. */
-export function spokenSpan(caption: Pick<Caption, "words">): { startFrame: number; endFrame: number } {
-  return {
-    startFrame: Math.min(...caption.words.map((w) => w.startFrame)),
-    endFrame: Math.max(...caption.words.map((w) => w.endFrame)),
-  };
-}
-
-/**
- * Why this text can't replace this phrase, or null when it can. "too_long": it doesn't fit on
- * screen (fixedCaptionLines), or it has more words than the phrase has frames (every word needs
- * at least one frame to be highlighted). Used by the server (API F4) and again by the render.
- */
-export function captionFixProblem(caption: Pick<Caption, "words">, text: string, layout: CaptionLayout = DEFAULT_CAPTION_LAYOUT): "too_long" | null {
-  if (!fixedCaptionLines(text, layout)) return "too_long";
-  const span = spokenSpan(caption);
-  if (captionWordsOf(text).length > span.endFrame - span.startFrame) return "too_long";
-  return null;
 }
 
 /** Letters and digits only, lower case: "Vapour," and "vapour" match. */
@@ -140,14 +82,25 @@ export function spreadWordTimes(words: readonly string[], startFrame: number, en
   return words.map((_word, i) => ({ startFrame: bounds[i]!, endFrame: bounds[i + 1]! }));
 }
 
+/**
+ * The new words' times: each word's own spoken times when the number of words is the same (and the
+ * phrase wasn't one long word split in two), otherwise spread over the phrase's spoken span.
+ */
+function wordTimes(caption: Caption, words: readonly string[]): { startFrame: number; endFrame: number }[] {
+  if (words.length === caption.words.length && caption.fontSizePx === undefined) {
+    return caption.words.map((w) => ({ startFrame: w.startFrame, endFrame: w.endFrame }));
+  }
+  const span = spokenSpan(caption);
+  return spreadWordTimes(words, span.startFrame, span.endFrame);
+}
+
 /** One phrase with the creator's text: same start and end frame, new words, lines and highlights. */
-export function fixCaption(caption: Caption, text: string, layout: CaptionLayout = DEFAULT_CAPTION_LAYOUT): Caption {
+export function fixCaption(caption: Caption, text: string, layout: CaptionLayout = CAPTION_FIX_LAYOUT): Caption {
   const lines = fixedCaptionLines(text, layout);
-  if (!lines || captionFixProblem(caption, text, layout)) throw new CaptionOverrideError(`the caption fix for "${caption.id}" is too long to fit on screen`);
+  if (!lines || captionFixProblem(caption, text, layout)) throw new CaptionOverrideError(`the caption fix for "${caption.id}" doesn't fit on screen`);
   const words = lines.flat();
   const highlighted = new Set(caption.words.filter((w) => w.key).map((w) => matchKey(w.text)));
-  const span = spokenSpan(caption);
-  const times = spreadWordTimes(words, span.startFrame, span.endFrame);
+  const times = wordTimes(caption, words);
   const timed: CaptionTrackWord[] = words.map((word, i) => ({ text: word, ...times[i]!, key: matchKey(word) !== "" && highlighted.has(matchKey(word)) }));
   // The normal size again (a fix must fit at the normal size), so no `fontSizePx`.
   return {
@@ -167,7 +120,7 @@ export function fixCaption(caption: Caption, text: string, layout: CaptionLayout
  * compiling). Every fix must name an existing phrase whose compiled text is still `originalText`;
  * a fix equal to the compiled text changes nothing. Throws CaptionOverrideError otherwise.
  */
-export function applyCaptionOverrides(track: CaptionTrack, overrides: readonly CaptionOverride[], layout: CaptionLayout = DEFAULT_CAPTION_LAYOUT): CaptionTrack {
+export function applyCaptionOverrides(track: CaptionTrack, overrides: readonly CaptionOverride[], layout: CaptionLayout = CAPTION_FIX_LAYOUT): CaptionTrack {
   if (overrides.length === 0) return track;
   const indexed = indexCaptions(track);
   const captions = [...track.captions];

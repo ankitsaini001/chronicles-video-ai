@@ -28,13 +28,15 @@ export interface CaptionLayout {
   maxWords?: number;
   /** Soft minimum: shorter phrases cost extra unless the sentence itself is shorter. */
   minWords?: number;
+  /** Width (em) of a character the estimate doesn't know; default 0.6 (F25 caption fixes use 1.0). */
+  unknownCharEm?: number;
 }
 
 const SENTENCE_END = /[.?!।]["')\]]?$/u;
 const CLAUSE_END = /[,;:—–]["')\]]?$/u;
 
 function width(words: readonly string[], layout: CaptionLayout): number {
-  return estimateTextWidth(words.join(" "), layout.fontSizePx);
+  return estimateTextWidth(words.join(" "), layout.fontSizePx, layout.unknownCharEm !== undefined ? { unknownCharEm: layout.unknownCharEm } : {});
 }
 
 function fitsLine(words: readonly string[], layout: CaptionLayout): boolean {
