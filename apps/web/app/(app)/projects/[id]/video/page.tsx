@@ -1,4 +1,4 @@
-import { currentStepOf, displayStateOf, findProjectRender, getDb, readDbConfig, toJobResource, toRenderSummary } from "@bytereel/db";
+import { canRetryCaptionJob, currentStepOf, displayStateOf, findProjectRender, getDb, readDbConfig, toJobResource, toRenderSummary } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -18,6 +18,9 @@ import { videoMediaDeps } from "@/lib/video/media";
 // owner sees it: another user's project, a missing one and a malformed id all get the same 404 page.
 // A project on another step goes back to /projects/[id], which sends it to its step. An archived
 // project opens read-only.
+// F25: the ready video has the Captions tab (caption fixes); while a fix is rendered the progress
+// screen shows its two steps (Updating captions → Rendering). A failed or cancelled fix leaves the
+// project `video_ready`: the review screen shows a note with Try again.
 
 export const metadata: Metadata = { title: "Your video" };
 
@@ -58,6 +61,17 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
       media.presign(render.thumbnailKey).then((link) => link.url, () => null),
       media.presign(render.mp4Key).then((link) => link.url, () => null),
     ]);
+    // The last caption fix made on THIS video, when it failed or was cancelled.
+    const captionJob = loaded.latestCaptionJob;
+    const lastCaptionJob =
+      captionJob && (captionJob.state === "failed" || captionJob.state === "cancelled") && captionJob.inputRef.renderId?.equals(render._id)
+        ? {
+            id: captionJob._id.toHexString(),
+            state: captionJob.state,
+            message: captionJob.error?.message ?? "Something went wrong on our side. Please try again.",
+            canRetry: resource.allowedActions.includes("retry_job") && canRetryCaptionJob(captionJob) && !archived,
+          }
+        : null;
     return frame(
       <ReviewVideoScreen
         projectId={projectId}
@@ -66,6 +80,9 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
         render={toRenderSummary(render, project, thumbnailUrl)}
         videoUrl={videoUrl}
         canEditStoryboard={resource.allowedActions.includes("edit_storyboard") && !archived}
+        stateVersion={project.stateVersion}
+        canEditCaptions={resource.allowedActions.includes("edit_captions") && !archived}
+        lastCaptionJob={lastCaptionJob}
       />,
     );
   }
@@ -81,6 +98,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
       error={project.lastError ? { code: project.lastError.code, message: project.lastError.message } : null}
       allowedActions={resource.allowedActions}
       archived={archived}
+      kind={job?.type === "caption" ? "captions" : "video"}
     />,
   );
 }

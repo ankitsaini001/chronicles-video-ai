@@ -22,7 +22,9 @@ export function cardStatus(p: StatusInput): CardStatus {
       return p.storyboardApproved ? { label: "Approved", tone: "success" } : { label: "Storyboard ready", tone: "warning" };
     case "generating":
       // F23: only one video is made at a time; a video still waiting for its turn says so.
-      return p.activeJobState === "queued" ? { label: "Waiting to start…", tone: "progress" } : { label: "Making video…", tone: "progress" };
+      if (p.activeJobState === "queued") return { label: "Waiting to start…", tone: "progress" };
+      // F25: a caption fix re-renders the video.
+      return p.activeJobType === "caption" ? { label: "Updating captions…", tone: "progress" } : { label: "Making video…", tone: "progress" };
     case "generate_failed":
       return { label: "Video failed", tone: "danger" };
     case "video_ready":

@@ -61,6 +61,33 @@ export function videoSteps(job: JobLike | null): VideoStep[] {
   return steps;
 }
 
+/** F25: the two steps of a caption fix (a re-render with the same narration). */
+export const CAPTION_STEP_LABELS = ["Updating captions", "Rendering"] as const;
+
+/**
+ * The two steps for a caption job (null = not started: all to do):
+ *   compile          → Updating captions
+ *   render + validate → Rendering (with the percent while it renders)
+ */
+export function captionSteps(job: JobLike | null): VideoStep[] {
+  const steps: VideoStep[] = CAPTION_STEP_LABELS.map((label) => ({ label, status: "todo", detail: null }));
+  if (!job || job.state === "queued") return steps;
+  if (job.state === "succeeded") return steps.map((s) => ({ ...s, status: "done" }));
+  const st = (name: string) => status(job.stages, name);
+  const compile = st("compile");
+  if (compile === "succeeded") steps[0] = { ...steps[0]!, status: "done" };
+  else if (compile === "failed") steps[0] = { ...steps[0]!, status: "failed" };
+  else if (compile === "running" && job.state === "running") steps[0] = { ...steps[0]!, status: "active" };
+  const render = st("render");
+  const validate = st("validate");
+  if (render === "succeeded" && validate === "succeeded") steps[1] = { ...steps[1]!, status: "done" };
+  else if (render === "failed" || validate === "failed") steps[1] = { ...steps[1]!, status: "failed" };
+  else if ((render === "running" || validate === "running") && job.state === "running") {
+    steps[1] = { ...steps[1]!, status: "active", detail: job.progress.stage === "render" || job.progress.stage === "validate" ? job.progress.message : null };
+  }
+  return steps;
+}
+
 /** "Waiting to start…" with how many videos are before this one (only one video is made at a time). */
 export function waitingText(ahead: number | null | undefined): string {
   if (!ahead) return "Waiting to start…";

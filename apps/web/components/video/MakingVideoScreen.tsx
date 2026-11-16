@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { apiSend, newIdempotencyKey } from "@/components/storyboard/client";
 import { Button, cn } from "@/components/ui";
-import { videoSteps, waitingText, type VideoStepStatus } from "@/lib/video/steps";
+import { captionSteps, videoSteps, waitingText, type VideoStepStatus } from "@/lib/video/steps";
 
 // ③ Video while it is made (F23; Stitch "ByteReel — Step 3 Making video"): a phone frame on the left,
 // the four steps on the right (Recording narration → Timing animations → Adding captions →
@@ -16,6 +16,10 @@ import { videoSteps, waitingText, type VideoStepStatus } from "@/lib/video/steps
 // ReviewVideoScreen instead (F24: watch and download). After a failure: "Edit storyboard" (a muted
 // text link, like Cancel) opens the storyboard, so a failure that can't be retried as it is never
 // leaves the creator stuck. (A cancelled video goes straight back to the storyboard.)
+// F25: the same screen while caption fixes are applied (`kind: "captions"`): two steps, Updating
+// captions → Rendering, with Cancel. A caption job never leaves the project failed: when it ends
+// (ready, failed or cancelled) the project is `video_ready` again and the page shows the review
+// screen (with the new video, or the previous one and a note).
 
 export type MakingVideoScreenProps = {
   projectId: string;
@@ -27,6 +31,8 @@ export type MakingVideoScreenProps = {
   error: { code: string; message: string } | null;
   allowedActions: string[];
   archived: boolean;
+  /** "captions": a caption fix is being rendered (F25). Default: making the video (F23). */
+  kind?: "video" | "captions";
 };
 
 const POLL_MS = 2000;
@@ -43,6 +49,7 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const retryKey = useRef<string | null>(null);
   const generating = props.state === "generating";
+  const captions = props.kind === "captions";
 
   // Live state while the video is being made.
   useEffect(() => {
@@ -105,7 +112,11 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
     }
     setJob(answer.json);
     // A waiting video stops at once; a running one within a few seconds (the poll sees it).
-    if (answer.json.state === "cancelled") router.replace(`/projects/${props.projectId}/storyboard`);
+    // A cancelled caption fix goes back to the video (the previous one), a video to the storyboard.
+    if (answer.json.state === "cancelled") {
+      if (captions) router.refresh();
+      else router.replace(`/projects/${props.projectId}/storyboard`);
+    }
   }
 
   async function retry() {
@@ -124,13 +135,13 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
 
   const waiting = generating && (!job || job.state === "queued");
   const cancelling = generating && job?.cancelRequestedAt != null;
-  const steps = videoSteps(job);
+  const steps = captions ? captionSteps(job) : videoSteps(job);
   const failed = props.state === "generate_failed";
   const canRetry = failed && actions.includes("retry_job") && job !== null && !props.archived;
   const canCancel = generating && actions.includes("cancel_job") && !cancelling;
   const canEditStoryboard = failed && actions.includes("edit_storyboard") && !props.archived;
 
-  const heading = failed ? "We couldn't finish your video" : "Making your video";
+  const heading = failed ? "We couldn't finish your video" : captions ? "Updating your captions" : "Making your video";
   return (
     <div className="mx-auto grid w-full max-w-4xl grid-cols-1 items-center gap-10 md:grid-cols-12 lg:gap-14">
       <div className="flex justify-center md:col-span-5">
@@ -148,7 +159,9 @@ export function MakingVideoScreen(props: MakingVideoScreenProps) {
               ? "Stopping…"
               : waiting
                 ? `${waitingText(job?.queue?.ahead)} You can leave this page; we'll start it for you.`
-                : "You can leave this page. We'll keep working and save everything."}
+                : captions
+                  ? "The narration audio stays the same. You can leave this page; your current video stays until the new one is ready."
+                  : "You can leave this page. We'll keep working and save everything."}
         </p>
 
         <ol aria-label="Steps" className="mb-9 flex flex-col gap-4">

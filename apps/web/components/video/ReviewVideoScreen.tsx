@@ -7,12 +7,15 @@ import { apiSend } from "@/components/storyboard/client";
 import { Note } from "@/components/storyboard/Note";
 import { Button } from "@/components/ui";
 import { afterPlayerError, LinkRequests, type Resume } from "@/lib/video/player-link";
+import { CaptionsPanel, type LastCaptionJob } from "./CaptionsPanel";
 import { VideoVersionMenu } from "./VideoVersionMenu";
 
 // ③ Video when it is ready (F24; Stitch "ByteReel — Step 3 Review video"): the real MP4 in the phone
 // frame (HTML5 player, the thumbnail as its poster), and on the right the title, "Video ready", the
 // "Video version N ▾" picker (F1), Download MP4, Back to My videos and Edit storyboard. Publishing
-// comes later (F28+), so it shows "coming soon". The Captions tab and "Ask for changes" are F25/F26.
+// comes later (F28+), so it shows "coming soon". Below it, the Captions tab (F25, CaptionsPanel): fix
+// caption text without changing the narration; clicking a phrase's time plays the latest version from
+// there. "Ask for changes" is F26.
 //
 // The player's address is a 15-minute private link (F3 kind=video). When it has expired, the browser
 // fails as soon as it needs more of the file (play after a long pause, seeking): the screen quietly
@@ -33,6 +36,12 @@ export type ReviewVideoScreenProps = {
   /** Its 15-minute private link, made by the page after the owner check (null → fetched here). */
   videoUrl: string | null;
   canEditStoryboard: boolean;
+  /** F25: the project's stateVersion (sent with caption fixes). */
+  stateVersion: number;
+  /** F25: `edit_captions` is allowed (video_ready, no job running, not archived). */
+  canEditCaptions: boolean;
+  /** F25: the last caption fix on this video failed or was cancelled (with Try again when allowed). */
+  lastCaptionJob: LastCaptionJob | null;
 };
 
 const PLAY_PROBLEM = "We couldn't play this video. Please reload the page.";
@@ -72,6 +81,21 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
     void loadLink(render.id, { time: 0, play: true });
   }
 
+  /** Play the latest version from `seconds` (a caption's time); switches back to it when another version is shown. */
+  function seekTo(seconds: number) {
+    if (shown.id !== props.render.id) {
+      setShown(props.render);
+      setSrc(null);
+      setProblem(null);
+      void loadLink(props.render.id, { time: seconds, play: true });
+      return;
+    }
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = seconds;
+    void video.play().catch(() => undefined);
+  }
+
   function onError() {
     const video = videoRef.current;
     if (!video || src === null) return;
@@ -107,8 +131,8 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
   const downloadHref = `/api/v1/projects/${props.projectId}/renders/${shown.id}/media?kind=download&redirect=true`;
 
   return (
-    <div className="mx-auto grid w-full max-w-4xl grid-cols-1 items-center gap-10 md:grid-cols-12 lg:gap-14">
-      <div className="flex justify-center md:col-span-5">
+    <div className="mx-auto grid w-full max-w-4xl grid-cols-1 items-start gap-10 md:grid-cols-12 lg:gap-14">
+      <div className="flex justify-center md:sticky md:top-8 md:col-span-5">
         <div className="relative aspect-[9/16] w-[240px] rounded-[28px] border border-line bg-surface-2 p-2.5 shadow-card sm:w-[280px]">
           <div className="relative size-full overflow-hidden rounded-[20px] border border-line bg-screen">
             <video
@@ -130,7 +154,8 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
         </div>
       </div>
 
-      <section aria-labelledby="video-heading" className="rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-10 md:col-span-7">
+      <div className="flex flex-col gap-6 md:col-span-7">
+      <section aria-labelledby="video-heading" className="rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-10">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h1 id="video-heading" className="font-display text-3xl font-bold tracking-tight break-words text-text sm:text-4xl">
             {props.title}
@@ -185,6 +210,19 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
           )}
         </div>
       </section>
+
+      <CaptionsPanel
+        projectId={props.projectId}
+        renderId={props.render.id}
+        renderNumber={props.render.renderNumber}
+        stateVersion={props.stateVersion}
+        canEdit={props.canEditCaptions}
+        canEditStoryboard={props.canEditStoryboard}
+        showingOtherVersion={shown.id !== props.render.id}
+        lastJob={props.lastCaptionJob}
+        onSeek={seekTo}
+      />
+      </div>
     </div>
   );
 }
