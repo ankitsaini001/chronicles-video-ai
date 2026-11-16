@@ -53,8 +53,10 @@ export class FakeElevenLabsSpeech implements SpeechProvider {
         throw new ProviderError({ provider: "elevenlabs", kind: "account-restricted", status: 402, message: "ElevenLabs stand-in: refused (e2e voice refused)" });
       }
       if (request.text.includes("e2e voice busy") && calls <= 3) {
-        if (attempt <= 2) continue; // the real adapter retries a busy answer twice
-        throw new ProviderError({ provider: "elevenlabs", kind: "transient", status: 503, message: "ElevenLabs stand-in: busy (e2e voice busy)" });
+        const busy = new ProviderError({ provider: "elevenlabs", kind: "transient", status: 503, message: "ElevenLabs stand-in: busy (e2e voice busy)" });
+        if (attempt > 2) throw busy;
+        options.retry?.onRetry?.({ attempt, waitMs: 0, error: busy }); // the real adapter retries a busy answer twice
+        continue;
       }
       break;
     }

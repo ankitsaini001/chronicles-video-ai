@@ -217,6 +217,9 @@ function usageOutcomeOf(error: unknown): string {
   return "error";
 }
 
+/** A failed request ElevenLabs may still have billed (it did the work): a broken answer or a timeout. */
+const mayHaveBilled = (error: unknown) => ["invalid_output", "timeout"].includes(usageOutcomeOf(error));
+
 /** Progress shown for each render phase (UI mapping: API.md §8.2). */
 export function renderPhaseProgress(phase: RenderPhase, percent: number): { stage: GenerateStage; percent: number; message: string; stages?: Partial<Record<GenerateStage, "running" | "succeeded">> } {
   switch (phase) {
@@ -465,10 +468,12 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
           log("error", `Video job ${event.jobId}: usage log failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       };
+      /** The error the provider is retrying: the previous request is logged with it. */
+      let retried: unknown = null;
       const options: SpeechCallOptions = {
         beforeAttempt: async (requestNumber) => {
-          // Only busy/network failures are retried by the provider: the previous request ended that way.
-          if (requestNumber > 1) await finishUsage("failed", "busy", 0);
+          // A retry: the previous request ended with the error the provider retried (busy, network, timeout).
+          if (requestNumber > 1) await finishUsage("failed", usageOutcomeOf(retried), mayHaveBilled(retried) ? characters : 0);
           const counted = await store.reserveVoiceSend({ jobId, attempt, item: { cacheKey, characters }, timezone });
           if (counted === "quota") throw new VoiceLimitDuringRecording("QUOTA_EXCEEDED");
           if (counted === "ceiling") throw new VoiceLimitDuringRecording("SPEND_CEILING");
@@ -476,7 +481,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
           usage = await store.reserveUsage({ ownerId: ownerId.toHexString(), projectId, jobId: event.jobId, model, characters });
           sentAt = Date.now();
         },
-        ...(deps.sleep ? { retry: { sleep: deps.sleep } } : {}),
+        retry: { ...(deps.sleep ? { sleep: deps.sleep } : {}), onRetry: ({ error }) => void (retried = error) },
       };
       /** While the request is in flight (retries included), the same progress line is written every 20 s: the stuck rule never ends a live worker waiting for a paid answer. */
       const synthesize = async () => {
@@ -494,8 +499,8 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
       try {
         response = await synthesize();
       } catch (error) {
-        // A broken answer (bad JSON, bad timings) may have been billed: logged with its characters.
-        await finishUsage("failed", usageOutcomeOf(error), error instanceof ProviderError && error.kind === "bad-response" ? characters : 0);
+        // A broken answer (bad JSON, bad timings) or a timeout may have been billed: logged with its characters.
+        await finishUsage("failed", usageOutcomeOf(error), mayHaveBilled(error) ? characters : 0);
         const code = speechFailureCode(error);
         if (code === "INTERNAL") throw error;
         const line = SPEECH_FAILURE_LINE[code] ?? "the recording failed";

@@ -1197,8 +1197,24 @@ describe("every ElevenLabs request is counted before it is sent (code review, fi
       expect(eleven.requests).toHaveLength(scenesOf() + 3);
       expect(bundle.state.sends).toHaveLength(eleven.requests.length);
       expect(bundle.state.counted).toBe(charactersOf(eleven.requests));
-      expect(bundle.state.usage.slice(0, 3).map((u) => `${u.status}:${u.outcome}`)).toEqual(["failed:busy", "failed:busy", "failed:timeout"]);
+      // Each timed-out request is logged as a timeout WITH its characters (ElevenLabs may have billed it), retried ones too.
+      expect(bundle.state.usage.slice(0, 3).map((u) => `${u.status}:${u.outcome}`)).toEqual(["failed:timeout", "failed:timeout", "failed:timeout"]);
+      expect(bundle.state.usage.slice(0, 3).every((u) => u.characters > 0)).toBe(true);
       expect(bundle.state.usage.filter((u) => u.status === "reserved")).toHaveLength(0);
+    });
+  });
+
+  it("a retried request is logged with its real outcome: busy (0 characters), timeout (its characters), then ok (second review, finding 4)", async () => {
+    await withTempDir(async (root) => {
+      const bundle = fakeStore([]);
+      const eleven = scriptedElevenLabs(["busy", "timeout"]);
+      expect(await run(bundle, { files: sameFiles(fakeFiles()), voice: eleven.voice, render: fakeRenderer([], readyResult) as never, root })).toBe("done");
+      const scene1 = countCharacters(eleven.requests[0]!.text);
+      expect(bundle.state.usage.slice(0, 3)).toEqual([
+        { status: "failed", outcome: "busy", characters: 0 },
+        { status: "failed", outcome: "timeout", characters: scene1 },
+        { status: "final", outcome: "ok", characters: scene1 },
+      ]);
     });
   });
 
