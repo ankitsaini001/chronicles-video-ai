@@ -28,3 +28,15 @@ export function assertGenerateReady(env: NodeJS.ProcessEnv = process.env): Voice
   if (!storage.ok) throw new Error(`File storage (R2) is not set up: ${storage.problem}`);
   return voiceEstimatorFor(voice);
 }
+
+/**
+ * Before saving caption fixes (F4) or retrying a caption job (E2; F25): Inngest and the R2 bucket
+ * settings must be set up, else nothing is saved and the answer is 500. NO voice set-up is needed or
+ * checked: a caption fix re-renders the existing narration and never calls the voice service.
+ */
+export function assertCaptionJobsReady(env: NodeJS.ProcessEnv = process.env): void {
+  const inngest = getInngest(env);
+  if (!inngest.ok) throw new Error(`Background jobs are not set up: ${inngest.problem}`);
+  const storage = storageFromEnv(env);
+  if (!storage.ok) throw new Error(`File storage (R2) is not set up: ${storage.problem}`);
+}

@@ -54,18 +54,18 @@ export type ProjectStatusResource = {
 };
 
 /** C3 `Project` (API.md §11.3) with its active job embedded. */
-export function toProjectResourceOf({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob }: ProjectWithJobs): ProjectResource {
+export function toProjectResourceOf({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob }: ProjectWithJobs): ProjectResource {
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
-  return toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null, latestGenerateJob: latestGenerateJob ?? null });
+  return toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null, latestGenerateJob: latestGenerateJob ?? null, latestCaptionJob: latestCaptionJob ?? null });
 }
 
 /**
  * C6 `ProjectStatus` (API.md §11.3): polling stops when `pollAfterMs` is null (no active job).
  * `ahead` (F23): for a video job still waiting for its turn, how many videos are before it.
  */
-export function toProjectStatus({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob }: ProjectWithJobs, extras: { ahead?: number | null } = {}): ProjectStatusResource {
+export function toProjectStatus({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob }: ProjectWithJobs, extras: { ahead?: number | null } = {}): ProjectStatusResource {
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
-  const resource = toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null, latestGenerateJob: latestGenerateJob ?? null });
+  const resource = toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null, latestGenerateJob: latestGenerateJob ?? null, latestCaptionJob: latestCaptionJob ?? null });
   return {
     projectId: resource.id,
     state: project.state,
