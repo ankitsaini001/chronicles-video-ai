@@ -43,11 +43,6 @@ export interface RenderDocument {
 
 export type RenderStatus = RenderDocument["status"];
 
-/** The project's current video (owner-scoped), or null. */
-export async function getRender(db: Db, ownerId: ObjectId, renderId: ObjectId, session?: ClientSession): Promise<RenderDocument | null> {
-  return db.collection<RenderDocument>(RENDERS_COLLECTION).findOne({ _id: renderId, ownerId }, session ? { session } : {});
-}
-
 /** The newest ready video of one storyboard version (D8 re-approval reuses it). */
 export async function latestReadyRenderOf(db: Db, input: { ownerId: ObjectId; projectId: ObjectId; planVersionId: ObjectId }, session?: ClientSession): Promise<RenderDocument | null> {
   return db

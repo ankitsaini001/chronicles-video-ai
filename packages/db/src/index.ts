@@ -305,7 +305,6 @@ export {
 } from "./speech-artifacts";
 export {
   findProjectRender,
-  getRender,
   latestReadyRenderOf,
   listProjectRenders,
   RENDER_SCHEMA_VERSION,
