@@ -2,7 +2,7 @@
 
 import type { RenderSummaryResource } from "@bytereel/db";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { apiSend } from "@/components/storyboard/client";
 import { Note } from "@/components/storyboard/Note";
 import { Button } from "@/components/ui";
@@ -11,14 +11,17 @@ import { VideoVersionMenu } from "./VideoVersionMenu";
 
 // ③ Video when it is ready (F24; Stitch "ByteReel — Step 3 Review video"): the real MP4 in the phone
 // frame (HTML5 player, the thumbnail as its poster), and on the right the title, "Video ready", the
-// "Video version N ▾" picker (F1), Download MP4 (a plain link to F3 kind=download&redirect=true),
-// Back to My videos and Edit storyboard. Publishing
+// "Video version N ▾" picker (F1), Download MP4, Back to My videos and Edit storyboard. Publishing
 // comes later (F28+), so it shows "coming soon". The Captions tab and "Ask for changes" are F25/F26.
 //
 // The player's address is a 15-minute private link (F3 kind=video). When it has expired, the browser
 // fails as soon as it needs more of the file (play after a long pause, seeking): the screen quietly
 // gets a fresh link and goes on at the same second. If a link applied less than 10 s ago fails too, it
 // shows a message instead (no endless loop). Both decisions live in lib/video/player-link.ts.
+//
+// Download MP4 asks F3 kind=download for the link (as JSON), then opens it: the browser saves the file
+// and the page stays. A problem (logged out, gone, too many requests, a server error) shows as a plain
+// line here, never as a raw error page. The href (redirect=true) stays for middle-click / new tab.
 
 export type ReviewVideoScreenProps = {
   projectId: string;
@@ -38,6 +41,7 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
   const [shown, setShown] = useState(props.render);
   const [src, setSrc] = useState<string | null>(props.videoUrl);
   const [problem, setProblem] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const resume = useRef<Resume | null>(null);
   /** When the current link was applied (0 = the page's own first link). */
@@ -83,6 +87,20 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
     if (!video || !then) return;
     if (then.time > 0) video.currentTime = then.time;
     if (then.play) void video.play().catch(() => undefined);
+  }
+
+  async function download(event: MouseEvent<HTMLAnchorElement>) {
+    // Middle-click, Ctrl/Cmd/Shift/Alt-click: the plain link (opened by the browser itself).
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (downloading) return;
+    setDownloading(true);
+    setProblem(null);
+    const answer = await apiSend<{ url: string }>("GET", `/api/v1/projects/${props.projectId}/renders/${shown.id}/media?kind=download`);
+    setDownloading(false);
+    if (!answer.ok) return setProblem(answer.message);
+    // An attachment link: the browser saves the file and this page stays open.
+    window.location.assign(answer.json.url);
   }
 
   const fromOlderStoryboard = props.currentPlanVersionId !== null && shown.planVersionId !== props.currentPlanVersionId;
@@ -140,14 +158,16 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
         )}
 
         <div className="flex flex-wrap items-center gap-4">
-          {/* A plain link (not next/link): the API answers with a redirect to the private file. */}
+          {/* A plain link (not next/link): a click asks for the file's private link first; the href is for middle-click. */}
           <a
             href={downloadHref}
+            onClick={(event) => void download(event)}
+            aria-disabled={downloading || undefined}
             data-testid="download-mp4"
-            className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2.5 rounded-full bg-button px-6 py-3 text-[15px] font-bold text-on-amber shadow-glow transition motion-safe:hover:-translate-y-0.5"
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2.5 rounded-full bg-button px-6 py-3 text-[15px] font-bold text-on-amber shadow-glow transition motion-safe:hover:-translate-y-0.5 aria-disabled:opacity-70"
           >
             <span aria-hidden="true">⬇</span>
-            Download MP4
+            {downloading ? "Getting your file…" : "Download MP4"}
           </a>
           <Button type="button" variant="secondary" disabled>
             Publish — coming soon
