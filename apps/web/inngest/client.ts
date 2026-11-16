@@ -28,8 +28,12 @@ export const REVISION_REQUESTED = "revision.requested";
 /** Event that starts the video job (API.md D8, E2; F23). Carries ids only. */
 export const VIDEO_GENERATE_REQUESTED = "video.generate.requested";
 
+/** Event that starts a caption-fix re-render (API.md F4, E2; F25). Carries ids only. */
+export const VIDEO_RECAPTION_REQUESTED = "video.recaption.requested";
+
 /**
- * Only ONE video job step runs at a time across the whole app (F23, founder 2026-11-15): renders run
+ * Only ONE video job step runs at a time across the whole app (F23, founder 2026-11-15), shared by
+ * `generate-video` and `fix-captions` (F25: a caption fix re-renders the video): renders run
  * on this computer, and one render at a time keeps the machine (and the founder's dev server)
  * usable. Inngest counts steps, so two videos may take turns between steps, but a render (one step)
  * never overlaps another. Other videos wait ("Waiting to start…"). `scope: "env"` with a fixed key.

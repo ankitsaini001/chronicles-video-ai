@@ -1,7 +1,10 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import path from "node:path";
 import type { Language, Scene } from "@bytereel/pipeline/contracts";
 import { countCharacters } from "@bytereel/pipeline/pipeline/speech";
 import { ProviderError, type SpeechCallOptions, type SpeechProvider, type SpeechRequest, type SpeechResponse } from "@bytereel/pipeline/providers";
 import { synthesizeSceneAlignment } from "@bytereel/pipeline/timing";
+import { projectRoot } from "./render-process";
 
 // A stand-in for ElevenLabs, ONLY for the automated end-to-end check (tools/e2e/f23-generate.ts):
 // ZERO calls to ElevenLabs. It answers like the real adapter (ElevenLabsSpeech): silent MP3 audio
@@ -13,6 +16,9 @@ import { synthesizeSceneAlignment } from "@bytereel/pipeline/timing";
 // - "e2e voice busy": the first 3 calls for that text fail as "busy" (the provider's 2 quick retries
 //   included), so the job fails with PROVIDER_BUSY; the next call (Try again) succeeds.
 // - "e2e voice refused": always refused as a voice-account problem (PROVIDER_UNAVAILABLE).
+// Every call it answers (each attempt) adds one line to runs/.tmp/e2e/elevenlabs-stand-in-calls.log
+// inside the project (never /tmp), so an e2e check can prove a job made no voice request at all
+// (F25 caption fixes). Only the stand-in writes it; it holds no text, only a time and a counter.
 
 /** One silent MPEG-1 Layer III frame: 128 kbps, 44.1 kHz, mono, no CRC (decodes as silence). */
 function silentFrame(): Buffer {
@@ -36,6 +42,25 @@ export function silentMp3(seconds: number): Uint8Array {
 /** How many calls each text got (per server process), for the "e2e voice busy" switch. */
 const callsByText = new Map<string, number>();
 
+/** The stand-in's call log (one line per call), read by the e2e checks. */
+export function standInCallLog(root: string = projectRoot()): string {
+  return path.join(root, "runs", ".tmp", "e2e", "elevenlabs-stand-in-calls.log");
+}
+
+let callCount = 0;
+function logCall(): void {
+  callCount++;
+  // Only on the e2e test server (the switch is on in its environment), never from unit tests.
+  if (process.env.E2E_FAKE_ELEVENLABS !== "1") return;
+  try {
+    const file = standInCallLog();
+    mkdirSync(path.dirname(file), { recursive: true });
+    appendFileSync(file, `${new Date().toISOString()} call ${callCount}\n`);
+  } catch {
+    // the log is only for the e2e check; a failure here never changes the answer
+  }
+}
+
 export class FakeElevenLabsSpeech implements SpeechProvider {
   readonly name = "elevenlabs-e2e-stand-in";
 
@@ -47,6 +72,7 @@ export class FakeElevenLabsSpeech implements SpeechProvider {
     for (;;) {
       attempt++;
       await options.beforeAttempt?.(attempt);
+      logCall();
       const calls = (callsByText.get(request.text) ?? 0) + 1;
       callsByText.set(request.text, calls);
       if (request.text.includes("e2e voice refused")) {

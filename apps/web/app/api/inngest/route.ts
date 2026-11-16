@@ -1,4 +1,5 @@
 import { serve } from "inngest/next";
+import { createFixCaptionsFunction } from "@/inngest/functions/fix-captions";
 import { createGenerateVideoFunction } from "@/inngest/functions/generate-video";
 import { createPlanVideoFunction } from "@/inngest/functions/plan-video";
 import { createRevisePlanFunction } from "@/inngest/functions/revise-plan";
@@ -25,7 +26,7 @@ function handlers(): { GET: Handler; POST: Handler; PUT: Handler } | null {
     console.error(`Inngest is not set up: ${setup.problem}`);
     return null;
   }
-  return serve({ client: setup.client, functions: [createPlanVideoFunction(setup.client), createRevisePlanFunction(setup.client), createGenerateVideoFunction(setup.client)] }) as unknown as { GET: Handler; POST: Handler; PUT: Handler };
+  return serve({ client: setup.client, functions: [createPlanVideoFunction(setup.client), createRevisePlanFunction(setup.client), createGenerateVideoFunction(setup.client), createFixCaptionsFunction(setup.client)] }) as unknown as { GET: Handler; POST: Handler; PUT: Handler };
 }
 
 let served: ReturnType<typeof handlers> | undefined;
