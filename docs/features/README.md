@@ -74,7 +74,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F22b | [Video style upgrade (v4 hero visuals)](F22b-video-style-v4.md) | F22, F00 | ✅ Done |
 | F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ✅ Done |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ✅ Done |
-| F25 | [Caption fixes](F25-caption-fixes.md) | F24 | 🧪 Testing |
+| F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ✅ Done |
 | F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | ⬜ Not started |
 | F27 | [Daily limits](F27-daily-limits.md) | F23 | ⬜ Not started |
 
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F25 — Caption fixes** is 🧪 Testing (built 2026-11-17: the Captions tab on the review screen; a fix re-renders the video with the same narration, zero voice characters, not counted as a video of the day). Restart `npm run dev` and `npm run inngest` before trying it (a new background job). F24 — Watch and download the video is ✅ Done (founder OK 2026-11-17). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b, F23 and F24 done (v4 hero style is the only video style).
+**Now:** **F25 — Caption fixes** is ✅ Done (founder OK 2026-11-17: the Captions tab on the review screen; a fix re-renders the video with the same narration, zero voice characters, not counted as a video of the day). Next: **F26 — Revision chat on the video**. Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b, F23, F24 and F25 done (v4 hero style is the only video style).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
