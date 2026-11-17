@@ -132,7 +132,7 @@ export function CaptionsPanel(props: CaptionsPanelProps) {
     retryKey.current ??= newIdempotencyKey();
     const answer = await apiSend("POST", `/api/v1/jobs/${props.lastJob.id}/retry`, {}, { "Idempotency-Key": retryKey.current });
     if (answer.ok) return router.refresh();
-    if (answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") retryKey.current = null;
+    if (answer.status > 0 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") retryKey.current = null;
     setBusy(null);
     setProblem(answer.message);
   }
