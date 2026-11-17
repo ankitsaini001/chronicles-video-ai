@@ -245,11 +245,10 @@ async function main(): Promise<void> {
   const shows = {
     progress: view.html.includes('aria-label="Change progress"') && /Updating your storyboard…|Our AI is busy, trying again…/.test(view.html),
     captionsWait: view.html.includes("Caption fixes wait until your change request is finished."),
-    noSave: !view.html.includes("Save caption fixes"),
   };
   check(
     "…the video page (still video_ready) shows the progress line and says caption fixes wait",
-    running.activeJob?.type === "revise" && running.state === "video_ready" && view.status === 200 && shows.progress && shows.captionsWait && shows.noSave,
+    running.activeJob?.type === "revise" && running.state === "video_ready" && view.status === 200 && shows.progress && shows.captionsWait,
     `${running.activeJob?.type} ${running.state} ${JSON.stringify(shows)}`,
   );
   st = await waitFor(a.cookie, pid, (s) => s.pollAfterMs === null, 3 * 60_000);
@@ -281,18 +280,34 @@ async function main(): Promise<void> {
 
   // ---------- 7. the storyboard: Changed tag, cost note, button, Back to video ----------
   view = await page(a.cookie, `/projects/${pid}/storyboard`);
-  const note = /In your new video, scene 3 gets new narration \(about ([\d,]+) voice characters\)\. The other (\d+) scenes reuse their recordings\. It counts as 1 of your 3 videos today\./.exec(view.html);
+  const note = /In your new video, scene 3 gets new narration \(about ([\d,]+) voice characters\)\. The other (\d+) scenes reuse their recordings\. It counts as 1 of your 3 videos today \(2 left\)\./.exec(view.html);
   const noteChars = note ? Number(note[1]!.replace(/,/g, "")) : NaN;
   check("storyboard: the cost note names ONLY scene 3, with its characters, the other 5 scenes reuse", note !== null && note[2] === String(scenes.length - 1) && noteChars > 0, note?.[0] ?? "(no note)");
   check("storyboard: 'Approve & make new video', Back to video, the Changed tag", view.html.includes("Approve & make new video") && !view.html.includes("Approve & generate video") && view.html.includes("Back to video") && view.html.includes("Changed"));
   check("…no voice request or count from showing the note", JSON.stringify(await voiceSnapshot(a.id, tz)) === JSON.stringify(baseline));
   view = await page(a.cookie, `/projects/${pid}/video`);
-  check("Back to video: the video page shows video 1 with a note to approve the new storyboard", view.status === 200 && view.html.includes("Your storyboard has changes that aren't in this video yet.") && view.html.includes("Back to storyboard") && !view.html.includes("Save caption fixes"));
+  check("Back to video: the video page shows video 1 with a note to approve the new storyboard", view.status === 200 && view.html.includes("Your storyboard has changes that aren't in this video yet.") && view.html.includes("Back to storyboard") && view.html.includes("so its captions can't be fixed now") && view.html.includes("Ask for more changes on the storyboard."));
   const meanwhile = await downloadable(a.cookie, pid, render1Id);
   check("…video 1 still downloads", meanwhile.ok, meanwhile.detail);
   project = (await send(a.cookie, "GET", `/api/v1/projects/${pid}`)).json;
   r = await send(a.cookie, "POST", reviseUrl, { stage: "video", scope: "project", message: "make the ending punchier", basePlanVersionId: v1.id, expectedStateVersion: project.stateVersion }, { "idempotency-key": key() });
   check("D5 stage video after the change (storyboard_ready) → 409 INVALID_STATE, nothing saved", r.status === 409 && r.json.error?.code === "INVALID_STATE" && (await projectOf(pid))?.activeJobId === null, `${r.status} ${r.json.error?.code}`);
+
+  // ---------- 7b. Undo back to the video's own version (code review): video_ready again, no job, nothing counted ----------
+  const beforeUndo = await voiceSnapshot(a.id, tz);
+  const jobsBeforeUndo = await db.collection("jobs").countDocuments({ projectId: oid(pid) });
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/plan-versions/${v0.json.id}/restore`, { expectedStateVersion: project.stateVersion });
+  check(
+    "D7 Undo to video 1's version → video_ready with the SAME video, approved again, no job",
+    r.status === 200 && r.json.state === "video_ready" && r.json.currentRenderId === render1Id && r.json.approvedPlanVersionId === v0.json.id && r.json.activeJobId === null && (await db.collection("jobs").countDocuments({ projectId: oid(pid) })) === jobsBeforeUndo,
+    `${r.status} ${r.json.state} ${JSON.stringify(r.json.error ?? null)}`,
+  );
+  check("…nothing counted (voice, videos today)", JSON.stringify(await voiceSnapshot(a.id, tz)) === JSON.stringify(beforeUndo));
+  view = await page(a.cookie, `/projects/${pid}/video`);
+  check("…the video page: no 'changes' note, captions and changes offered again", view.status === 200 && !view.html.includes("Your storyboard has changes that aren't in this video yet.") && !view.html.includes("its captions can't be fixed now") && !view.html.includes("Ask for more changes on the storyboard") && r.json.allowedActions?.includes("request_revision") && r.json.allowedActions?.includes("edit_captions"));
+  r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/plan-versions/${v1.id}/restore`, { expectedStateVersion: r.json.stateVersion });
+  check("D7 back to the changed version → storyboard_ready (not approved), video 1 kept", r.status === 200 && r.json.state === "storyboard_ready" && r.json.approvedPlanVersionId === null && r.json.currentRenderId === render1Id, `${r.status} ${r.json.state}`);
+  project = r.json;
 
   // ---------- 8. approve → video 2 ----------
   const before = await voiceSnapshot(a.id, tz);
