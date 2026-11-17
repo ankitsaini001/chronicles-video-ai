@@ -41,11 +41,12 @@ export const PLAN_STAGES = ["plan", "validate"] as const;
 export const JOB_MESSAGES = {
   QUEUED: "Writing your storyboard…",
   WRITING: "Writing your storyboard…",
-  RETRYING: "Our AI is busy, trying again…",
+  RETRYING: "Our AI is busy or slow, trying again…",
   REPAIRING: "Fixing a few details in your storyboard…",
   SAVING: "Checking your storyboard…",
   DONE: "Your storyboard is ready.",
-  PROVIDER_BUSY: "Our AI is very busy right now. Your idea is saved; please try again in a few minutes.",
+  // Also when Gemini doesn't answer within the time limit (F26 founder test): "busy or taking too long".
+  PROVIDER_BUSY: "Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes.",
   PROVIDER_REJECTED: "We can't make a video about this topic.",
   PLAN_INVALID: "Couldn't build a good storyboard, try rephrasing.",
   QUOTA_EXCEEDED: "This project has reached 20 storyboard requests. Start a new project to keep going.",

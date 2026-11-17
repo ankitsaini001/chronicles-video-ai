@@ -716,7 +716,7 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 ### 20.2 Retry matrix
 | Failure | Retry | User sees |
 |---|---|---|
-| Gemini 503/504/timeout | ≤2 (Retry-After) then fail; **no model switch** | "Our AI is very busy right now. Your idea is saved; please try again in a few minutes." + Try again |
+| Gemini 503/504/timeout | ≤2 (Retry-After) then fail; **no model switch** | "Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes." (since F26) + Try again |
 | Gemini 400 / safety | none | Safety: "We can't make a video about this topic"; 400: internal alert |
 | Invalid plan after repair | none | "Couldn't build a good storyboard, try rephrasing" |
 | ElevenLabs transient | ≤2 | "Voice service busy" + Retry |

@@ -59,12 +59,13 @@ export interface RevisionDocument {
 /** What the creator reads while a change runs and when it ends (API.md §4.3). Shown as is. */
 export const REVISE_MESSAGES = {
   WRITING: "Updating your storyboard…",
-  RETRYING: "Our AI is busy, trying again…",
+  RETRYING: "Our AI is busy or slow, trying again…",
   REPAIRING: "Fixing a few details in your storyboard…",
   SAVING: "Checking the new storyboard…",
   DONE: "Your storyboard is updated.",
   NO_CHANGE: "I couldn't find anything to change for this request. Try saying exactly what to change, for example “scene 2: make it simpler”.",
-  PROVIDER_BUSY: "Our AI is very busy right now. Your storyboard is saved; please try again in a few minutes.",
+  // Also when Gemini doesn't answer within the time limit (F26 founder test): "busy or taking too long".
+  PROVIDER_BUSY: "Our AI is busy or taking too long right now. Your storyboard is saved; please try again in a few minutes.",
   PROVIDER_REJECTED: "We can't make this change. Please ask for something else.",
   PLAN_INVALID: "Our AI couldn't make a good storyboard with this change. Try saying it differently.",
   QUOTA_EXCEEDED: "This project has reached 20 changes. Start a new project to keep going.",

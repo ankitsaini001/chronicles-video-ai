@@ -78,7 +78,7 @@ export interface PlanJobMessages {
 
 export const PLAN_JOB_MESSAGES: PlanJobMessages = {
   first: "Writing your storyboard…",
-  retrying: "Our AI is busy, trying again…",
+  retrying: "Our AI is busy or slow, trying again…",
   repairing: "Fixing a few details in your storyboard…",
   saving: "Checking your storyboard…",
 };

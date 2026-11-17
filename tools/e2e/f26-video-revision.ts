@@ -241,9 +241,9 @@ async function main(): Promise<void> {
   check("…video 1 still downloads while the change runs", whileRunning.ok, whileRunning.detail);
   const running = (await send(a.cookie, "GET", `/api/v1/projects/${pid}/status`)).json;
   view = await page(a.cookie, `/projects/${pid}/video`);
-  // The progress line is the job's own message: "Updating your storyboard…", then (busy AI) "Our AI is busy, trying again…".
+  // The progress line is the job's own message: "Updating your storyboard…", then (busy or slow AI) "Our AI is busy or slow, trying again…".
   const shows = {
-    progress: view.html.includes('aria-label="Change progress"') && /Updating your storyboard…|Our AI is busy, trying again…/.test(view.html),
+    progress: view.html.includes('aria-label="Change progress"') && /Updating your storyboard…|Our AI is busy or slow, trying again…/.test(view.html),
     captionsWait: view.html.includes("Caption fixes wait until your change request is finished."),
   };
   check(

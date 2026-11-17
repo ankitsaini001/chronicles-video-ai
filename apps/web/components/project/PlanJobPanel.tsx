@@ -54,7 +54,7 @@ function failureText(code: string | undefined, fallback: string | undefined): st
     case "PLAN_INVALID":
       return "Couldn't build a good storyboard, try rephrasing.";
     case "PROVIDER_BUSY":
-      return "Our AI is very busy right now. Your idea is saved; please try again in a few minutes.";
+      return "Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes.";
     case "PROVIDER_REJECTED":
       return "We can't make a video about this topic. Please edit your idea.";
     default:

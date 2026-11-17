@@ -423,7 +423,7 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 
 | Code / situation | Message | Button |
 |---|---|---|
-| `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."** | **Try again** (`E2` retry, or re-send for H1) |
+| `PROVIDER_BUSY` (Gemini, ARCHITECTURE §16.1) | **"Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes."** (a change request: "…Your storyboard is saved; …"; since F26, because a Gemini request that runs past the 180 s limit ends the same way; while retrying: "Our AI is busy or slow, trying again…") | **Try again** (`E2` retry, or re-send for H1) |
 | `PROVIDER_BUSY` (C7 brainstorm: no project exists, so nothing is "saved") | **"Our AI is very busy right now. Please try again in a few minutes."** | **Get ideas** again (re-send C7) |
 | `PROVIDER_BUSY` (ElevenLabs) | "Voice service busy. Please try again in a few minutes." | Retry |
 | `PROVIDER_REJECTED` | "We can't make a video about this topic." | Edit idea (C4 with `text`, then E2) |
