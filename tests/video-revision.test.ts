@@ -1,9 +1,12 @@
 import {
   allowedActionsFor,
+  failedChangeFor,
   narrationCost,
   newPlanJob,
   ProjectActionError,
   requestRevision,
+  restoredState,
+  restorePlanVersion,
   USAGE_LIMITS,
   VIDEO_STAGE_NOT_READY,
   type JobDocument,
@@ -12,9 +15,10 @@ import {
 } from "@bytereel/db";
 import { type Db, ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
-import { afterChange, changeEndedMessage, historyUrl, revisionBody, runningNote, wholeLabel } from "../apps/web/lib/storyboard/changes";
+import { afterChange, changeEndedMessage, revisionBody, runningNote, wholeLabel } from "../apps/web/lib/storyboard/changes";
 import { newVideoCost } from "../apps/web/lib/video/narration-cost";
-import { approveLabel, newVideoNote } from "../apps/web/lib/video/new-video";
+import { approveLabel, newVideoNote, videosTodayLine } from "../apps/web/lib/video/new-video";
+import { captionFailureOf, storyboardChangedSince } from "../apps/web/lib/video/review-state";
 import { voiceEstimatorFor, type VoiceSetup } from "../apps/web/lib/video/voice";
 import type { Plan } from "../packages/pipeline/src/contracts";
 import { countCharacters, speechConfigFor, speechRequestFor } from "../packages/pipeline/src/pipeline/speech";
@@ -107,7 +111,6 @@ describe("the Ask for changes panel on the video page (stage handling)", () => {
       expectedStateVersion: 7,
     });
     expect(revisionBody({ stage: "storyboard", scope: "project", message: "Shorter", baseVersionId: V1.toHexString(), stateVersion: 2 }).stage).toBe("storyboard");
-    expect(historyUrl(PROJECT.toHexString(), "video")).toBe(`/api/v1/projects/${PROJECT.toHexString()}/revisions?stage=video`);
   });
 
   it("a new version asked for on the video page opens the storyboard; anything else stays and reloads", () => {
@@ -259,25 +262,137 @@ describe("the new video's cost (narrationCost, the same rule as D8)", () => {
   });
 });
 
+const TODAY = { used: 1, limit: 3 };
+
 describe("the storyboard after a change on the video: the note and the button", () => {
+  it("says how many videos are left today, and plainly when today's limit is reached", () => {
+    expect(videosTodayLine({ used: 0, limit: 3 })).toBe("It counts as 1 of your 3 videos today (3 left).");
+    expect(videosTodayLine({ used: 2, limit: 3 })).toBe("It counts as 1 of your 3 videos today (1 left).");
+    expect(videosTodayLine({ used: 3, limit: 3 })).toBe("You've reached today's limit of 3 videos, so the new video can be made tomorrow.");
+    expect(newVideoNote({ newScenes: [2], reusedScenes: [0, 1], characters: 99 }, { used: 5, limit: 3 })).toMatch(/so the new video can be made tomorrow\.$/);
+  });
+
   it("the button reads 'Approve & make new video' only when the project already has a video", () => {
     expect(approveLabel(true)).toBe("Approve & make new video");
     expect(approveLabel(false)).toBe("Approve & generate video");
   });
 
   it("names the scenes that get new narration, the characters, and that the others reuse their recording", () => {
-    expect(newVideoNote({ newScenes: [2], reusedScenes: [0, 1, 3, 4, 5], characters: 151 }, 3)).toBe(
-      "In your new video, scene 3 gets new narration (about 151 voice characters). The other 5 scenes reuse their recordings. It counts as 1 of your 3 videos today.",
+    expect(newVideoNote({ newScenes: [2], reusedScenes: [0, 1, 3, 4, 5], characters: 151 }, TODAY)).toBe(
+      "In your new video, scene 3 gets new narration (about 151 voice characters). The other 5 scenes reuse their recordings. It counts as 1 of your 3 videos today (2 left).",
     );
-    expect(newVideoNote({ newScenes: [1, 3], reusedScenes: [0, 2, 4, 5], characters: 1234 }, 3)).toBe(
-      "In your new video, scenes 2 and 4 get new narration (about 1,234 voice characters). The other 4 scenes reuse their recordings. It counts as 1 of your 3 videos today.",
+    expect(newVideoNote({ newScenes: [1, 3], reusedScenes: [0, 2, 4, 5], characters: 1234 }, TODAY)).toBe(
+      "In your new video, scenes 2 and 4 get new narration (about 1,234 voice characters). The other 4 scenes reuse their recordings. It counts as 1 of your 3 videos today (2 left).",
     );
-    expect(newVideoNote({ newScenes: [0, 1], reusedScenes: [2], characters: 90 }, 3)).toMatch(/The other scene reuses its recording\./);
-    expect(newVideoNote({ newScenes: [0, 1, 2], reusedScenes: [], characters: 400 }, 3)).toBe(
-      "Your new video records new narration for all 3 scenes (about 400 voice characters). It counts as 1 of your 3 videos today.",
+    expect(newVideoNote({ newScenes: [0, 1], reusedScenes: [2], characters: 90 }, TODAY)).toMatch(/The other scene reuses its recording\./);
+    expect(newVideoNote({ newScenes: [0, 1, 2], reusedScenes: [], characters: 400 }, TODAY)).toBe(
+      "Your new video records new narration for all 3 scenes (about 400 voice characters). It counts as 1 of your 3 videos today (2 left).",
     );
-    expect(newVideoNote({ newScenes: [], reusedScenes: [0, 1, 2], characters: 0 }, 3)).toBe(
-      "Your new video reuses the recorded narration of every scene: no voice characters needed. It counts as 1 of your 3 videos today.",
+    expect(newVideoNote({ newScenes: [], reusedScenes: [0, 1, 2], characters: 0 }, TODAY)).toBe(
+      "Your new video reuses the recorded narration of every scene: no voice characters needed. It counts as 1 of your 3 videos today (2 left).",
     );
+  });
+});
+
+// ---------- code review (F26) ----------
+
+/** A failed revise job made on V1 (retryable unless said otherwise). */
+function failedRevise(overrides: Partial<JobDocument> = {}): JobDocument {
+  const job = newPlanJob({ ownerId: OWNER, projectId: PROJECT, project: projectDoc(), now: NOW });
+  return { ...job, type: "revise", state: "failed", error: { code: "PROVIDER_BUSY", message: "Our AI is very busy right now.", retryable: true }, inputRef: { ...job.inputRef, planVersionId: V1 }, ...overrides } as JobDocument;
+}
+
+describe("a failed change shows (with Try again) only on the page where it was asked", () => {
+  const job = failedRevise();
+  const mine = { jobId: job._id.toHexString() };
+  const other = { jobId: new ObjectId().toHexString() };
+
+  it("the newest request of this page's stage must be that job (else nothing shows)", () => {
+    expect(failedChangeFor(projectDoc(), job, mine)).toEqual({ id: job._id.toHexString(), message: "Our AI is very busy right now.", canRetry: true });
+    expect(failedChangeFor(projectDoc({ state: "storyboard_ready" }), job, other)).toBeNull(); // asked on the video: not on the storyboard
+    expect(failedChangeFor(projectDoc(), job, undefined)).toBeNull(); // no request of this stage at all
+    expect(failedChangeFor(projectDoc(), { ...job, state: "needs_input" }, mine)).toBeNull();
+    expect(failedChangeFor(projectDoc(), null, mine)).toBeNull();
+  });
+
+  it("Try again follows the revise job's own rule, never the shared retry_job flag", () => {
+    expect(failedChangeFor(projectDoc(), { ...job, error: { code: "PROVIDER_REJECTED", message: "No.", retryable: false } } as JobDocument, mine)?.canRetry).toBe(false);
+    expect(failedChangeFor(projectDoc({ currentPlanVersionId: new ObjectId() }), job, mine)?.canRetry).toBe(false); // the storyboard changed since
+    expect(failedChangeFor(projectDoc({ planRequestCount: USAGE_LIMITS.planRequestsPerProject }), job, mine)?.canRetry).toBe(false); // 20 used
+    expect(failedChangeFor(projectDoc({ activeJobId: new ObjectId() }), job, mine)?.canRetry).toBe(false); // a job runs
+    expect(failedChangeFor(projectDoc({ state: "archived" }), job, mine)?.canRetry).toBe(false);
+    expect(failedChangeFor(projectDoc({ language: "hi" }), job, mine)?.canRetry).toBe(false);
+    expect(failedChangeFor(projectDoc({ state: "storyboard_ready" }), job, mine)?.canRetry).toBe(true);
+  });
+});
+
+describe("Undo back to the video's own version (D7)", () => {
+  const ready = { planVersionId: V1, status: "ready" as const };
+
+  it("restoredState: video_ready only for the approved version the ready video was made from", () => {
+    expect(restoredState({ versionId: V1, approved: true, video: ready })).toBe("video_ready");
+    expect(restoredState({ versionId: V1, approved: false, video: ready })).toBe("storyboard_ready");
+    expect(restoredState({ versionId: V1, approved: true, video: { planVersionId: new ObjectId(), status: "ready" } })).toBe("storyboard_ready");
+    expect(restoredState({ versionId: V1, approved: true, video: { planVersionId: V1, status: "rendering" as never } })).toBe("storyboard_ready");
+    expect(restoredState({ versionId: V1, approved: true, video: null })).toBe("storyboard_ready");
+  });
+
+  const V2 = new ObjectId("67330e019f1e4b2a7c0d2b09");
+  const afterChange = projectDoc({ state: "storyboard_ready", currentPlanVersionId: V2, approvedPlanVersionId: null });
+  const restore = (db: Db) => restorePlanVersion(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), planVersionId: V1.toHexString(), expectedStateVersion: 7, now: NOW });
+
+  it("Undo after a change asked on the video: the project is video_ready again with the same video, approval back", async () => {
+    const { db, calls } = fakeDb({
+      "projects.findOne": () => afterChange,
+      "planVersions.findOne": () => ({ _id: V1, plan: { voicePreset: "indian-english-female" } }),
+      "storyboardApprovals.findOne": () => ({ _id: new ObjectId(), planVersionId: V1 }),
+      "renders.findOne": () => ({ _id: RENDER, ...ready }),
+      "projects.findOneAndUpdate": (_f: unknown, update: { $set: Record<string, unknown> }) => ({ ...afterChange, ...update.$set }),
+    });
+    const out = await restore(db);
+    const [filter, update] = calls.find((c) => c.name === "projects.findOneAndUpdate")!.args as [Record<string, unknown>, { $set: Record<string, unknown> }];
+    expect(update.$set).toMatchObject({ state: "video_ready", currentPlanVersionId: V1, approvedPlanVersionId: V1 });
+    expect(update.$set).not.toHaveProperty("currentRenderId"); // the same video
+    expect(filter).toMatchObject({ activeJobId: null, currentRenderId: RENDER });
+    expect(out.state).toBe("video_ready");
+    expect((calls.find((c) => c.name === "renders.findOne")!.args[0] as Record<string, unknown>)).toEqual({ _id: RENDER, projectId: PROJECT, ownerId: OWNER });
+  });
+
+  it("back to a version without that video: storyboard_ready as before (no render read without an approval)", async () => {
+    const { db, calls } = fakeDb({
+      "projects.findOne": () => afterChange,
+      "planVersions.findOne": () => ({ _id: V1, plan: { voicePreset: "indian-english-female" } }),
+      "storyboardApprovals.findOne": () => null,
+      "projects.findOneAndUpdate": (_f: unknown, update: { $set: Record<string, unknown> }) => ({ ...afterChange, ...update.$set }),
+    });
+    expect((await restore(db)).state).toBe("storyboard_ready");
+    expect(calls.map((c) => c.name)).not.toContain("renders.findOne");
+  });
+
+  it("still refused in scheduled / publish_failed (until F30)", async () => {
+    for (const state of ["scheduled", "publish_failed"] as const) {
+      const { db } = fakeDb({ "projects.findOne": () => projectDoc({ state, currentPlanVersionId: V2 }), "planVersions.findOne": () => ({ _id: V1, plan: {} }) });
+      expect((await refusal(restore(db))).code).toBe("INVALID_STATE");
+    }
+  });
+});
+
+describe("the video page: 'changed' by the video's storyboard version, and the caption note only on a ready video", () => {
+  it("storyboardChangedSince: another version than the video's, or not video_ready", () => {
+    expect(storyboardChangedSince({ state: "video_ready", currentPlanVersionId: V1, renderPlanVersionId: V1 })).toBe(false);
+    expect(storyboardChangedSince({ state: "video_ready", currentPlanVersionId: new ObjectId(), renderPlanVersionId: V1 })).toBe(true);
+    expect(storyboardChangedSince({ state: "storyboard_ready", currentPlanVersionId: new ObjectId(), renderPlanVersionId: V1 })).toBe(true);
+    expect(storyboardChangedSince({ state: "storyboard_ready", currentPlanVersionId: V1, renderPlanVersionId: V1 })).toBe(true);
+  });
+
+  it("captionFailureOf: a failed fix on this video, only in video_ready; Try again needs the job itself to be retryable", () => {
+    const job = { _id: new ObjectId(), type: "caption", state: "failed", error: { code: "INTERNAL", message: "Oops.", retryable: true }, inputRef: { renderId: RENDER } } as unknown as JobDocument;
+    const base = { state: "video_ready" as const, job, renderId: RENDER, retryAllowed: true, archived: false };
+    expect(captionFailureOf(base)).toEqual({ id: job._id.toHexString(), message: "Oops.", canRetry: true });
+    expect(captionFailureOf({ ...base, state: "storyboard_ready" })).toBeNull(); // the kept video after a change
+    expect(captionFailureOf({ ...base, renderId: new ObjectId() })).toBeNull(); // made on another video
+    expect(captionFailureOf({ ...base, job: { ...job, state: "cancelled" } as JobDocument })).toBeNull();
+    expect(captionFailureOf({ ...base, job: { ...job, error: { code: "FIX_NOT_APPLICABLE", message: "x", retryable: false } } as JobDocument })?.canRetry).toBe(false); // retry_job set by another job
+    expect(captionFailureOf({ ...base, retryAllowed: false })?.canRetry).toBe(false);
   });
 });
