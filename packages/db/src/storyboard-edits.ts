@@ -2,7 +2,8 @@ import { type ClientSession, type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { cleanIdeaText } from "./idea-text";
 import { PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanStatsDoc, type PlanVersionDocument, type StoredPlan } from "./plan-versions";
-import { ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument, type VoiceGender } from "./projects";
+import { ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument, type ProjectState, type VoiceGender } from "./projects";
+import { RENDERS_COLLECTION, type RenderDocument } from "./renders";
 import { STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalDocument } from "./storyboard-approvals";
 
 // Changing the storyboard by hand (docs/API.md D3 narration edit, D4 voice switch, D7 undo/restore;
@@ -101,6 +102,15 @@ export function assertStoryboardEditable(project: ProjectDocument, expectedState
   if (!STORYBOARD_EDIT_STATES.includes(project.state) || !project.currentPlanVersionId) {
     throw new ProjectActionError("INVALID_STATE", "The storyboard can't be changed right now.", { state: project.state });
   }
+}
+
+/**
+ * D7: the project's state after restoring a version. `video_ready` only when that version is approved
+ * and the project's video (`currentRenderId`) is ready and was made from exactly that version;
+ * otherwise `storyboard_ready` (an older video, if any, stays kept).
+ */
+export function restoredState(input: { versionId: ObjectId; approved: boolean; video: Pick<RenderDocument, "planVersionId" | "status"> | null }): ProjectState {
+  return input.approved && input.video?.status === "ready" && input.video.planVersionId.equals(input.versionId) ? "video_ready" : "storyboard_ready";
 }
 
 async function loadOwnedProject(db: Db, ownerId: string, projectId: string, session: ClientSession): Promise<ProjectDocument> {
@@ -203,6 +213,10 @@ export async function saveUserEditVersion(
  * project becomes current again. No new version, nothing deleted. `approvedPlanVersionId` = that
  * version if it has an approval (the same exact plan), else null; state `storyboard_ready`; the
  * project's voice follows the restored plan's voice; +1 stateVersion.
+ * F26 (code review): back to the version the project's video was made from (approved, and the
+ * `currentRenderId` render is ready and made from exactly that version, e.g. Undo after a change
+ * asked on the video): state `video_ready`, so the video is "ready" again with its captions and
+ * changes (restoredState). Still refused in `scheduled` / `publish_failed` (assertStoryboardEditable).
  */
 export async function restorePlanVersion(
   db: Db,
@@ -227,10 +241,17 @@ export async function restorePlanVersion(
       }
       const approval = await db.collection<StoryboardApprovalDocument>(STORYBOARD_APPROVALS_COLLECTION).findOne({ planVersionId: target._id, ownerId: project.ownerId }, { session });
       const voiceGender = voiceGenderOfPreset(target.plan?.voicePreset) ?? project.voiceGender;
+      const video =
+        approval && project.currentRenderId
+          ? await db
+              .collection<RenderDocument>(RENDERS_COLLECTION)
+              .findOne({ _id: project.currentRenderId, projectId: project._id, ownerId: project.ownerId }, { session, projection: { planVersionId: 1, status: 1 } })
+          : null;
+      const state = restoredState({ versionId: target._id, approved: approval !== null, video });
       const updated = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOneAndUpdate(
-        { _id: project._id, stateVersion: project.stateVersion, activeJobId: null },
+        { _id: project._id, stateVersion: project.stateVersion, activeJobId: null, currentRenderId: project.currentRenderId },
         {
-          $set: { currentPlanVersionId: target._id, approvedPlanVersionId: approval ? target._id : null, state: "storyboard_ready", voiceGender, updatedAt: now },
+          $set: { currentPlanVersionId: target._id, approvedPlanVersionId: approval ? target._id : null, state, voiceGender, updatedAt: now },
           $inc: { stateVersion: 1 },
         },
         { session, returnDocument: "after" },

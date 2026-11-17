@@ -518,6 +518,34 @@ export function canRetryReviseJob(job: JobDocument): boolean {
 }
 
 /**
+ * The newest change request's failed job, for the page of its stage (F26 code review): its message,
+ * and whether Try again is offered. Null unless `job` (the project's newest revise job) failed AND is
+ * the job of `newestRevision` (the newest request of THIS page's stage, D6), so a failed change asked
+ * on the video never shows on the storyboard and the other way round. Try again follows the same rule
+ * as `allowedActions` for a revise job (and E2): a retryable failure, no job running, not archived,
+ * the storyboard still the version it was asked on, the language on, under the 20 AI requests. It
+ * never relies on the shared `retry_job` flag (which a caption or video job can also set).
+ */
+export function failedChangeFor(
+  project: Pick<ProjectDocument, "state" | "activeJobId" | "language" | "planRequestCount" | "currentPlanVersionId">,
+  job: JobDocument | null | undefined,
+  newestRevision: { jobId: string } | undefined,
+): { id: string; message: string; canRetry: boolean } | null {
+  if (!job || job.type !== "revise" || job.state !== "failed" || !job.error) return null;
+  if (newestRevision?.jobId !== job._id.toHexString()) return null;
+  const canRetry =
+    canRetryReviseJob(job) &&
+    project.state !== "archived" &&
+    project.activeJobId === null &&
+    STORYBOARD_EDIT_STATES.includes(project.state) &&
+    isLanguageEnabled(project.language) &&
+    project.planRequestCount < USAGE_LIMITS.planRequestsPerProject &&
+    project.currentPlanVersionId !== null &&
+    job.inputRef.planVersionId?.equals(project.currentPlanVersionId) === true;
+  return { id: job._id.toHexString(), message: job.error.message, canRetry };
+}
+
+/**
  * E2 "Try again" on a failed change request (API.md E2), ONE transaction: no job running, the
  * storyboard is still the version the request was made on (else the request is out of date: ask
  * again), under the 20 AI requests; the same job back to `queued` with attempt + 1, the revision

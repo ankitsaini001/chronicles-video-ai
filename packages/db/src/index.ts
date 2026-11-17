@@ -356,6 +356,7 @@ export {
 export {
   canRetryReviseJob,
   completeReviseJob,
+  failedChangeFor,
   failReviseJob,
   listRevisions,
   loadReviseAttempt,
@@ -385,6 +386,7 @@ export {
   NARRATION_MAX_CHARS,
   NarrationEditBodySchema,
   ObjectIdString,
+  restoredState,
   restorePlanVersion,
   RestoreBodySchema,
   saveUserEditVersion,
