@@ -113,6 +113,7 @@ Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision
 
 ## Follow-ups to re-check in manual testing
 - **Narration and pictures in sync (founder, 2026-11-16, after the first real F23 video):** "the explanation and the picturization somewhere might not be in sync, or some visualization part is missing." Known part: the test storyboard (2026-11-14) predates the planner's hero picks (F22b), so heroes came from single spoken words (a map pin for "every single direction", a steam picture for "nitrogen and oxygen"). In the manual testing phase, make a new storyboard on the same topic and check scene by scene; fix then if it still shows. Video and frame sheet: `runs/f23-work/real-video/`.
+- **A failed second video hides the kept one (F26 code review, 2026-11-17):** after "Approve & make new video", if the new video fails (`generate_failed`), the video page shows only the failure screen; the older video is still the project's video but can't be played or downloaded from there. Decide in manual testing whether the failure screen should also show the kept video (not built).
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.
