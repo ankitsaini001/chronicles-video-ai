@@ -1,4 +1,4 @@
-import { displayStateOf, getCurrentPlanVersion, getDb, listRevisions, loadPlanVersionResource, readDbConfig, STORYBOARD_EDIT_STATES, USAGE_LIMITS } from "@bytereel/db";
+import { displayStateOf, failedChangeFor, getCurrentPlanVersion, getDb, listRevisions, loadPlanVersionResource, readDbConfig, readUsageCount, STORYBOARD_EDIT_STATES, USAGE_LIMITS } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -45,11 +45,12 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
   const current = await getCurrentPlanVersion(db, project);
   if (!current) redirect(`/projects/${projectId}`);
   const [version, history] = await Promise.all([loadPlanVersionResource(db, project, current), listRevisions(db, project, { limit: 20, cursor: null, stage: "storyboard" })]);
-  const latestChange = loaded.latestReviseJob;
-  const failedChange = latestChange?.state === "failed" && latestChange.error ? { id: latestChange._id.toHexString(), message: latestChange.error.message } : null;
+  // The newest change request failed, and it was asked HERE (not on the video page): its message and
+  // Try again (by the revise job's own rule, not the shared retry_job flag).
+  const failedChange = failedChangeFor(project, loaded.latestReviseJob, history.items[0]);
   const resource = toProjectResourceOf(loaded);
   const approvable = project.currentRenderId !== null && resource.allowedActions.includes("approve_storyboard") && version.valid;
-  const cost = approvable ? await newVideoCost(db, project, current.plan) : null;
+  const [cost, videosToday] = approvable ? await Promise.all([newVideoCost(db, project, current.plan), readUsageCount(db, user.id, "videos", user.timezone)]) : [null, 0];
 
   return (
     <div className="mx-auto flex w-full flex-col pb-28">
@@ -66,7 +67,7 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
         failedChange={failedChange}
         requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
         samplePresets={[...availableSamples()]}
-        newVideoNote={cost ? newVideoNote(cost, USAGE_LIMITS.videosPerDay) : null}
+        newVideoNote={cost ? newVideoNote(cost, { used: videosToday, limit: USAGE_LIMITS.videosPerDay }) : null}
       />
     </div>
   );

@@ -35,8 +35,8 @@ export type StoryboardScreenProps = {
   version: PlanVersionResource;
   /** Change requests on the storyboard, oldest first (D6). */
   revisions: RevisionResource[];
-  /** The newest change request's job, when it failed (for its message and Try again). */
-  failedChange: { id: string; message: string } | null;
+  /** The newest storyboard change request's job, when it failed (its message; Try again when `canRetry`). */
+  failedChange: { id: string; message: string; canRetry: boolean } | null;
   /** The project used all its 20 AI requests. */
   requestsUsedUp: boolean;
   /** Voices with a recorded ▶ sample (F13). */
@@ -339,7 +339,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             activeJob={project.activeJob}
             failedJob={failedChange}
             canRequest={project.allowedActions.includes("request_revision")}
-            canRetry={project.allowedActions.includes("retry_job")}
+            canRetry={failedChange?.canRetry === true}
             requestsUsedUp={requestsUsedUp}
             unavailableNote={languageOn ? null : `AI changes aren't available for ${LANGUAGE_WORDS[language]} videos right now. You can still edit the narration yourself.`}
             disabled={busy || editing !== null}

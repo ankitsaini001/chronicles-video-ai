@@ -19,10 +19,17 @@ function scenesWord(indexes: readonly number[]): string {
   return `scenes ${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`;
 }
 
-/** The note on the storyboard page before a new video is approved. */
-export function newVideoNote(cost: NarrationCost, videosPerDay: number): string {
+/** What the new video does to today's videos: "It counts as 1 of your 3 videos today (2 left)." (D8 enforces it.) */
+export function videosTodayLine(today: { used: number; limit: number }): string {
+  const left = Math.max(0, today.limit - today.used);
+  if (left === 0) return `You've reached today's limit of ${today.limit} videos, so the new video can be made tomorrow.`;
+  return `It counts as 1 of your ${today.limit} videos today (${left} left).`;
+}
+
+/** The note on the storyboard page before a new video is approved (`today`: the creator's videos today). */
+export function newVideoNote(cost: NarrationCost, today: { used: number; limit: number }): string {
   const total = cost.newScenes.length + cost.reusedScenes.length;
-  const counts = `It counts as 1 of your ${videosPerDay} videos today.`;
+  const counts = videosTodayLine(today);
   if (cost.newScenes.length === 0) return `Your new video reuses the recorded narration of every scene: no voice characters needed. ${counts}`;
   const characters = `about ${number(cost.characters)} voice characters`;
   if (cost.reusedScenes.length === 0) return `Your new video records new narration for ${total === 1 ? "its scene" : `all ${total} scenes`} (${characters}). ${counts}`;

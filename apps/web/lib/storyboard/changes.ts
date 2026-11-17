@@ -32,11 +32,6 @@ export function revisionBody(input: { stage: ChangeStage; scope: string; message
   };
 }
 
-/** D6 history of this place: only its own stage. */
-export function historyUrl(projectId: string, stage: ChangeStage): string {
-  return `/api/v1/projects/${projectId}/revisions?stage=${stage}`;
-}
-
 /** The job (E1) as the panel reads it when the change ended. */
 export type EndedChange = { state: string; error: { message: string } | null; needsInput: { message: string } | null };
 
