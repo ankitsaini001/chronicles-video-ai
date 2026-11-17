@@ -155,6 +155,31 @@ export async function voiceStillNeeded(
   return { items, characters: items.reduce((sum, i) => sum + i.characters, 0) };
 }
 
+/** F26: what a new video of a storyboard would record, scene by scene (the note on the storyboard page). */
+export type NarrationCost = {
+  /** Scene indexes (from 0) whose narration isn't recorded yet: the new video records it. */
+  newScenes: number[];
+  /** Scene indexes that reuse a recording this owner already has (no voice characters). */
+  reusedScenes: number[];
+  /** About how many voice characters the new narration uses (one per distinct recording, as D8 counts). */
+  characters: number;
+};
+
+/**
+ * F26: the cost of a new video, from the SAME rule D8/E2 check the voice limits with
+ * (voiceStillNeeded: the owner's recordings by cache key; two scenes with the same words and voice
+ * share one recording). `scenes` = the VoiceEstimator's list, one per scene, in scene order. Reads
+ * the database only: no provider call.
+ */
+export async function narrationCost(db: Db, input: { ownerId: ObjectId; scenes: readonly VoiceScene[] }, session?: ClientSession): Promise<NarrationCost> {
+  const needed = await voiceStillNeeded(db, { ownerId: input.ownerId, scenes: input.scenes }, session);
+  const missing = new Set(needed.items.map((i) => i.cacheKey));
+  const newScenes: number[] = [];
+  const reusedScenes: number[] = [];
+  input.scenes.forEach((scene, index) => (missing.has(scene.cacheKey) ? newScenes : reusedScenes).push(index));
+  return { newScenes, reusedScenes, characters: needed.characters };
+}
+
 /**
  * Pure: which monthly voice limit would `needed` more characters break? The creator's own limit
  * (3,000) is checked first, then the app-wide guard (9,000, APP_VOICE_CHARACTERS_PER_MONTH).

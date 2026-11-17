@@ -25,6 +25,9 @@ import { USAGE_LIMITS } from "./usage";
 // so a failed change leaves the storyboard as it was. A new version has no approval.
 // An answer that changes nothing ends as `rejected` (job `needs_input`) with a short reply asking
 // the creator to say exactly what to change: no new version.
+// F26: the same chat on the video page (`stage: video`, only on a ready video). It runs the same
+// job; on success the project goes to `storyboard_ready` with `currentRenderId` kept (the older
+// video stays until the new one is ready), and the creator approves the new version on the storyboard.
 
 export const REVISIONS_COLLECTION = "revisions";
 export const REVISION_SCHEMA_VERSION = 1;
@@ -144,6 +147,9 @@ export function revisionInputHash(input: { basePlanVersionId: ObjectId; scope: R
 
 export const reviseJobKey = (revisionId: ObjectId) => `rev:${revisionId.toHexString()}`;
 
+/** D5 `stage: video` when the storyboard already has changes the video doesn't show (F26). */
+export const VIDEO_STAGE_NOT_READY = "Your storyboard has changes that aren't in the video yet. Ask for changes on the storyboard.";
+
 const QUOTA = (used: number) =>
   new ProjectActionError("QUOTA_EXCEEDED", REVISE_MESSAGES.QUOTA_EXCEEDED, {
     quota: "plan_requests_per_project",
@@ -189,7 +195,11 @@ export async function requestRevision(
       if (!project.currentPlanVersionId!.equals(new ObjectId(body.basePlanVersionId))) {
         throw new ProjectActionError("STALE_VERSION", "This storyboard changed in another tab, refresh.", { expectedStateVersion: body.expectedStateVersion, currentStateVersion: project.stateVersion });
       }
-      if (body.stage === "video" && !project.currentRenderId) throw new ProjectActionError("INVALID_STATE", "There is no video to change yet.", { state: project.state });
+      // F26: a change "on the video" is asked while watching it: only on a ready video. After a
+      // storyboard change (storyboard_ready with the older video kept) it is asked on the storyboard.
+      if (body.stage === "video" && (!project.currentRenderId || project.state !== "video_ready")) {
+        throw new ProjectActionError("INVALID_STATE", project.currentRenderId ? VIDEO_STAGE_NOT_READY : "There is no video to change yet.", { state: project.state });
+      }
       const base = await db.collection<PlanVersionDocument>(PLAN_VERSIONS_COLLECTION).findOne({ _id: project.currentPlanVersionId!, projectId: project._id }, { session, projection: { "plan.scenes.id": 1 } });
       if (!base) throw new Error(`Project ${project._id.toHexString()} points to a missing plan version.`);
       const sceneIndex = body.sceneId ? base.plan.scenes.findIndex((s) => s.id === body.sceneId) : -1;
