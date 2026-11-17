@@ -5,15 +5,19 @@ import type { JobResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/components/ui";
+import { afterChange, changeEndedMessage, changePlaceholder, revisionBody, runningNote, wholeLabel, type ChangeStage, type EndedChange } from "@/lib/storyboard/changes";
 import { sceneNumber } from "@/lib/storyboard/view";
 import { apiSend, CLIENT_MESSAGES, newIdempotencyKey } from "./client";
 
-// "Ask for changes" (F18; Stitch "Step 2 Storyboard", right column): the change history as chat
-// bubbles (D6), a scope choice ("Whole storyboard" or one scene) and a box for the request
-// (3–500 characters). Sending (D5) starts a background job; while it runs the panel polls C6 every
-// 2 s (every 15 s in a hidden tab, stops when it ends or the page is left) and shows the job's
-// progress; when it ends the page re-reads the storyboard (new version, "Changed" tags). A failed
-// change shows its message and Try again (E2). Each change uses 1 of the project's 20 AI requests.
+// "Ask for changes" (F18; Stitch "Step 2 Storyboard", right column; F26: also the tab on the video
+// page): the change history as chat bubbles (D6, only this place's `stage`), a scope choice ("Whole
+// storyboard" / "Whole video" or one scene) and a box for the request (3–500 characters). Sending
+// (D5 with this `stage`) starts a background job; while it runs the panel polls C6 every 2 s (every
+// 15 s in a hidden tab, stops when it ends or the page is left) and shows the job's progress. When
+// it ends: on the storyboard the page re-reads it (new version, "Changed" tags); on the video page a
+// new version opens the storyboard (to approve it), and an unclear or failed request stays here with
+// the reply (lib/storyboard/changes.ts). A failed change shows its message and Try again (E2). Each
+// change uses 1 of the project's 20 AI requests.
 
 const MIN = 3;
 const MAX = 500;
@@ -22,10 +26,13 @@ const HIDDEN_POLL_MS = 15000;
 const MAX_ERROR_BACKOFF_MS = 10000;
 
 type ChangesPanelProps = {
+  /** Where the panel is: the storyboard (F18) or the video page (F26). Sent as D5 `stage`. */
+  stage: ChangeStage;
   projectId: string;
   baseVersionId: string;
   stateVersion: number;
   scenes: { id: string }[];
+  /** This stage's change requests, oldest first (D6). */
   revisions: RevisionResource[];
   activeJob: JobResource | null;
   /** The newest change request's job, when it failed. */
@@ -41,7 +48,7 @@ type ChangesPanelProps = {
 };
 
 export function ChangesPanel(props: ChangesPanelProps) {
-  const { projectId, scenes, revisions, activeJob, failedJob } = props;
+  const { stage, projectId, scenes, revisions, activeJob, failedJob } = props;
   const router = useRouter();
   const id = useId();
   const [scope, setScope] = useState("project");
@@ -86,17 +93,11 @@ export function ChangesPanel(props: ChangesPanelProps) {
       failures = 0;
       if (answer.json.pollAfterMs == null || !answer.json.activeJob) {
         stopped = true;
-        // Say how it ended (the status line lives outside the part that reloads), then reload.
-        const job = runningJobId ? await apiSend<{ state: string; error: { message: string } | null; needsInput: { message: string } | null }>("GET", `/api/v1/jobs/${runningJobId}`) : null;
-        if (job?.ok) {
-          announce(
-            job.json.state === "succeeded"
-              ? "Your storyboard is updated."
-              : job.json.state === "needs_input"
-                ? (job.json.needsInput?.message ?? "Nothing was changed.")
-                : (job.json.error?.message ?? "The change couldn't be made."),
-          );
-        }
+        // Say how it ended (the status line lives outside the part that reloads), then reload or
+        // (a new version asked for on the video page) open the storyboard.
+        const job = runningJobId ? await apiSend<EndedChange>("GET", `/api/v1/jobs/${runningJobId}`) : null;
+        if (job?.ok) announce(changeEndedMessage(stage, job.json));
+        if (afterChange(stage, job?.ok ? job.json : null) === "open_storyboard") return router.push(`/projects/${projectId}/storyboard`);
         return router.refresh();
       }
       setProgress(answer.json.activeJob.progress.message);
@@ -112,7 +113,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [running, runningJobId, projectId, router, announce]);
+  }, [running, runningJobId, projectId, router, announce, stage]);
 
   async function send() {
     const message = cleanIdeaText(text);
@@ -124,7 +125,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
     const answer = await apiSend(
       "POST",
       `/api/v1/projects/${projectId}/revisions`,
-      { stage: "storyboard", scope: scope === "project" ? "project" : "scene", ...(scope === "project" ? {} : { sceneId: scope }), message, basePlanVersionId: props.baseVersionId, expectedStateVersion: props.stateVersion },
+      revisionBody({ stage, scope, message, baseVersionId: props.baseVersionId, stateVersion: props.stateVersion }),
       { "Idempotency-Key": sendKey.current },
     );
     if (!answer.ok) {
@@ -154,13 +155,19 @@ export function ChangesPanel(props: ChangesPanelProps) {
 
   const locked = busy || running || props.disabled || !props.canRequest;
   const latest = revisions[revisions.length - 1];
+  const onVideo = stage === "video";
 
   return (
-    <section aria-labelledby={`${id}-title`} className="flex flex-col rounded-2xl border border-line bg-surface p-4 shadow-card sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-amber/10 pb-4">
-        <h2 id={`${id}-title`} className="font-display text-lg font-bold text-text">
+    <section
+      aria-labelledby={`${id}-title`}
+      className={cn("flex flex-col", onVideo ? "p-6" : "rounded-2xl border border-line bg-surface p-4 shadow-card sm:p-5")}
+    >
+      <div className={cn("mb-4 flex flex-wrap items-center justify-between gap-3", !onVideo && "border-b border-amber/10 pb-4")}>
+        {/* On the video page the tab names the panel; the heading is kept for screen readers. */}
+        <h2 id={`${id}-title`} className={onVideo ? "sr-only" : "font-display text-lg font-bold text-text"}>
           Ask for changes
         </h2>
+        {onVideo && <p className="text-sm text-muted">Say what to change. You&apos;ll review the new storyboard before a new video is made.</p>}
         <label className="sr-only" htmlFor={`${id}-scope`}>
           What to change
         </label>
@@ -174,7 +181,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
           disabled={locked}
           className="min-h-9 max-w-full cursor-pointer rounded-full border border-line bg-surface-2 px-3 py-1 text-xs font-medium text-text hover:border-amber/40 disabled:opacity-50"
         >
-          <option value="project">Whole storyboard</option>
+          <option value="project">{wholeLabel(stage)}</option>
           {scenes.map((s, i) => (
             <option key={s.id} value={s.id}>
               {sceneNumber(i)}
@@ -221,7 +228,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
           <div role="progressbar" aria-label="Change progress" aria-valuetext={progress ?? "Working"} className="h-1.5 w-full overflow-hidden rounded-full bg-progress-bg">
             <div className="h-full w-2/5 rounded-full bg-progress motion-safe:animate-pulse" />
           </div>
-          <p className="text-xs text-muted">This usually takes about a minute. You can leave this page; the change keeps going.</p>
+          <p className="text-xs text-muted">{runningNote(stage)}</p>
         </div>
       )}
 
@@ -268,7 +275,7 @@ export function ChangesPanel(props: ChangesPanelProps) {
                   if (!locked) void send();
                 }
               }}
-              placeholder="e.g. make it shorter, or scene 3: show this as a comparison"
+              placeholder={changePlaceholder(stage)}
               aria-describedby={`${id}-count`}
               className="block min-h-11 w-full resize-none bg-transparent py-1.5 text-sm leading-relaxed text-text outline-none placeholder:text-muted disabled:opacity-60"
             />

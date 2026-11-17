@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 import { sceneNotes, sceneNumber, type SceneLike } from "@/lib/storyboard/view";
+import { approveLabel } from "@/lib/video/new-video";
 import { ChangesPanel } from "./ChangesPanel";
 import { apiSend, CLIENT_MESSAGES, newIdempotencyKey } from "./client";
 import { NarrationEditor } from "./NarrationEditor";
@@ -25,6 +26,9 @@ import { VoiceMenu } from "./VoiceMenu";
 // (`problem`) and where keyboard focus goes back to (`focusTarget`: the scene's Edit button after
 // a save or cancel, the Version button after an undo or restore, the voice chip after a switch).
 // Every change sends the stateVersion this page was loaded with: another tab's change → "refresh".
+// F26: when the project already has a video and this version isn't approved, the page notes what
+// the new video costs (`newVideoNote`, worked out on the server), the button reads "Approve & make
+// new video", and "Back to video" shows the current (older) video.
 
 export type StoryboardScreenProps = {
   project: ProjectResource;
@@ -37,6 +41,8 @@ export type StoryboardScreenProps = {
   requestsUsedUp: boolean;
   /** Voices with a recorded ▶ sample (F13). */
   samplePresets: VoicePresetId[];
+  /** F26: what a new video of this version would record (null when there is no video yet or nothing to approve). */
+  newVideoNote?: string | null;
 };
 
 const LANGUAGE_NAMES: Record<VoiceLanguage, { text: string; lang?: string; english?: string }> = {
@@ -85,7 +91,7 @@ function focusMarked(target: string): void {
   (find(target) ?? find("version"))?.focus();
 }
 
-function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
+function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, newVideoNote, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
   const router = useRouter();
   const language = project.language as VoiceLanguage;
   const lang = VOICE_TEXT_LANG[language];
@@ -198,6 +204,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
   const needsChange = project.lastError?.code === "NEEDS_INPUT" ? project.lastError.message : null;
   // F23 (founder decision 5): an older video stays the project's video until a new one is made.
   const hasOlderVideo = project.currentRenderId !== null && project.state === "storyboard_ready";
+  const hasVideo = project.currentRenderId !== null;
 
   return (
     <div className="flex flex-col">
@@ -254,7 +261,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
         </div>
       )}
 
-      {(needsChange || hasOlderVideo) && (
+      {(needsChange || hasOlderVideo || newVideoNote) && (
         <div className="mt-4 flex flex-col gap-2">
           {needsChange && (
             <Note tone="problem">
@@ -262,6 +269,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             </Note>
           )}
           {hasOlderVideo && <Note tone="warning">Your earlier video (made from an older version) is kept until you make a new one.</Note>}
+          {newVideoNote && <Note tone="warning">{newVideoNote}</Note>}
         </div>
       )}
 
@@ -322,6 +330,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
       <aside className="min-w-0 lg:col-span-4">
         <div className="lg:sticky lg:top-6">
           <ChangesPanel
+            stage="storyboard"
             projectId={project.id}
             baseVersionId={version.id}
             stateVersion={project.stateVersion}
@@ -368,8 +377,14 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
               {!version.valid && <p className="text-xs text-danger">Fix the scenes marked in red first.</p>}
               {version.valid && changeRunning && <p className="text-xs text-muted">Wait for your change to finish.</p>}
+              {/* F26: the video the project already has (an older version) stays one click away. */}
+              {hasVideo && (
+                <Button href={`/projects/${project.id}/video`} variant="secondary" className="whitespace-nowrap">
+                  Back to video
+                </Button>
+              )}
               <Button type="button" onClick={() => void approve()} disabled={!canApprove} className="whitespace-nowrap">
-                {approving ? "Starting…" : "Approve & generate video"}
+                {approving ? "Starting…" : approveLabel(hasVideo)}
               </Button>
             </div>
           )}

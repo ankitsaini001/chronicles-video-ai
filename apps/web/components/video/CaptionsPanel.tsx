@@ -23,6 +23,9 @@ import type { CaptionPhrase, RenderDetailResource } from "@/lib/video/captions";
 //   on the row. Then the page shows the progress (Updating captions → Rendering).
 // - After a failed caption fix: a note, with Try again (E2) only when trying again can help; a fix
 //   that can't be applied asks to fix the captions again here. A cancelled fix shows no note.
+// F26: the tab bar (Captions | Ask for changes) belongs to ReviewVideoScreen; this is the Captions
+// tab's content. While a change request runs, the rows are read-only with a plain note (one job at a
+// time; the server refuses a fix then with 409 JOB_ALREADY_RUNNING).
 
 export type LastCaptionJob = { id: string; message: string; canRetry: boolean };
 
@@ -39,6 +42,8 @@ export type CaptionsPanelProps = {
   showingOtherVersion: boolean;
   lastJob: LastCaptionJob | null;
   onSeek: (seconds: number) => void;
+  /** F26: why fixes can't be made right now (a change request is running), shown above the rows. */
+  waitNote?: string | null;
 };
 
 const keyOf = (p: Pick<CaptionPhrase, "sceneId" | "phraseIndex">) => `${p.sceneId}#${p.phraseIndex}`;
@@ -133,12 +138,6 @@ export function CaptionsPanel(props: CaptionsPanelProps) {
   }
 
   return (
-    <section aria-labelledby="captions-heading" className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
-      <div className="flex gap-6 border-b border-line bg-surface-2 px-6 pt-4">
-        <h2 id="captions-heading" className="border-b-2 border-amber pb-3 text-sm font-medium text-text">
-          Captions
-        </h2>
-      </div>
       <div className="flex flex-col gap-5 p-6">
         <p className="text-sm text-muted">
           Fix a word in the captions. The narration audio stays the same.
@@ -161,6 +160,12 @@ export function CaptionsPanel(props: CaptionsPanelProps) {
               </button>
             )}
           </div>
+        )}
+
+        {props.waitNote && (
+          <p role="status" className="rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-muted">
+            {props.waitNote}
+          </p>
         )}
 
         {props.showingOtherVersion && <p className="text-xs text-muted">These are the captions of your latest video (version {props.renderNumber}).</p>}
@@ -252,6 +257,5 @@ export function CaptionsPanel(props: CaptionsPanelProps) {
           </div>
         )}
       </div>
-    </section>
   );
 }

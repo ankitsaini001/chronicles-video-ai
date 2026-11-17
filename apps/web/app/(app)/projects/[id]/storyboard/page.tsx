@@ -7,6 +7,8 @@ import { StoryboardScreen } from "@/components/storyboard/StoryboardScreen";
 import { requireUser } from "@/lib/auth/session";
 import { toProjectResourceOf } from "@/lib/plan/api";
 import { loadProjectWithJobs } from "@/lib/plan/jobs";
+import { newVideoCost } from "@/lib/video/narration-cost";
+import { newVideoNote } from "@/lib/video/new-video";
 import { availableSamples } from "@/lib/voices";
 
 // ② Review storyboard (F16; ARCHITECTURE §11, PRD §6.2, Stitch "Step 2 Storyboard").
@@ -18,6 +20,10 @@ import { availableSamples } from "@/lib/voices";
 // F23 "Edit storyboard" from the video page). Any other project (idea, "Writing…", a video being
 // made) goes back to /projects/[id], which shows its step. An archived project (F21) still opens
 // here from a saved link, read-only (allowedActions is empty, so nothing can be edited or approved).
+// F26: when the project already has a video (it is kept after a change) and this version can be
+// approved, the page works out what the new video would record (lib/video/narration-cost.ts: the
+// same rule D8 checks the voice limits with; database only, no voice call) for the note above the
+// scenes, and the stepper's "3 Video" opens that video.
 
 export const metadata: Metadata = { title: "Storyboard" };
 
@@ -33,13 +39,17 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
   const projectId = project._id.toHexString();
   const shown = displayStateOf(project);
   if (!STORYBOARD_EDIT_STATES.includes(shown)) redirect(`/projects/${projectId}`);
-  // F23: a failed or ready video keeps its page one click away (the stepper's "3 Video").
-  const videoHref = shown === "generate_failed" || shown === "video_ready" ? `/projects/${projectId}/video` : undefined;
+  // F23: a failed or ready video keeps its page one click away (the stepper's "3 Video"); F26: so does
+  // the older video after a change.
+  const videoHref = shown === "generate_failed" || shown === "video_ready" || project.currentRenderId ? `/projects/${projectId}/video` : undefined;
   const current = await getCurrentPlanVersion(db, project);
   if (!current) redirect(`/projects/${projectId}`);
   const [version, history] = await Promise.all([loadPlanVersionResource(db, project, current), listRevisions(db, project, { limit: 20, cursor: null, stage: "storyboard" })]);
   const latestChange = loaded.latestReviseJob;
   const failedChange = latestChange?.state === "failed" && latestChange.error ? { id: latestChange._id.toHexString(), message: latestChange.error.message } : null;
+  const resource = toProjectResourceOf(loaded);
+  const approvable = project.currentRenderId !== null && resource.allowedActions.includes("approve_storyboard") && version.valid;
+  const cost = approvable ? await newVideoCost(db, project, current.plan) : null;
 
   return (
     <div className="mx-auto flex w-full flex-col pb-28">
@@ -50,12 +60,13 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
         <ProjectStepper current="storyboard" hrefs={{ storyboard: `/projects/${projectId}/storyboard`, ...(videoHref ? { video: videoHref } : {}) }} />
       </div>
       <StoryboardScreen
-        project={toProjectResourceOf(loaded)}
+        project={resource}
         version={version}
         revisions={history.items.reverse()}
         failedChange={failedChange}
         requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
         samplePresets={[...availableSamples()]}
+        newVideoNote={cost ? newVideoNote(cost, USAGE_LIMITS.videosPerDay) : null}
       />
     </div>
   );

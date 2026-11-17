@@ -1,4 +1,19 @@
-import { canRetryCaptionJob, currentStepOf, displayStateOf, findProjectRender, getDb, readDbConfig, toJobResource, toRenderSummary } from "@bytereel/db";
+import {
+  canRetryCaptionJob,
+  canRetryReviseJob,
+  currentStepOf,
+  displayStateOf,
+  findProjectRender,
+  getCurrentPlanVersion,
+  getDb,
+  isLanguageEnabled,
+  LANGUAGE_NAMES,
+  listRevisions,
+  readDbConfig,
+  toJobResource,
+  toRenderSummary,
+  USAGE_LIMITS,
+} from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -22,6 +37,12 @@ import { videoMediaDeps } from "@/lib/video/media";
 // screen shows its two steps (Updating captions → Rendering). A failed or cancelled fix leaves the
 // project `video_ready`; after a FAILED one the review screen shows a note (Try again only when
 // trying again can help). A cancelled fix shows no note.
+// F26: the ready video also has the "Ask for changes" tab (D5/D6 `stage: video`), offered while
+// `request_revision` is allowed (no job running, under the 20 AI requests). While a change runs the
+// project stays `video_ready` (only `activeJobId` is set): the video plays and downloads, the
+// Captions tab waits. After a change the project is `storyboard_ready` with its video kept: this
+// page still shows that video ("Back to video" from the storyboard), read-only, with a note to
+// approve the new storyboard there.
 
 export const metadata: Metadata = { title: "Your video" };
 
@@ -36,7 +57,9 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
   const { project } = loaded;
   const projectId = project._id.toHexString();
   const state = displayStateOf(project);
-  if (currentStepOf(state) !== "video" || (state !== "generating" && state !== "generate_failed" && state !== "video_ready")) redirect(`/projects/${projectId}`);
+  // F26: the older video after a change (storyboard_ready, the video kept) opens here too.
+  const storyboardChanged = state === "storyboard_ready" && project.currentRenderId !== null;
+  if (!storyboardChanged && (currentStepOf(state) !== "video" || (state !== "generating" && state !== "generate_failed" && state !== "video_ready"))) redirect(`/projects/${projectId}`);
   const resource = toProjectResourceOf(loaded);
   const archived = project.state === "archived";
 
@@ -52,7 +75,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
     </div>
   );
 
-  if (state === "video_ready") {
+  if (state === "video_ready" || storyboardChanged) {
     // F24: the project's video. Its thumbnail and MP4 links (15 minutes, private) are made only after
     // the owner check above; a link that couldn't be made is fetched again by the screen.
     const render = await findProjectRender(db, project, "current");
@@ -62,6 +85,18 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
       media.presign(render.thumbnailKey).then((link) => link.url, () => null),
       media.presign(render.mp4Key).then((link) => link.url, () => null),
     ]);
+    // F26: the video-stage change requests (D6) and the base storyboard version they are made on.
+    const [current, history] = await Promise.all([getCurrentPlanVersion(db, project), listRevisions(db, project, { limit: 20, cursor: null, stage: "video" })]);
+    if (!current) throw new Error("This project's storyboard could not be found.");
+    // The newest change request failed: its message (and Try again) shows under it, when it was asked here.
+    const reviseJob = loaded.latestReviseJob;
+    const failedChange =
+      reviseJob?.state === "failed" && reviseJob.error && history.items[0]?.jobId === reviseJob._id.toHexString()
+        ? { id: reviseJob._id.toHexString(), message: reviseJob.error.message, canRetry: canRetryReviseJob(reviseJob) }
+        : null;
+    const activeJob = resource.activeJob;
+    const changeRunning = activeJob?.type === "revise";
+    const languageOn = isLanguageEnabled(project.language);
     // The last caption fix made on THIS video, when it FAILED (a fix the creator cancelled shows no note).
     const captionJob = loaded.latestCaptionJob;
     const lastCaptionJob =
@@ -83,10 +118,35 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
         stateVersion={project.stateVersion}
         canEditCaptions={resource.allowedActions.includes("edit_captions") && !archived}
         lastCaptionJob={lastCaptionJob}
+        storyboardChanged={storyboardChanged}
+        captionsNote={
+          changeRunning
+            ? "Caption fixes wait until your change request is finished."
+            : storyboardChanged
+              ? "Your storyboard has changes that aren't in this video yet, so its captions can't be fixed now."
+              : null
+        }
+        changes={{
+          baseVersionId: current._id.toHexString(),
+          scenes: current.plan.scenes.map((scene) => ({ id: scene.id })),
+          revisions: history.items.reverse(),
+          activeJob: changeRunning ? activeJob : null,
+          failedJob: failedChange ? { id: failedChange.id, message: failedChange.message } : null,
+          canRequest: state === "video_ready" && resource.allowedActions.includes("request_revision") && !archived,
+          canRetry: state === "video_ready" && failedChange !== null && failedChange.canRetry && resource.allowedActions.includes("retry_job") && !archived,
+          requestsUsedUp: project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject,
+          unavailableNote: !languageOn
+            ? `AI changes aren't available for ${LANGUAGE_NAMES[project.language]} videos right now. You can still edit the narration yourself.`
+            : storyboardChanged
+              ? "Your storyboard has changes that aren't in this video yet. Ask for more changes on the storyboard."
+              : null,
+        }}
       />,
     );
   }
 
+  // Only a video being made or a failed one is left here (the check above).
+  if (state !== "generating" && state !== "generate_failed") redirect(`/projects/${projectId}`);
   const job = loaded.activeJob ?? loaded.latestGenerateJob ?? null;
   return frame(
     <MakingVideoScreen

@@ -1,11 +1,12 @@
 "use client";
 
-import type { RenderSummaryResource } from "@bytereel/db";
+import type { JobResource, RenderSummaryResource, RevisionResource } from "@bytereel/db";
 import Link from "next/link";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { ChangesPanel } from "@/components/storyboard/ChangesPanel";
 import { apiSend } from "@/components/storyboard/client";
 import { Note } from "@/components/storyboard/Note";
-import { Button } from "@/components/ui";
+import { Button, cn } from "@/components/ui";
 import { afterPlayerError, LinkRequests, type Resume } from "@/lib/video/player-link";
 import { CaptionsPanel, type LastCaptionJob } from "./CaptionsPanel";
 import { VideoVersionMenu } from "./VideoVersionMenu";
@@ -15,7 +16,13 @@ import { VideoVersionMenu } from "./VideoVersionMenu";
 // "Video version N ▾" picker (F1), Download MP4, Back to My videos and Edit storyboard. Publishing
 // comes later (F28+), so it shows "coming soon". Below it, the Captions tab (F25, CaptionsPanel): fix
 // caption text without changing the narration; clicking a phrase's time plays the latest version from
-// there. "Ask for changes" is F26.
+// there.
+// F26: next to Captions, the "Ask for changes" tab (the F18 panel with `stage: video`): a change
+// makes a new storyboard version; when it is ready the page opens the storyboard to approve it
+// ("Approve & make new video"). While it runs the video still plays and downloads, the Captions tab
+// waits, and the tab shows the progress. An unclear request stays here with the reply. The screen
+// also shows the project's video after a change (`storyboardChanged`: "Back to video" from the
+// storyboard), read-only: the new storyboard is approved there.
 //
 // The player's address is a 15-minute private link (F3 kind=video). When it has expired, the browser
 // fails as soon as it needs more of the file (play after a long pause, seeking): the screen quietly
@@ -42,7 +49,29 @@ export type ReviewVideoScreenProps = {
   canEditCaptions: boolean;
   /** F25: the last caption fix on this video failed or was cancelled (with Try again when allowed). */
   lastCaptionJob: LastCaptionJob | null;
+  /** F26: the "Ask for changes" tab (D5/D6 `stage: video`). */
+  changes: VideoChanges;
+  /** F26: the storyboard has changes this video doesn't have yet (they are approved on the storyboard). */
+  storyboardChanged: boolean;
+  /** F26: why caption fixes can't be made now (a change runs, or the storyboard changed). */
+  captionsNote: string | null;
 };
+
+/** F26: what the "Ask for changes" tab needs (the props of ChangesPanel on the video page). */
+export type VideoChanges = {
+  baseVersionId: string;
+  scenes: { id: string }[];
+  /** Video-stage change requests, oldest first (D6 `stage=video`). */
+  revisions: RevisionResource[];
+  activeJob: JobResource | null;
+  failedJob: { id: string; message: string } | null;
+  canRequest: boolean;
+  canRetry: boolean;
+  requestsUsedUp: boolean;
+  unavailableNote: string | null;
+};
+
+type Tab = "captions" | "changes";
 
 const PLAY_PROBLEM = "We couldn't play this video. Please reload the page.";
 
@@ -56,6 +85,10 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
   /** When the current link was applied (0 = the page's own first link). */
   const lastApplied = useRef(0);
   const [requests] = useState(() => new LinkRequests());
+  // A change that is running opens on its tab (its progress); otherwise Captions first.
+  const changeRunning = props.changes.activeJob?.type === "revise";
+  const [tab, setTab] = useState<Tab>(changeRunning ? "changes" : "captions");
+  const [notice, setNotice] = useState("");
 
   async function loadLink(renderId: string, then: Resume) {
     const mine = requests.start();
@@ -171,10 +204,16 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
           <VideoVersionMenu projectId={props.projectId} shown={shown} onChoose={choose} />
         </div>
 
-        {fromOlderStoryboard && (
+        {props.storyboardChanged ? (
           <Note tone="warning" className="mb-6">
-            Made from an older version of your storyboard.
+            Your storyboard has changes that aren&apos;t in this video yet. Approve them on the storyboard to make a new video.
           </Note>
+        ) : (
+          fromOlderStoryboard && (
+            <Note tone="warning" className="mb-6">
+              Made from an older version of your storyboard.
+            </Note>
+          )
         )}
         {problem && (
           <p role="alert" className="mb-6 text-sm text-danger">
@@ -205,23 +244,76 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
           </Button>
           {props.canEditStoryboard && (
             <Link href={`/projects/${props.projectId}/storyboard`} className="inline-flex min-h-11 items-center px-1 text-sm font-medium text-muted transition-colors hover:text-text">
-              Edit storyboard
+              {props.storyboardChanged ? "Back to storyboard" : "Edit storyboard"}
             </Link>
           )}
         </div>
       </section>
 
-      <CaptionsPanel
-        projectId={props.projectId}
-        renderId={props.render.id}
-        renderNumber={props.render.renderNumber}
-        stateVersion={props.stateVersion}
-        canEdit={props.canEditCaptions}
-        canEditStoryboard={props.canEditStoryboard}
-        showingOtherVersion={shown.id !== props.render.id}
-        lastJob={props.lastCaptionJob}
-        onSeek={seekTo}
-      />
+      <section aria-label="Captions and changes" className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <p role="status" aria-live="polite" className="sr-only">
+          {notice}
+        </p>
+        <div role="tablist" aria-label="Captions and changes" className="flex gap-6 border-b border-line bg-surface-2 px-6 pt-4">
+          {(
+            [
+              ["captions", "Captions"],
+              ["changes", "Ask for changes"],
+            ] as const
+          ).map(([name, label]) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              id={`video-tab-${name}`}
+              aria-selected={tab === name}
+              aria-controls={`video-panel-${name}`}
+              onClick={() => setTab(name)}
+              className={cn(
+                "-mb-px min-h-11 cursor-pointer border-b-2 pb-3 text-sm font-medium transition-colors",
+                tab === name ? "border-amber text-text" : "border-transparent text-muted hover:text-text",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Both stay mounted (hidden when not shown): unsaved caption fixes and a running change's polling survive a tab switch. */}
+        <div role="tabpanel" id="video-panel-captions" aria-labelledby="video-tab-captions" hidden={tab !== "captions"}>
+          <CaptionsPanel
+            projectId={props.projectId}
+            renderId={props.render.id}
+            renderNumber={props.render.renderNumber}
+            stateVersion={props.stateVersion}
+            canEdit={props.canEditCaptions}
+            canEditStoryboard={props.canEditStoryboard}
+            showingOtherVersion={shown.id !== props.render.id}
+            lastJob={props.lastCaptionJob}
+            onSeek={seekTo}
+            waitNote={props.captionsNote}
+          />
+        </div>
+        <div role="tabpanel" id="video-panel-changes" aria-labelledby="video-tab-changes" hidden={tab !== "changes"}>
+          <ChangesPanel
+            // A fresh panel after every change of the project (like the storyboard's), so it starts clean.
+            key={props.stateVersion}
+            stage="video"
+            projectId={props.projectId}
+            baseVersionId={props.changes.baseVersionId}
+            stateVersion={props.stateVersion}
+            scenes={props.changes.scenes}
+            revisions={props.changes.revisions}
+            activeJob={props.changes.activeJob}
+            failedJob={props.changes.failedJob}
+            canRequest={props.changes.canRequest}
+            canRetry={props.changes.canRetry}
+            requestsUsedUp={props.changes.requestsUsedUp}
+            unavailableNote={props.changes.unavailableNote}
+            disabled={false}
+            announce={setNotice}
+          />
+        </div>
+      </section>
       </div>
     </div>
   );
