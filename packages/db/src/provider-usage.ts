@@ -37,6 +37,12 @@ export interface ProviderUsageDocument {
   outcome: string | null;
   /** Milliseconds from sending the request to its end (null while reserved). */
   latencyMs: number | null;
+  /**
+   * Why a failed call failed, as a short fixed code (F26, Gemini storyboard and change requests):
+   * e.g. "transient 503 UNAVAILABLE", "quota 429 RESOURCE_EXHAUSTED", "transient timeout". Never the
+   * provider's free text. Absent on rows written before F26 and on calls that didn't fail.
+   */
+  errorCode?: string;
   at: Date;
 }
 
@@ -72,9 +78,10 @@ export async function reserveProviderUsage(
 export async function finishProviderUsage(
   db: Db,
   id: ObjectId,
-  input: { status: "final" | "failed"; outcome: string; model: string; units?: Partial<ProviderUsageUnits>; estCostInr?: number; latencyMs: number },
+  input: { status: "final" | "failed"; outcome: string; model: string; units?: Partial<ProviderUsageUnits>; estCostInr?: number; latencyMs: number; errorCode?: string },
 ): Promise<void> {
   const units: ProviderUsageUnits = { ...NO_UNITS, ...input.units };
+  const errorCode = input.errorCode ? input.errorCode.slice(0, 80) : null;
   await db.collection<ProviderUsageDocument>(PROVIDER_USAGE_COLLECTION).updateOne(
     { _id: id, status: "reserved" },
     {
@@ -85,6 +92,7 @@ export async function finishProviderUsage(
         units,
         estCostInr: input.estCostInr ?? 0,
         latencyMs: Math.max(0, Math.round(input.latencyMs)),
+        ...(errorCode ? { errorCode } : {}),
       },
     },
   );

@@ -64,6 +64,34 @@ export type PlanRequestFailure =
   /** Key, model or request problem on our side: no retry, INTERNAL (admin must fix the setup). */
   | { kind: "setup" };
 
+/**
+ * A short, fixed code for why a Gemini request failed, saved on its `providerUsage` row (F26 founder
+ * test: "busy" alone couldn't tell an overloaded model from a quota limit or an empty answer).
+ * Built only from the HTTP status, Google's status word and fixed labels: never Gemini's free text,
+ * which could quote the storyboard. Examples: "transient 503 UNAVAILABLE", "quota 429
+ * RESOURCE_EXHAUSTED", "bad-response no-candidates", "transient timeout", "other".
+ */
+export function planErrorCode(error: unknown): string {
+  if (!(error instanceof ProviderError)) return "other";
+  const message = error.message;
+  if (error.status !== null) {
+    // Google's status word: right after the number, or inside the quoted error body
+    // ("Gemini API error 503 Service Unavailable: { … "status": "UNAVAILABLE" }", seen 2026-11-17).
+    const word = /^Gemini API error \d{3} ([A-Z_]{3,40})\b/.exec(message)?.[1] ?? /"status":\s*"([A-Z_]{3,40})"/.exec(message)?.[1];
+    return `${error.kind} ${error.status}${word ? ` ${word}` : ""}`;
+  }
+  const label = /abort|timeout|timed out/i.test(message)
+    ? "timeout"
+    : /no candidates/i.test(message)
+      ? "no-candidates"
+      : /fetch failed|network|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket/i.test(message)
+        ? "network"
+        : /json|unexpected token|parse/i.test(message)
+          ? "bad-json"
+          : "other";
+  return `${error.kind} ${label}`;
+}
+
 export function classifyPlanRequestError(error: unknown): PlanRequestFailure {
   if (!(error instanceof ProviderError)) return { kind: "busy", retryAfterMs: null };
   if (error.kind === "safety") return { kind: "rejected" };

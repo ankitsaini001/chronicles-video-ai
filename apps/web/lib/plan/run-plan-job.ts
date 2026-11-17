@@ -8,6 +8,7 @@ import {
   ideaSources,
   PLAN_JOB_MAX_REQUESTS,
   PLAN_STEP_RETRIES,
+  planErrorCode,
   planJobPrompt,
   planRetryWaitMs,
   plannerRequestBase,
@@ -56,7 +57,7 @@ export interface PlanJobStore {
   complete(input: { jobId: ObjectId; attempt: number; result: ValidPlanToSave }): Promise<boolean>;
   fail(input: { jobId: ObjectId; attempt: number; code: PlanJobErrorCode; stage: "plan" | "validate"; detail?: string }): Promise<boolean>;
   reserveUsage(input: { ownerId: string; projectId: string; jobId: string; model: string }): Promise<unknown>;
-  finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; units: { promptTokens: number; outputTokens: number }; latencyMs: number }): Promise<void>;
+  finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; units: { promptTokens: number; outputTokens: number }; latencyMs: number; errorCode?: string }): Promise<void>;
 }
 
 /** What one Gemini request of this job is about: the first prompt, the code-owned plan fields and the language. */
@@ -205,7 +206,7 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
       const failure = classifyPlanRequestError(error);
       const message = error instanceof Error ? error.message : String(error);
       const outcome = failure.kind === "rejected" ? "rejected" : failure.kind === "setup" ? "error" : /timeout|timed out|abort/i.test(message) ? "timeout" : "busy";
-      await finishUsageSafely(usage, { status: "failed", outcome, model: provider.model, units: { promptTokens: 0, outputTokens: 0 }, latencyMs: now() - sentAt });
+      await finishUsageSafely(usage, { status: "failed", outcome, model: provider.model, units: { promptTokens: 0, outputTokens: 0 }, latencyMs: now() - sentAt, errorCode: planErrorCode(error) });
       if (failure.kind === "rejected") return { status: "rejected" };
       if (failure.kind === "setup") {
         log("error", `Storyboard job ${event.jobId}: Gemini refused the request (key/model/request problem): ${message}`);
