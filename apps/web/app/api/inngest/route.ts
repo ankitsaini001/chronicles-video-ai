@@ -12,7 +12,8 @@ import { getInngest } from "@/inngest/client";
 // and the reason goes to the server log only.
 
 /**
- * One step may wait up to 180 s for Gemini; 300 s is the most a Vercel function can run (Hobby, fluid
+ * One step may wait up to 240 s for Gemini (PLAN_REQUEST_TIMEOUT_MS; keep it well under this, the
+ * step also writes to the database); 300 s is the most a Vercel function can run (Hobby, fluid
  * compute). The F23 render step runs on this computer (about 2–4 min, no Vercel limit there); where
  * videos are rendered online is decided at go-live (F38).
  */

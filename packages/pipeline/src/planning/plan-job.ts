@@ -10,13 +10,19 @@ import { buildCreatorIdeaPrompt, type CreatorIdea } from "./prompts";
  * but each Gemini request runs as its own durable step, so a request that already succeeded is
  * never paid for twice and every request is logged (providerUsage) on its own.
  *
- * Limits (ARCHITECTURE §16.1, §20.2): 180 s per request; at most 4 requests per job attempt
+ * Limits (ARCHITECTURE §16.1, §20.2): 240 s per request (180 s until F26); at most 4 requests per job attempt
  * (the first answer + up to 2 retries for busy/network errors, plus the one repair); waits honour
  * Retry-After up to 60 s (a longer wait counts as "busy"). No automatic model fallback.
  */
 
-/** Per-request time limit (the prototype planner's). */
-export const PLAN_REQUEST_TIMEOUT_MS = 180_000;
+/**
+ * Per-request time limit. 180 s (the prototype planner's) until F26: on a slow evening (2026-11-17)
+ * a storyboard took 113 s and every change request ran past 180 s (a change sends AND gets back the
+ * whole storyboard). 240 s gives a third more room and still fits one step under the 300 s a
+ * Vercel function may run (apps/web/app/api/inngest/route.ts `maxDuration`), with time to spare
+ * for the database writes around the request.
+ */
+export const PLAN_REQUEST_TIMEOUT_MS = 240_000;
 /** Most Gemini requests one job attempt may make: 3 (first answer + 2 retries) + 1 repair. */
 export const PLAN_JOB_MAX_REQUESTS = 4;
 /** Retries for one answer after a busy/network error (the prototype's DEFAULT_RETRY). */
@@ -27,7 +33,7 @@ export const PLAN_RETRY_MAX_WAIT_MS = 60_000;
 
 /**
  * The Gemini adapter for the plan job: no retries of its own (each retry is a new, logged step),
- * 180 s per request, the full output budget of the prototype planner.
+ * PLAN_REQUEST_TIMEOUT_MS per request, the full output budget of the prototype planner.
  */
 export function createPlanJobProvider(options: { apiKey: string; model: string; fetch?: typeof fetch }): PlannerProvider {
   return new GeminiPlanner({
