@@ -75,7 +75,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ✅ Done |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ✅ Done |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ✅ Done |
-| F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | 🔨 Building |
+| F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | 🧪 Testing |
 | F27 | [Daily limits](F27-daily-limits.md) | F23 | ⬜ Not started |
 
 ### A5 · Instagram publishing

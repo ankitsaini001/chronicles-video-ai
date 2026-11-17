@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔨 Building (plan approved 2026-11-17) |
+| **Status** | 🧪 Testing (built 2026-11-17; waiting for code review and the founder's test) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F25 |
 | **Design** | — (reuses the F18 "Ask for changes" panel) |
@@ -31,18 +31,41 @@ The 'Ask for changes' tab on the review screen.
 5. **The new video** is the next "Video version N"; older versions stay.
 6. **No real AI or voice calls by agents:** tests use stand-in Gemini and voice on `bytereel_test`.
 
+### Choices made while building (engineer)
+- **Narration reuse needed no fix.** The F23 video job already looks every scene's recording up by its cache key (the words, pronunciation and voice) and reuses a ready one; D8 already counts only the recordings still to make. The e2e proves it on a real second video (see the progress log).
+- **The cost note uses the same rule as D8.** `narrationCost` (`packages/db/src/generate-jobs.ts`) calls the very function D8/E2 check the voice limits with (`voiceStillNeeded`): the plan's recordings by cache key against this creator's own recordings. It only reads the database (no voice or AI call, nothing counted). Two scenes with the same words share one recording (counted once); a voice switch changes every scene. If the voice isn't set up on the server, the note is left out.
+- **One panel, two places.** The F18 "Ask for changes" panel got a `stage` prop instead of a copy (`components/storyboard/ChangesPanel.tsx`, the differences in `lib/storyboard/changes.ts`): "Whole video", the history of video changes only, and on success it opens the storyboard. On the video page it sits in a tab next to Captions; both tabs stay loaded, so a half-typed caption fix and the change's progress survive switching tabs.
+- **A change on the video only on a ready video.** D5 `stage: video` is now refused (409) when the storyboard already has changes the video doesn't show (`storyboard_ready` with the older video kept): those are asked on the storyboard. Before, the API accepted it there.
+- **"Back to video" needed a small addition.** After a change the project is `storyboard_ready` with its video kept, and the video page used to send that state back to the storyboard. It now shows the kept video (play, download, versions) with a note "Your storyboard has changes that aren't in this video yet. Approve them on the storyboard to make a new video."; captions and changes are not offered there. The storyboard shows **Back to video** next to **Approve & make new video**, and its stepper's "3 Video" links there too.
+- **While a change runs** the video page stays the review screen (the project stays `video_ready`): the "Ask for changes" tab opens by itself with the progress line, the Captions tab says "Caption fixes wait until your change request is finished.", and the server refuses a caption fix with 409 JOB_ALREADY_RUNNING.
+
 ## Steps
-_Filled in while building._
+- [x] 1. Database: the new video's cost (`narrationCost`, the D8 rule), D5 `stage: video` only on a ready video (`packages/db/src/generate-jobs.ts`, `revisions.ts`) — `f4dc8e3`
+- [x] 2. Screens: the "Ask for changes" tab on the video page (`ReviewVideoScreen.tsx`, `ChangesPanel.tsx` with `stage`, `CaptionsPanel.tsx` as the Captions tab); the storyboard's cost note, "Approve & make new video" and Back to video (`StoryboardScreen.tsx`, `lib/video/new-video.ts`, `lib/video/narration-cost.ts`); the video page shows the kept video after a change — `6de66af`
+- [x] 3. Unit tests (`tests/video-revision.test.ts`, 16 tests) — `6774f81`
+- [x] 4. E2E `tools/e2e/f26-video-revision.ts` (stand-in voice and Gemini, real renders, real uploads)
+- [x] 5. Docs: API.md (D5, D6, D8 "As built (F26)", the ③ page row), this file, the tracker
 
 ## How to try it (founder)
-_Filled in when it is ready._
+**Restart `npm run dev` once** (Ctrl+C, then `npm run dev` again; `npm run inngest` can keep running). Nothing else to set up: no new setting, no new index. **Cost:** asking for the change uses 1 of the project's 20 AI requests (one Gemini call, free tier); the new video counts 1 of your 3 videos today and only the changed scene's narration uses voice characters (about 150–250 for one scene). It takes about 1 minute for the change and about 3–4 minutes for the new video.
+1. Open **My videos → Ready** and click **"Why is the sky blue?"** (or any ready video).
+2. Under the video's buttons you now see two tabs, **Captions** and **Ask for changes**. Click **Ask for changes**.
+3. First an unclear one: type **make it better** and send. After a few seconds the AI replies asking what exactly to change; nothing else changes and you stay on the video.
+4. Now a real one: pick **Scene 03** in the menu, type e.g. **say this more simply**, and send. While it works you see "Updating scene 3…"; the video still plays and **Download MP4** still works. Click the **Captions** tab: it says caption fixes wait.
+5. When it is done the app opens the storyboard: scene 3 is tagged **Changed**, and a note says e.g. "In your new video, scene 3 gets new narration (about 207 voice characters). The other 5 scenes reuse their recordings. It counts as 1 of your 3 videos today."
+6. Click **Back to video**: your old video is still there, with a note that the storyboard has changes. Go back to the storyboard (the link or the stepper's "2 Storyboard").
+7. Note your **voice characters this month** (header/account). Click **Approve & make new video**. After about 3–4 minutes the new video is ready as **Video version 2 ▾**; play scene 3 to hear the change. The voice characters went up by about the number in the note (only scene 3), **Videos today** by 1. Open the version picker: version 1 is still there and downloads.
 
 ## Known limits
-_Filled in while building._
+- **The progress line names every scene** while it checks the narration ("Recording narration · scene 2 of 6", …), also the scenes that reuse their recording (this is F23's screen, unchanged); only the changed scenes are really recorded and counted.
+- The cost note is an estimate before you approve: if you change the voice or the narration again, it is worked out again for the new version. It does not know about a recording paid for in a failed earlier attempt of the same version (then the real cost is lower, never higher).
+- The video page's history shows only the changes asked there; changes asked on the storyboard stay in the storyboard's chat (and the other way round).
+- A change can't be asked on the video while the storyboard already has unapproved changes: approve them first (a new video), or ask on the storyboard.
+- Caption fixes belong to their storyboard version (F25): the new video starts without the old video's caption fixes.
 
 ## How we test it (done when all are ticked)
-- [ ] Change appears in the new video
-- [ ] Unchanged scenes reuse their narration (no extra cost)
+- [x] Change appears in the new video (e2e: video 2's `captions.json` in R2 has the new words in scene 3, video 1's doesn't; every other scene's captions read the same)
+- [x] Unchanged scenes reuse their narration (no extra cost) (e2e: ONE voice request for the new video (`providerUsage` and the stand-in's call log +1), one new recording, for scene 3; voice characters +207 for the creator and the app = that recording = the storyboard note; the other 5 scenes use the same recordings as video 1: ids, cache keys, audio keys, SHA-256)
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
@@ -50,3 +73,5 @@ _Filled in while building._
 | Date | What happened |
 |---|---|
 | 2026-11-17 | Plan approved by the founder (decisions 1–6). |
+| 2026-11-17 | **Built** in small commits on `dev` (see Steps). Narration reuse needed **no fix** (F23's job already reuses recordings by cache key; the e2e proves it). Found while building: after a change the video page sent the creator back to the storyboard, so "Back to video" (decision 3) didn't exist yet: the page now shows the kept video read-only; D5 `stage: video` is now refused outside a ready video. Unit tests: **1022 pass** (16 new in `tests/video-revision.test.ts`); typecheck clean; `next build` compiled, type-checked and wrote every route (it then printed a Next.js security-advisory notice for the installed version and exited 1; no upgrade made, the founder's call). |
+| 2026-11-17 | **E2E `tools/e2e/f26-video-revision.ts`: 60/60 pass** on `bytereel_test` (port 3236, a private Inngest on 8299; stand-in voice and Gemini; two real local renders, real create-only uploads to `reel-app-dev` under test user ids). Video 1 ("How does the water cycle work?", the stand-in's 6-scene storyboard) took 187 s. "make it better" → rejected with the reply question, no new version, still `video_ready` with video 1. A busy AI kept a change running: meanwhile a caption fix and a second change got 409 JOB_ALREADY_RUNNING, video 1 downloaded, the page showed the progress line and "Caption fixes wait…"; then it failed (PROVIDER_BUSY) with its message and Try again on the video page. "Scene 03: say this scene more simply" → a new version with only scene 3 Changed, `storyboard_ready` with video 1 kept; the storyboard said "In your new video, scene 3 gets new narration (about 207 voice characters). The other 5 scenes reuse their recordings. It counts as 1 of your 3 videos today.", with "Approve & make new video" and Back to video (which showed video 1 with the note). Approve → video 2 in 213 s: voice requests 6 → 7, characters +207 (creator and app), videos today 1 → 2, the other 5 recordings identical to video 1's; F1 lists both, video 1 still downloads. Another user → 404 (D5, D6, E1, E2, the page); signed out → 401. The first run had 3 failing checks, all in the test itself (two read fields C6 doesn't return / an exact progress text; one expected the progress line to name only scene 3, see Known limits); fixed and re-run on a fresh database. No signed link in any output or log; no work folder left. Test servers stopped by pid, `bytereel_test` dropped. The R2 test files stay (31 keys, listed at the end of `runs/f26-work/e2e.out`). Zero real ElevenLabs and Gemini calls; TMPDIR inside the project throughout. Ready for code review and the founder's test. |
