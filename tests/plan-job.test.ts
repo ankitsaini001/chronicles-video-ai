@@ -328,23 +328,31 @@ describe("plan-video job (runPlanJob)", () => {
     expect(planner.requests).toHaveLength(2);
   });
 
-  it("busy: 2 retries (2 s, 5 s waits), then PROVIDER_BUSY; each request logged as failed/busy", async () => {
+  it("busy: 2 retries (20 s, 60 s waits), then PROVIDER_BUSY; each request logged as failed/busy", async () => {
     const store = new FakeStore();
     const planner = new FakePlanner([busy(), busy(), busy(), VALID]);
     const { outcome, runner } = await run(store, planner);
     expect(outcome).toBe("failed");
     expect(store.failedWith).toEqual({ code: "PROVIDER_BUSY", stage: "plan" });
     expect(planner.requests).toHaveLength(3);
-    expect(runner.retries).toEqual([2000, 5000]);
+    expect(runner.retries).toEqual([20_000, 60_000]);
     expect(store.usage.map((u) => `${u.status}/${u.outcome}`)).toEqual(["failed/busy", "failed/busy", "failed/busy"]);
   });
 
-  it("busy once, then fine: the retry honours Retry-After and the job succeeds", async () => {
+  it("busy once, then fine: a longer Retry-After is honoured and the job succeeds", async () => {
+    const store = new FakeStore();
+    const planner = new FakePlanner([busy(45_000), VALID]);
+    const { outcome, runner } = await run(store, planner);
+    expect(outcome).toBe("saved");
+    expect(runner.retries).toEqual([45_000]);
+  });
+
+  it("a Retry-After shorter than our wait doesn't shorten it (a short hint lands in the same spike)", async () => {
     const store = new FakeStore();
     const planner = new FakePlanner([busy(7000), VALID]);
     const { outcome, runner } = await run(store, planner);
     expect(outcome).toBe("saved");
-    expect(runner.retries).toEqual([7000]);
+    expect(runner.retries).toEqual([20_000]);
   });
 
   it("a Retry-After longer than 60 s is not waited for: PROVIDER_BUSY at once", async () => {
@@ -456,7 +464,8 @@ describe("planner pieces for the job", () => {
     expect(classifyPlanRequestError(busy(3000))).toEqual({ kind: "busy", retryAfterMs: 3000 });
     expect(classifyPlanRequestError(new ProviderError({ provider: "gemini", kind: "safety", message: "x" }))).toEqual({ kind: "rejected" });
     expect(classifyPlanRequestError(new ProviderError({ provider: "gemini", kind: "model-unavailable", message: "x" }))).toEqual({ kind: "setup" });
-    expect([planRetryWaitMs(1, null), planRetryWaitMs(2, null), planRetryWaitMs(1, 60_000), planRetryWaitMs(1, 60_001)]).toEqual([2000, 5000, 60_000, null]);
+    expect([planRetryWaitMs(1, null), planRetryWaitMs(2, null), planRetryWaitMs(3, null)]).toEqual([20_000, 60_000, 60_000]);
+    expect([planRetryWaitMs(1, 5_000), planRetryWaitMs(1, 30_000), planRetryWaitMs(2, 30_000), planRetryWaitMs(1, 60_000), planRetryWaitMs(1, 60_001)]).toEqual([20_000, 30_000, 60_000, 60_000, null]);
   });
 });
 

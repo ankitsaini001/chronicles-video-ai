@@ -11,8 +11,9 @@ import { buildCreatorIdeaPrompt, type CreatorIdea } from "./prompts";
  * never paid for twice and every request is logged (providerUsage) on its own.
  *
  * Limits (ARCHITECTURE §16.1, §20.2): 240 s per request (180 s until F26); at most 4 requests per job attempt
- * (the first answer + up to 2 retries for busy/network errors, plus the one repair); waits honour
- * Retry-After up to 60 s (a longer wait counts as "busy"). No automatic model fallback.
+ * (the first answer + up to 2 retries for busy/network errors, plus the one repair); waits of 20 s
+ * then 60 s (2 s / 5 s until after F26), or a longer Retry-After up to 60 s (more than that counts
+ * as "busy"). No automatic model fallback.
  */
 
 /**
@@ -27,8 +28,14 @@ export const PLAN_REQUEST_TIMEOUT_MS = 240_000;
 export const PLAN_JOB_MAX_REQUESTS = 4;
 /** Retries for one answer after a busy/network error (the prototype's DEFAULT_RETRY). */
 export const PLAN_STEP_RETRIES = 2;
-/** Waits between retries when Gemini gives no Retry-After (ms), and the longest wait we accept. */
-export const PLAN_RETRY_BACKOFF_MS = [2_000, 5_000] as const;
+/**
+ * Waits before retry 1 and retry 2 (ms), and the longest wait we accept. 2 s / 5 s until after F26:
+ * on 2026-11-17 Gemini answered 503 "high demand" three times within seconds, so every retry landed
+ * in the same spike. 20 s / 60 s spread the tries over about 1.5 minutes. The wait is an Inngest
+ * retry (RetryAfterError): no server is kept busy and nothing is paid while waiting; the job's
+ * progress is written before each wait, far inside the 10-minute stuck-job rule.
+ */
+export const PLAN_RETRY_BACKOFF_MS = [20_000, 60_000] as const;
 export const PLAN_RETRY_MAX_WAIT_MS = 60_000;
 
 /**
@@ -101,8 +108,13 @@ export function classifyPlanRequestError(error: unknown): PlanRequestFailure {
   return { kind: "setup" };
 }
 
-/** The wait before retry number `retry` (1-based), or null when the wait would be too long. */
+/**
+ * The wait before retry number `retry` (1-based), or null when Gemini asks for more than we accept.
+ * Our own backoff is the minimum: a Retry-After shorter than it doesn't shorten the wait (a short
+ * hint during a demand spike just lands in the same spike), a longer one is honoured up to 60 s.
+ */
 export function planRetryWaitMs(retry: number, retryAfterMs: number | null): number | null {
-  const wait = retryAfterMs ?? PLAN_RETRY_BACKOFF_MS[Math.min(retry - 1, PLAN_RETRY_BACKOFF_MS.length - 1)]!;
-  return wait > PLAN_RETRY_MAX_WAIT_MS ? null : wait;
+  if (retryAfterMs !== null && retryAfterMs > PLAN_RETRY_MAX_WAIT_MS) return null;
+  const backoff = PLAN_RETRY_BACKOFF_MS[Math.min(retry - 1, PLAN_RETRY_BACKOFF_MS.length - 1)]!;
+  return Math.max(backoff, retryAfterMs ?? 0);
 }

@@ -63,7 +63,7 @@ The 'Ask for changes' tab on the review screen.
 - The video page's history shows only the changes asked there; changes asked on the storyboard stay in the storyboard's chat (and the other way round).
 - A change can't be asked on the video while the storyboard already has unapproved changes: approve them first (a new video), or ask on the storyboard.
 - Caption fixes belong to their storyboard version (F25): the new video starts without the old video's caption fixes.
-- **A slow Gemini can take about 10–12 minutes to end in a failure.** Each Gemini request waits up to 240 s (180 s before the founder test), with 2 retries per attempt, before the change ends with "Our AI is busy or taking too long right now…". Seen in the founder's test on 2026-11-17 evening: every request timed out or was busy (on 2026-11-14 a real revision took 34.8 s). If it keeps happening, a lighter request for revisions (less model "thinking") is the next step to look at, with the founder's OK.
+- **A slow Gemini can take about 13–14 minutes to end in a failure.** Each Gemini request waits up to 240 s (180 s before the founder test), with 2 retries per attempt 20 s and 60 s apart (2 s / 5 s before 2026-11-18), before the change ends with "Our AI is busy or taking too long right now…". Seen in the founder's test on 2026-11-17 evening: every request timed out or was busy (on 2026-11-14 a real revision took 34.8 s). If it keeps happening, a lighter request for revisions (less model "thinking") is the next step to look at, with the founder's OK.
 
 ## How we test it (done when all are ticked)
 - [x] Change appears in the new video (e2e: video 2's `captions.json` in R2 has the new words in scene 3, video 1's doesn't; every other scene's captions read the same)

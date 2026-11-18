@@ -210,14 +210,15 @@ async function main(): Promise<void> {
   r = await createProject(a.cookie, "e2e busy: how vaccines work");
   const busyProject = r.json.project.id as string;
   const busyJob = r.json.job.id as string;
-  done = await waitDone(a.cookie, busyProject, 90_000);
+  // Busy waits are 20 s then 60 s (since after F26), so a busy attempt takes about 1.5 minutes.
+  done = await waitDone(a.cookie, busyProject, 3 * 60_000);
   check("busy → plan_failed PROVIDER_BUSY with 'Your idea is saved' message", done.status.state === "plan_failed" && done.status.lastError?.code === "PROVIDER_BUSY" && /Your idea is saved/.test(done.status.lastError?.message ?? ""), `${done.status.state} ${done.status.lastError?.code}`);
   rows = await usageRows(busyJob);
   check("busy: exactly 3 Gemini requests (first + 2 retries), each logged as failed/busy", rows.length === 3 && rows.every((x) => x.status === "failed" && x.outcome === "busy"), `${rows.length} rows`);
   check("busy: progress said it was trying again", done.messages.some((m) => /trying again/.test(m)), done.messages.join(" | "));
   r = await retry(a.cookie, busyJob);
   check("busy: Try again without editing → 202", r.status === 202 && r.json.attempt === 2);
-  done = await waitDone(a.cookie, busyProject, 90_000);
+  done = await waitDone(a.cookie, busyProject, 3 * 60_000);
   check("busy again → plan_failed; planRequestCount 2", done.status.state === "plan_failed" && (await db.collection("projects").findOne({ _id: new ObjectId(busyProject) }))?.planRequestCount === 2);
 
   // --- 7. Per-project limit: at 20 the Try again is refused, nothing changes.

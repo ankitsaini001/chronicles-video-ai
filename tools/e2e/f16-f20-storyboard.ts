@@ -238,13 +238,14 @@ async function main(): Promise<void> {
   ({ project, version } = await current(a.cookie, pid));
   r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/revisions`, { stage: "storyboard", scope: "project", message: "e2e busy: shorter", basePlanVersionId: version.id, expectedStateVersion: project.stateVersion }, { "idempotency-key": key() });
   const busyJob = r.json.job?.id as string;
-  let st = await waitIdle(a.cookie, pid);
+  // Busy waits are 20 s then 60 s (since after F26), so a busy attempt takes about 1.5 minutes.
+  let st = await waitIdle(a.cookie, pid, 3 * 60_000);
   r = await send(a.cookie, "GET", `/api/v1/jobs/${busyJob}`);
   check("busy → job failed PROVIDER_BUSY (retryable); storyboard unchanged; retry_job offered", r.json.state === "failed" && r.json.error?.code === "PROVIDER_BUSY" && r.json.error?.retryable === true && st.currentPlanVersionId === version.id && st.allowedActions?.includes("retry_job"));
   check("busy: revision failed", (await db.collection("revisions").findOne({ jobId: oid(busyJob) }))?.status === "failed");
   r = await send(a.cookie, "POST", `/api/v1/jobs/${busyJob}/retry`, {}, { "idempotency-key": key() });
   check("E2 Try again on the failed change → 202 attempt 2, revision pending", r.status === 202 && r.json.attempt === 2 && r.json.type === "revise" && (await db.collection("revisions").findOne({ jobId: oid(busyJob) }))?.status === "pending");
-  st = await waitIdle(a.cookie, pid);
+  st = await waitIdle(a.cookie, pid, 3 * 60_000);
   check("…fails again (still busy); planRequestCount counted per attempt", st.state === "storyboard_ready" && (await projectOf(pid))!.planRequestCount === countBefore + 4);
 
   // ---------- the 20 cap ----------
