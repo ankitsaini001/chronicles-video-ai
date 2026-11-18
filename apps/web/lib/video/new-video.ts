@@ -24,9 +24,8 @@ function scenesWord(indexes: readonly number[]): string {
 
 /** What the new video does to today's videos: "It counts as 1 of your 3 videos today (2 left)." (D8 enforces it.) */
 export function videosTodayLine(today: { used: number; limit: number }): string {
+  // Only called while one is left (F27: at 0 left the page shows the limit's own note instead).
   const left = Math.max(0, today.limit - today.used);
-  // Not shown by the page (F27: at 0 left the limit's own note says why and when it resets).
-  if (left === 0) return "You have no videos left today.";
   return `It counts as 1 of your ${today.limit} videos today (${left} left).`;
 }
 

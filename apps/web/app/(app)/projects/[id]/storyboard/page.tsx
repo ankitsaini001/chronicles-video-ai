@@ -58,7 +58,8 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
   const limit = startable ? await approveLimitFor(db, { project, version: current, timezone: user.timezone }) : null;
   const approvable = project.currentRenderId !== null && resource.allowedActions.includes("approve_storyboard") && version.valid && limit?.path !== "reuse";
   const [cost, videosToday] = approvable ? await Promise.all([newVideoCost(db, project, current.plan), readUsageCount(db, user.id, "videos", user.timezone)]) : [null, 0];
-  const today = limit?.path === "new" && videosToday < USAGE_LIMITS.videosPerDay ? { used: videosToday, limit: USAGE_LIMITS.videosPerDay } : null;
+  // No "counts as 1 of your 3 videos" next to a "Can't approve now" note.
+  const today = limit?.path === "new" && !limit.refusal && videosToday < USAGE_LIMITS.videosPerDay ?{ used: videosToday, limit: USAGE_LIMITS.videosPerDay } : null;
 
   return (
     <div className="mx-auto flex w-full flex-col pb-28">

@@ -11,6 +11,7 @@ import {
   listProjects,
   ProjectActionError,
   ProjectQuotaExceededError,
+  projectsPerDayMessage,
 } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
@@ -77,7 +78,8 @@ export const POST = apiRoute({
       created = await createProject(db, { ownerId: user.id, timezone: user.timezone, body, idempotencyLock });
     } catch (error) {
       if (error instanceof ProjectQuotaExceededError) {
-        throw new ApiProblem(429, "QUOTA_EXCEEDED", `You've created ${error.limit} projects today. Try again tomorrow.`, {
+        // F27 (founder 2026-11-18): the same wording as videos/day, with the reset time in the creator's timezone.
+        throw new ApiProblem(429, "QUOTA_EXCEEDED", projectsPerDayMessage({ limit: error.limit, resetsAt: error.resetsAt, timezone: user.timezone }), {
           quota: "projects_per_day",
           limit: error.limit,
           used: error.used,

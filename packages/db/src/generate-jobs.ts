@@ -8,7 +8,7 @@ import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, type Pr
 import { RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, latestReadyRenderOf, type RenderDocument } from "./renders";
 import { paidSpeechKeys, releaseSpeechClaims } from "./speech-artifacts";
 import { APPROVABLE_STATES, findOrCreateApproval, STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalBody, type StoryboardApprovalDocument } from "./storyboard-approvals";
-import { videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage } from "./limit-messages";
+import { videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage, voiceQuotaShortMessage } from "./limit-messages";
 import { addUsageWithinLimit, APP_USAGE_OWNER_ID, APP_USAGE_TIMEZONE, readUsageCount, usageCounterPeriod, wouldExceed } from "./usage-counters";
 import { APP_VOICE_CHARACTERS_PER_MONTH, DEFAULT_TIMEZONE, USAGE_LIMITS } from "./usage";
 
@@ -629,15 +629,24 @@ export async function ownerTimezone(db: Db, ownerId: ObjectId, session?: ClientS
 
 /**
  * F27 (decision 3): a video job stopped by a monthly voice limit fails with the SAME sentence D8/E2
- * would answer (voiceLimitError), in the creator's timezone. `needed`: the characters the refused
- * count asked for. Without it (e.g. ElevenLabs refused on its own: SPEND_CEILING from the provider)
- * the app's sentence still works; the creator's falls back to "Voice limit reached this month.".
+ * would answer (voiceLimitError), in the creator's timezone. `needed` says which limit refused:
+ * - a number: OUR counter refused the up-front reservation of that many characters → "This video
+ *   needs about N …, but you have M left …" / "paused for everyone until …";
+ * - null: OUR counter refused one request while recording (the number would be one scene's, so
+ *   none is given) → "You don't have enough voice characters left this month …" / the pause;
+ * - undefined: ElevenLabs refused on its own (we don't know when its allowance resets) → the plain
+ *   "Voice limit reached this month." without a date.
+ * At a month boundary (refused in the old month, ended in the new one) the numbers could contradict
+ * each other ("needs 1,160, you have 3,000 left"): then the sentence without numbers is used.
  */
-async function limitFailureMessage(db: Db, session: ClientSession, input: { ownerId: ObjectId; code: "QUOTA_EXCEEDED" | "SPEND_CEILING"; needed?: number; now: Date }): Promise<string> {
+async function limitFailureMessage(db: Db, session: ClientSession, input: { ownerId: ObjectId; code: "QUOTA_EXCEEDED" | "SPEND_CEILING"; needed?: number | null; now: Date }): Promise<string> {
+  if (input.needed === undefined) return GENERATE_ERRORS[input.code].message;
   const timezone = await ownerTimezone(db, input.ownerId, session);
   if (input.code === "SPEND_CEILING") return voiceLimitError("app", { used: 0, needed: input.needed ?? 0, timezone, now: input.now }).message;
-  if (input.needed === undefined) return GENERATE_ERRORS.QUOTA_EXCEEDED.message;
+  const { resetsAt } = usageCounterPeriod("voiceChars", timezone, input.now);
+  if (input.needed === null) return voiceQuotaShortMessage({ resetsAt, timezone });
   const used = await readUsageCount(db, input.ownerId.toHexString(), "voiceChars", timezone, input.now, session);
+  if (!wouldExceed(used, input.needed, USAGE_LIMITS.voiceCharactersPerMonth)) return voiceQuotaShortMessage({ resetsAt, timezone });
   return voiceLimitError("user", { used, needed: input.needed, timezone, now: input.now }).message;
 }
 
@@ -877,7 +886,8 @@ export async function completeGenerateJob(db: Db, input: { jobId: ObjectId; atte
  * `detail` is shown in the job's stage error (E1/C6): ONLY a fixed plain line written by our code,
  * never a provider's text, a stack trace or a link (those go to the server log).
  * F27: a QUOTA_EXCEEDED / SPEND_CEILING failure says why and when it resets (limitFailureMessage;
- * `needed` = the characters the refused count asked for).
+ * `needed`: the characters our refused reservation asked for, null = our counter refused one
+ * request while recording, absent = ElevenLabs refused on its own).
  */
 export async function endGenerateJob(
   db: Db,
@@ -888,7 +898,7 @@ export async function endGenerateJob(
     code?: GenerateErrorCode;
     stage?: GenerateStage;
     detail?: string;
-    needed?: number;
+    needed?: number | null;
     needsInput?: JobNeedsInput;
     staleBefore?: Date;
     queuedBefore?: Date;

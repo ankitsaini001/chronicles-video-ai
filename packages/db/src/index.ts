@@ -276,7 +276,7 @@ export {
   type SaveCaptionFixesResult,
 } from "./caption-fixes";
 export { checkStuckJob, checkStuckPlanJob, GENERATE_CANCEL_GRACE_MS, GENERATE_IDLE_LIMIT_MS, isGenerateJobStuck, type StuckCheck } from "./stuck-jobs";
-export { limitShortReason, resetClock, resetDate, videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage } from "./limit-messages";
+export { limitShortReason, projectsPerDayMessage, resetClock, resetDate, videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage, voiceQuotaShortMessage } from "./limit-messages";
 export {
   approveAndGenerate,
   approveLimitCheck,

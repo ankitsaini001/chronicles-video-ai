@@ -3,7 +3,6 @@
 import type { VoicePresetId } from "@bytereel/db/voices";
 import { ENABLED_LANGUAGES, enabledLanguageOr } from "@bytereel/db/languages";
 import { brainstormIdeaText, cleanIdeaText, fitsBrainstormText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaProblem } from "@bytereel/db/idea-text";
-import { resetClock } from "@bytereel/db/limit-messages";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
 import type { Usage } from "@/lib/account/me";
@@ -73,18 +72,6 @@ type ApiErrorBody = { error?: { code?: string; message?: string; details?: { iss
 /** 32 random hex characters. Works on plain http too (crypto.randomUUID needs https or localhost). */
 function newIdempotencyKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** " You can create more from 12:00 am IST." (the shared reset-time wording, F27: limit-messages.ts). */
-function resetTimeText(resetsAt: string | undefined, timezone: string): string {
-  if (!resetsAt) return "";
-  const date = new Date(resetsAt);
-  if (Number.isNaN(date.getTime())) return "";
-  try {
-    return ` You can create more from ${resetClock(date, timezone, { zoneName: true })}.`;
-  } catch {
-    return "";
-  }
 }
 
 export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, timezone, samplePresets }: IdeaFormProps) {
@@ -163,8 +150,9 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         if (textIssue) return showTextError(idea.length > IDEA_TOPIC_MAX_CHARS ? `Your notes ${textIssue.message}.` : `Your topic ${textIssue.message}.`);
         return setFormError(message);
       }
+      // F27: the server's sentence already says when more can be created (in the creator's timezone).
       case "QUOTA_EXCEEDED":
-        return setFormError(message + resetTimeText(json.error?.details?.resetsAt, timezone));
+        return setFormError(message);
       default:
         return setFormError(response.status >= 500 ? MESSAGES.INTERNAL : message);
     }

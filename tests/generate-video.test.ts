@@ -182,7 +182,7 @@ describe("D8 limits, in order: language → videos/day → voice characters (cre
   it("the app-wide 9,000 a month → 503 SPEND_CEILING: paused for everyone (F27)", async () => {
     const { db } = base({ app: 8500 });
     const error = await refusal(approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone: "Asia/Kolkata", body, voice, respond: () => ({ status: 202, body: {} }), now: NOW }));
-    expect(error).toMatchObject({ code: "SPEND_CEILING", message: "Video making is paused for everyone until 1 December (the app's monthly voice limit is used up). Your videos and downloads still work." });
+    expect(error).toMatchObject({ code: "SPEND_CEILING", message: "Video making is paused for everyone until 1 December, 5:30 am your time (the app's monthly voice limit is used up). Your videos and downloads still work." });
   });
 
   it("recordings the owner already has are free: the same counts pass when most scenes are recorded", async () => {
@@ -928,7 +928,7 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
     });
   });
 
-  it("F27: a request refused by a monthly limit while recording is not sent; the failure carries its characters", async () => {
+  it("F27: a request refused by a monthly limit while recording is not sent; the failure gives no number (null)", async () => {
     await withTempDir(async (root) => {
       for (const [send, code] of [["quota", "QUOTA_EXCEEDED"], ["ceiling", "SPEND_CEILING"]] as const) {
         const events: Events = [];
@@ -937,8 +937,7 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
         const outcome = await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root });
         expect(outcome).toBe("failed");
         expect(provider.calls).toBe(0);
-        expect(bundle.state.ends.at(-1)).toMatchObject({ outcome: "failed", code, stage: "speech" });
-        expect(bundle.state.ends.at(-1)?.needed).toBeGreaterThan(0);
+        expect(bundle.state.ends.at(-1)).toMatchObject({ outcome: "failed", code, stage: "speech", needed: null });
       }
     });
   });

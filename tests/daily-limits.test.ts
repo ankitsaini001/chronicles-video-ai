@@ -5,6 +5,7 @@ import {
   limitShortReason,
   newGenerateJob,
   ProjectActionError,
+  projectsPerDayMessage,
   resetClock,
   resetDate,
   usageCounterPeriod,
@@ -14,10 +15,12 @@ import {
   voiceLimitError,
   voiceLimitProblem,
   voiceQuotaMessage,
+  voiceQuotaShortMessage,
   wouldExceed,
   type JobDocument,
   type PlanVersionDocument,
   type ProjectDocument,
+  type ApprovePath,
   type StoredPlan,
   type VoiceScene,
 } from "@bytereel/db";
@@ -42,7 +45,8 @@ const KOLKATA = "Asia/Kolkata";
 const NEW_YORK = "America/New_York";
 
 const VIDEOS_MESSAGE = "You've made 3 videos today, the most for one day. You can make more after 12:00 am (midnight) your time.";
-const CEILING_DEC_1 = "Video making is paused for everyone until 1 December (the app's monthly voice limit is used up). Your videos and downloads still work.";
+/** The app's month ends at 00:00 UTC: 5:30 am on 1 December in Kolkata (not midnight there, so the time is said). */
+const CEILING_DEC_1 = "Video making is paused for everyone until 1 December, 5:30 am your time (the app's monthly voice limit is used up). Your videos and downloads still work.";
 
 describe("the wording (decision 1), in the creator's timezone", () => {
   it("videos per day: the decision's exact text, midnight in Kolkata and in New York", () => {
@@ -75,12 +79,25 @@ describe("the wording (decision 1), in the creator's timezone", () => {
     expect(voiceQuotaMessage({ needed: 10, used: 3100, limit: 3000, resetsAt: NOW, timezone: KOLKATA })).toContain("but you have 0 left this month");
   });
 
-  it("the app's voice (UTC month): the day it ends in the creator's timezone; a negative-offset zone sees 30 November", () => {
+  it("the app's voice (UTC month): the day AND time it ends in the creator's timezone; only the date when that is local midnight", () => {
     const resetsAt = usageCounterPeriod("appVoiceChars", "UTC", NOW).resetsAt;
     expect(resetsAt.toISOString()).toBe("2026-12-01T00:00:00.000Z");
     expect(voiceCeilingMessage({ resetsAt, timezone: KOLKATA })).toBe(CEILING_DEC_1);
-    expect(voiceCeilingMessage({ resetsAt, timezone: NEW_YORK })).toBe(
-      "Video making is paused for everyone until 30 November (the app's monthly voice limit is used up). Your videos and downloads still work.",
+    expect(voiceCeilingMessage({ resetsAt, timezone: NEW_YORK })).toBe("Video making is paused for everyone until 30 November, 7:00 pm your time (the app's monthly voice limit is used up). Your videos and downloads still work.");
+    expect(voiceCeilingMessage({ resetsAt, timezone: "Europe/London" })).toBe(
+      "Video making is paused for everyone until 1 December (the app's monthly voice limit is used up). Your videos and downloads still work.",
+    );
+  });
+
+  it("projects per day (founder 2026-11-18): the same wording as videos, midnight in the creator's timezone", () => {
+    const text = "You've created 5 projects today, the most for one day. You can create more after 12:00 am (midnight) your time.";
+    expect(projectsPerDayMessage({ limit: 5, resetsAt: usagePeriods(KOLKATA, NOW).dayResetsAt, timezone: KOLKATA })).toBe(text);
+    expect(projectsPerDayMessage({ limit: 5, resetsAt: usagePeriods(NEW_YORK, NOW).dayResetsAt, timezone: NEW_YORK })).toBe(text);
+  });
+
+  it("the creator's voice without a number (one request refused while recording)", () => {
+    expect(voiceQuotaShortMessage({ resetsAt: usagePeriods(KOLKATA, NOW).monthResetsAt, timezone: KOLKATA })).toBe(
+      "You don't have enough voice characters left this month for this video. The limit resets on 1 December.",
     );
   });
 
@@ -206,6 +223,8 @@ function precheckDb(world: World) {
 
 const generateJob = (overrides: Partial<JobDocument> = {}): JobDocument => ({ ...newGenerateJob({ ownerId: OWNER, projectId: PROJECT, version: { _id: V1, planHash: HASH }, now: NOW }), ...overrides });
 const failedJob = (overrides: Partial<JobDocument> = {}) => generateJob({ state: "failed", error: { code: "RENDER_FAILED", message: "Rendering failed.", retryable: true }, ...overrides });
+/** A failed job that reserved the first two recordings this month and didn't send them (800 characters): only the 3rd (250) is still needed. */
+const reservedJob = (scenes: VoiceScene[]) => failedJob({ voice: { cacheKeys: [scenes[0]!.cacheKey, scenes[1]!.cacheKey], characters: 800, sentKeys: [], period: { user: "2026-11", app: "2026-11" } } });
 
 describe("the storyboard's pre-check (approveLimitCheck): read-only, the same order as D8", () => {
   const check = (world: World, scenes: VoiceScene[] | null = scenesOf([400, 400, 250]), timezone = KOLKATA) => {
@@ -306,10 +325,10 @@ function versionDoc(): PlanVersionDocument {
   return { _id: V1, ownerId: OWNER, projectId: PROJECT, schemaVersion: 1, versionNumber: 1, parentVersionId: null, source: "ai_plan", plan: validPlan() as unknown as StoredPlan, planHash: HASH, validation: { valid: true, issues: [], warnings: [] }, stats: { sceneCount: 6, wordCount: 170, estimatedSeconds: 70 }, plannerUsage: null, createdAt: NOW } as PlanVersionDocument;
 }
 
-/** D8 against the same world: its refusal, or null when it would queue the video. */
-async function d8Refusal(world: World, scenes: VoiceScene[], timezone: string): Promise<ProjectActionError | null> {
+/** D8 against the same world: its refusal, or (accepted) which path it took. */
+async function d8Answer(world: World, scenes: VoiceScene[], timezone: string): Promise<{ refusal: ProjectActionError } | { path: ApprovePath }> {
   const counts = { ...(world.counts ?? {}) };
-  const { db } = fakeDb({
+  const { db, names } = fakeDb({
     "projects.findOne": () => projectDoc(),
     "planVersions.findOne": () => versionDoc(),
     "jobs.findOne": () => world.job ?? null,
@@ -329,10 +348,10 @@ async function d8Refusal(world: World, scenes: VoiceScene[], timezone: string): 
     "projects.findOneAndUpdate": (_f: unknown, update: { $set: Partial<ProjectDocument> }) => ({ ...projectDoc(), ...update.$set, stateVersion: 5 }),
   });
   try {
-    await approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone, body: { planVersionId: V1.toHexString(), planHash: HASH, expectedStateVersion: 4 }, voice: () => scenes, respond: () => ({ status: 202, body: {} }), now: NOW });
-    return null;
+    const out = await approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone, body: { planVersionId: V1.toHexString(), planHash: HASH, expectedStateVersion: 4 }, voice: () => scenes, respond: () => ({ status: 202, body: {} }), now: NOW });
+    return { path: out.kind === "reused" ? "reuse" : names().includes("jobs.insertOne") ? "new" : "requeue" };
   } catch (error) {
-    if (error instanceof ProjectActionError) return error;
+    if (error instanceof ProjectActionError) return { refusal: error };
     throw error;
   }
 }
@@ -349,12 +368,19 @@ describe("no drift: the pre-check says exactly what D8 answers", () => {
     ["the app's month full", { counts: { "appVoiceChars:2026-11": 8000 } }],
     ["0 videos left AND no voice left: videos/day wins", { counts: { "videos:2026-11-18": 3, "voiceChars:2026-11": 3000 } }],
     ["voice left only thanks to a ready recording", { counts: { "voiceChars:2026-11": 2500 }, ready: [scenes[0]!.cacheKey, scenes[1]!.cacheKey] }],
+    ["this version's video exists (reuse): every limit used up, still allowed", { job: generateJob({ state: "succeeded" }), render: true, counts: { "videos:2026-11-18": 3, "voiceChars:2026-11": 3000, "appVoiceChars:2026-11": 9000 } }],
+    ["a cancelled job at 3/3 (queued again, not counted)", { job: generateJob({ state: "cancelled", error: { code: "CANCELLED", message: "Cancelled.", retryable: false } }), counts: { "videos:2026-11-18": 3 } }],
+    ["characters already reserved: exactly enough for the rest", { job: reservedJob(scenes), counts: { "voiceChars:2026-11": 2750 } }],
+    ["characters already reserved: 1 short for the rest", { job: reservedJob(scenes), counts: { "voiceChars:2026-11": 2751 } }],
   ];
   for (const timezone of [KOLKATA, NEW_YORK]) {
     it.each(worlds)(`${timezone}: %s`, async (_name, world) => {
-      const pre = (await approveLimitCheck(precheckDb(world).db, { ownerId: OWNER, projectId: PROJECT, planVersionId: V1, timezone, scenes, now: NOW })).refusal;
-      const d8 = await d8Refusal(world, scenes, timezone);
-      expect(pre ? { code: pre.code, message: pre.message, details: pre.details } : null).toEqual(d8 ? { code: d8.code, message: d8.message, details: d8.details } : null);
+      const pre = await approveLimitCheck(precheckDb(world).db, { ownerId: OWNER, projectId: PROJECT, planVersionId: V1, timezone, scenes, now: NOW });
+      const d8 = await d8Answer(world, scenes, timezone);
+      const said = (e: ProjectActionError | null) => (e ? { code: e.code, message: e.message, details: e.details } : null);
+      expect(said(pre.refusal)).toEqual("refusal" in d8 ? said(d8.refusal) : null);
+      // Accepted: D8 took the path the pre-check named (show the existing video / queue the same job / a new job).
+      if ("path" in d8) expect(pre.path).toBe(d8.path);
     });
   }
 });
@@ -362,7 +388,7 @@ describe("no drift: the pre-check says exactly what D8 answers", () => {
 // ---------- a video job that hits a limit (decision 3) ----------
 
 describe("a video job stopped by a voice limit fails with the same sentence (endGenerateJob)", () => {
-  const ended = async (input: { code: "QUOTA_EXCEEDED" | "SPEND_CEILING"; needed?: number; timezone?: string; used?: number }) => {
+  const ended = async (input: { code: "QUOTA_EXCEEDED" | "SPEND_CEILING"; needed?: number | null; timezone?: string; used?: number }) => {
     const job = generateJob({ state: "running", attempt: 1 });
     const fake = fakeDb({
       "jobs.findOne": () => job,
@@ -388,11 +414,24 @@ describe("a video job stopped by a voice limit fails with the same sentence (end
 
   it("the app's limit: the pause-for-everyone sentence in the creator's timezone", async () => {
     expect((await ended({ code: "SPEND_CEILING", needed: 500 })).project.lastError.message).toBe(CEILING_DEC_1);
-    expect((await ended({ code: "SPEND_CEILING", timezone: NEW_YORK })).job.error.message).toContain("until 30 November");
+    expect((await ended({ code: "SPEND_CEILING", needed: null, timezone: NEW_YORK })).job.error.message).toBe("Video making is paused for everyone until 30 November, 7:00 pm your time (the app's monthly voice limit is used up). Your videos and downloads still work.");
   });
 
-  it("the creator's limit without the characters (should not happen): the short fallback", async () => {
+  it("one request refused while recording (needed null): the creator's sentence without a number", async () => {
+    expect((await ended({ code: "QUOTA_EXCEEDED", needed: null, used: 2950 })).job.error.message).toBe(
+      "You don't have enough voice characters left this month for this video. The limit resets on 1 December.",
+    );
+  });
+
+  it("ElevenLabs refused on its own (no needed): the plain line, no date we can't know", async () => {
+    expect((await ended({ code: "SPEND_CEILING" })).job.error.message).toBe("Voice limit reached this month.");
     expect((await ended({ code: "QUOTA_EXCEEDED" })).job.error.message).toBe("Voice limit reached this month.");
+  });
+
+  it("at a month boundary the numbers would contradict (needs 1,050, 3,000 left): the sentence without numbers", async () => {
+    expect((await ended({ code: "QUOTA_EXCEEDED", needed: 1050, used: 0 })).job.error.message).toBe(
+      "You don't have enough voice characters left this month for this video. The limit resets on 1 December.",
+    );
   });
 });
 

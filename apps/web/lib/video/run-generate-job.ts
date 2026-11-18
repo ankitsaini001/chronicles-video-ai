@@ -87,8 +87,11 @@ export interface GenerateJobStore {
   progress(input: { jobId: ObjectId; attempt: number; stage: GenerateStage; percent: number; message: string; stages?: Partial<Record<GenerateStage, "running" | "succeeded">> }): Promise<{ cancelRequested: boolean } | null>;
   beginRender(input: { jobId: ObjectId; attempt: number; renderId: ObjectId }): Promise<{ cancelRequested: boolean } | null>;
   complete(input: { jobId: ObjectId; attempt: number; render: RenderToSave }): Promise<boolean>;
-  /** `needed` (F27): the voice characters a refused count asked for (the failure message names them). */
-  end(input: { jobId: ObjectId; attempt: number; outcome: "failed" | "needs_input" | "cancelled"; code?: GenerateErrorCode; stage?: GenerateStage; detail?: string; needed?: number; needsInput?: JobNeedsInput }): Promise<boolean>;
+  /**
+   * `needed` (F27): the voice characters our refused reservation asked for (the failure message names
+   * them); null = our counter refused one request while recording (no number given); absent otherwise.
+   */
+  end(input: { jobId: ObjectId; attempt: number; outcome: "failed" | "needs_input" | "cancelled"; code?: GenerateErrorCode; stage?: GenerateStage; detail?: string; needed?: number | null; needsInput?: JobNeedsInput }): Promise<boolean>;
 }
 
 // The R2 methods, the create-only upload and the work-folder clean-up are shared with the caption
@@ -147,12 +150,9 @@ class JobStopped extends Error {
   }
 }
 
-/** A provider retry would pass a monthly voice limit (it is not sent). `characters`: what it would have counted. */
+/** A provider retry would pass a monthly voice limit (it is not sent). */
 export class VoiceLimitDuringRecording extends SpeechBudgetError {
-  constructor(
-    readonly code: "QUOTA_EXCEEDED" | "SPEND_CEILING",
-    readonly characters?: number,
-  ) {
+  constructor(readonly code: "QUOTA_EXCEEDED" | "SPEND_CEILING") {
     super(code === "QUOTA_EXCEEDED" ? "the creator's monthly voice characters are used up" : "the app's monthly voice characters are used up");
   }
 }
@@ -224,7 +224,7 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
   const jobId = new ObjectId(event.jobId);
   const attempt = event.attempt;
 
-  const end = async (outcome: "failed" | "needs_input" | "cancelled", extra: { code?: GenerateErrorCode; stage?: GenerateStage; detail?: string; needed?: number; needsInput?: JobNeedsInput } = {}): Promise<StepResult> => {
+  const end = async (outcome: "failed" | "needs_input" | "cancelled", extra: { code?: GenerateErrorCode; stage?: GenerateStage; detail?: string; needed?: number | null; needsInput?: JobNeedsInput } = {}): Promise<StepResult> => {
     const ended = await store.end({ jobId, attempt, outcome, ...extra });
     return ended ? { status: "ended", outcome } : { status: "stale" };
   };
@@ -460,8 +460,8 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
           // A retry: the previous request ended with the error the provider retried (busy, network, timeout).
           if (requestNumber > 1) await finishUsage("failed", usageOutcomeOf(retried), mayHaveBilled(retried) ? characters : 0);
           const counted = await store.reserveVoiceSend({ jobId, attempt, item: { cacheKey, characters }, timezone });
-          if (counted === "quota") throw new VoiceLimitDuringRecording("QUOTA_EXCEEDED", characters);
-          if (counted === "ceiling") throw new VoiceLimitDuringRecording("SPEND_CEILING", characters);
+          if (counted === "quota") throw new VoiceLimitDuringRecording("QUOTA_EXCEEDED");
+          if (counted === "ceiling") throw new VoiceLimitDuringRecording("SPEND_CEILING");
           if (counted === "stale") throw new JobStopped("the job no longer runs this attempt");
           if (counted === "cancelled") throw new JobStopped("Cancel was pressed: nothing more is sent", true);
           usage = await store.reserveUsage({ ownerId: ownerId.toHexString(), projectId, jobId: event.jobId, model, characters });
@@ -492,8 +492,9 @@ export async function runGenerateJob(input: { event: { jobId: string; attempt: n
         const line = SPEECH_FAILURE_LINE[code] ?? "the recording failed";
         log(code === "PROVIDER_UNAVAILABLE" ? "error" : "warn", `Video job ${event.jobId}, scene ${n}: ${error instanceof Error ? error.message : String(error)}`);
         await store.markSpeechFailed({ ...lock, message: line });
-        const needed = error instanceof VoiceLimitDuringRecording ? error.characters : undefined;
-        return end("failed", { code, stage: "speech", detail: `Scene ${n}: ${line}`, ...(needed !== undefined ? { needed } : {}) });
+        // F27: our own counter refused this one request (null: the message gives no number, one
+        // scene's characters would understate); ElevenLabs refusing on its own passes nothing.
+        return end("failed", { code, stage: "speech", detail: `Scene ${n}: ${line}`, ...(error instanceof VoiceLimitDuringRecording ? { needed: null } : {}) });
       }
       const cached = cacheRecordFor(cacheKey, request, response, new Date());
       const ends = cached.alignment?.character_end_times_seconds ?? [];

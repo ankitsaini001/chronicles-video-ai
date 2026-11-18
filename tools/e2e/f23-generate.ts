@@ -316,7 +316,7 @@ async function main(): Promise<void> {
   const appNow = await counter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC");
   await setCounter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC", 8990);
   r = await approve(a.cookie, p3);
-  check("the app-wide 9,000 a month → 503 SPEND_CEILING (F27 wording: paused for everyone)", r.status === 503 && r.json.error?.code === "SPEND_CEILING" && /^Video making is paused for everyone until \d+ \w+ /.test(r.json.error?.message ?? ""), `${r.status} ${r.json.error?.code}`);
+  check("the app-wide 9,000 a month → 503 SPEND_CEILING (F27 wording: paused for everyone)", r.status === 503 && r.json.error?.code === "SPEND_CEILING" && /^Video making is paused for everyone until \d+ \w+[ ,]/.test(r.json.error?.message ?? ""), `${r.status} ${r.json.error?.code}`);
   await setCounter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC", appNow);
 
   // ---------- owner only ----------

@@ -132,8 +132,14 @@ const dayIn = (instant: Date, timezone: string) => new Intl.DateTimeFormat("en-I
 const VIDEOS_TEXT = "You've made 3 videos today, the most for one day. You can make more after 12:00 am (midnight) your time.";
 const voiceText = (needed: number, left: number, timezone: string) =>
   `This video needs about ${n(needed)} voice characters, but you have ${n(left)} left this month. The limit resets on ${dayIn(usageCounterPeriod("voiceChars", timezone).resetsAt, timezone)}.`;
-const pauseText = (timezone: string) =>
-  `Video making is paused for everyone until ${dayIn(usageCounterPeriod("appVoiceChars", "UTC").resetsAt, timezone)} (the app's monthly voice limit is used up). Your videos and downloads still work.`;
+const clockIn = (instant: Date, timezone: string) => new Intl.DateTimeFormat("en-IN", { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(instant);
+/** The app's month ends at 00:00 UTC; unless that is midnight for the creator, the time is said too ("1 December, 5:30 am your time"). */
+const pauseText = (timezone: string) => {
+  const at = usageCounterPeriod("appVoiceChars", "UTC").resetsAt;
+  const clock = clockIn(at, timezone);
+  return `Video making is paused for everyone until ${dayIn(at, timezone)}${clock === "12:00 am" ? "" : `, ${clock} your time`} (the app's monthly voice limit is used up). Your videos and downloads still work.`;
+};
+const PROJECTS_TEXT = "You've created 5 projects today, the most for one day. You can create more after 12:00 am (midnight) your time.";
 
 // ---------- the storyboard page ----------
 
@@ -271,6 +277,15 @@ async function main(): Promise<void> {
   board = await storyboard(b.cookie, q1);
   check(`…B is paused too, with the date in B's timezone (${dayIn(usageCounterPeriod("appVoiceChars", "UTC").resetsAt, NEW_YORK)})`, shows(board, pauseText(NEW_YORK)) && greyedOut(board), boardDetail(board));
   await setCounter(APP, "appVoiceChars", "UTC", appBefore);
+
+  // ---------- 7b. projects per day: the same wording (founder 2026-11-18) ----------
+  const projectsBefore = await counter(a.id, "projects", KOLKATA);
+  const ownedBefore = await db.collection("projects").countDocuments({ ownerId: a.id });
+  await setCounter(a.id, "projects", KOLKATA, 5);
+  r = await send(a.cookie, "POST", "/api/v1/projects", { inputType: "topic", text: "How do volcanoes erupt?", language: "en", voiceGender: "female" }, { "idempotency-key": key() });
+  check("C2, 6th project of the day → 429 projects_per_day with the videos-style words", r.status === 429 && r.json.error?.code === "QUOTA_EXCEEDED" && r.json.error?.message === PROJECTS_TEXT && r.json.error?.details?.quota === "projects_per_day" && r.json.error.details.resetsAt === usageCounterPeriod("projects", KOLKATA).resetsAt.toISOString(), `${r.status} ${r.json.error?.message}`);
+  check("…nothing created, still 5", (await db.collection("projects").countDocuments({ ownerId: a.id })) === ownedBefore && (await counter(a.id, "projects", KOLKATA)) === 5);
+  await setCounter(a.id, "projects", KOLKATA, projectsBefore);
 
   // ---------- 8. a video job stopped by a voice limit (decision 3) ----------
   // Rare (D8 checks first): the limit is reached between Approve and the job's reservation. Set up

@@ -268,7 +268,6 @@ describe("the storyboard after a change on the video: the note and the button", 
   it("says how many videos are left today (F27: at 0 left the page shows the limit's own note instead)", () => {
     expect(videosTodayLine({ used: 0, limit: 3 })).toBe("It counts as 1 of your 3 videos today (3 left).");
     expect(videosTodayLine({ used: 2, limit: 3 })).toBe("It counts as 1 of your 3 videos today (1 left).");
-    expect(videosTodayLine({ used: 3, limit: 3 })).toBe("You have no videos left today.");
     expect(newVideoNote({ newScenes: [2], reusedScenes: [0, 1], characters: 99 }, null)).toMatch(/The other 2 scenes reuse their recordings\.$/);
   });
 
