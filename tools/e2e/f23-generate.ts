@@ -310,12 +310,13 @@ async function main(): Promise<void> {
   await setCounter(a.id, "videos", tz, 0);
   await setCounter(a.id, "voiceChars", tz, 2990);
   r = await approve(a.cookie, p3);
-  check("the creator's 3,000 voice characters → 429 'Voice limit reached this month.'; videos/day not counted", r.status === 429 && r.json.error?.message === "Voice limit reached this month." && r.json.error?.details?.quota === "voice_characters_per_month" && (await counter(a.id, "videos", tz)) === 0, `${r.status} ${r.json.error?.message}`);
+  // F27: the message says needed vs left and the reset date (tools/e2e/f27-limits.ts checks the exact words).
+  check("the creator's 3,000 voice characters → 429 (F27 wording: needed vs 10 left); videos/day not counted", r.status === 429 && /^This video needs about [\d,]+ voice characters, but you have 10 left this month\. The limit resets on \d+ \w+\.$/.test(r.json.error?.message ?? "") && r.json.error?.details?.quota === "voice_characters_per_month" && (await counter(a.id, "videos", tz)) === 0, `${r.status} ${r.json.error?.message}`);
   await setCounter(a.id, "voiceChars", tz, 0);
   const appNow = await counter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC");
   await setCounter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC", 8990);
   r = await approve(a.cookie, p3);
-  check("the app-wide 9,000 a month → 503 SPEND_CEILING 'Voice limit reached this month.'", r.status === 503 && r.json.error?.code === "SPEND_CEILING" && r.json.error?.message === "Voice limit reached this month.", `${r.status} ${r.json.error?.code}`);
+  check("the app-wide 9,000 a month → 503 SPEND_CEILING (F27 wording: paused for everyone)", r.status === 503 && r.json.error?.code === "SPEND_CEILING" && /^Video making is paused for everyone until \d+ \w+ /.test(r.json.error?.message ?? ""), `${r.status} ${r.json.error?.code}`);
   await setCounter(APP_USAGE_OWNER_ID, "appVoiceChars", "UTC", appNow);
 
   // ---------- owner only ----------
