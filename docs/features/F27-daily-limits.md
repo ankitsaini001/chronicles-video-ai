@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔨 Building (plan approved 2026-11-18) |
+| **Status** | 🧪 Testing (built 2026-11-18; waiting for code review and the founder's test) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F23 |
 | **Design** | — (the storyboard's cost note and approve bar from F26) |
@@ -44,19 +44,44 @@
 4. **Tests:** the 4th video of a day refused; counters rise; reset at midnight in unit tests (India and other timezones, month boundary); voice "not enough" and "exactly enough". E2E with the stand-in voice and Gemini only.
 5. **Founder test** (free): the new project (needs about 1,000 characters, about 790 left) shows the voice warning and a greyed-out Approve, nothing spent. The 4th-video case is proven by the e2e (on the real account it would cost 3 real videos).
 
+### Choices made while building (engineer)
+- **The server writes the whole sentence.** D8, E2 and a failed video job send the full sentence as the error `message`, built with the creator's timezone; the numbers stay in `details` as before. Every screen just shows the message, so the storyboard, the failure screen and a refused click always read the same. The sentences live in ONE file, `packages/db/src/limit-messages.ts` (no database code in it, so the Idea page uses its reset-time helper too: "You can create more from 12:00 am IST." is unchanged).
+- **The warning before Approve uses D8's own functions.** `approveLimitCheck` (`packages/db/src/generate-jobs.ts`) only reads the database and follows D8's path and order: this version already has its video → approving costs nothing, never greyed out; a failed or cancelled job of this version (D8 queues the same job again) → only the voice is checked (no video of the day is counted); otherwise videos/day, then the voice (`voiceRefusal`, the very function D8/E2 use), the creator's 3,000 before the app's 9,000. "Exactly enough" passes and one more is refused by one shared rule (`wouldExceed`). A unit test runs the warning and D8 side by side on nine situations in two timezones and expects the same answer (code, words and numbers).
+- **Where it shows:** a red note above the scenes ("Can't approve now: …" for screen readers) and the short reason next to the greyed-out button ("No videos left today." / "Not enough voice characters left this month." / "Video making is paused for everyone."); the button points to the note (`aria-describedby`). It works for the first video too (no cost note there, only the reason when it won't fit), for **Approve & make new video** (F26) and for **Generate video** (an approved version whose video was cancelled).
+- **F26's cost note fixed on the way:** "It counts as 1 of your 3 videos today (N left)." now shows only when approving really starts a NEW video job (re-queuing a failed or cancelled one doesn't count), and the note is left out when approving just shows this version's existing video (e.g. after an Undo).
+- **A video job that hits a limit** gets the same sentence (`endGenerateJob` builds it from the job owner's timezone and the characters the refused count asked for: the worker now passes them). Without the characters (ElevenLabs refusing on its own) the app's "paused for everyone" sentence is used; the creator's case falls back to "Voice limit reached this month.".
+- **The app's reset date in each creator's timezone:** the app's month is a UTC month, so it ends on 1 December at 05:30 in India but on 30 November at 7 pm in New York: a New York creator reads "until 30 November" (correct for them).
+
 ## Steps
-_Filled in while building._
+- [x] 1. Database: the sentences (`limit-messages.ts`), the refusals of D8/E2 (`videosPerDayError`, `voiceLimitError`), the read-only check before Approve (`approveLimitCheck`, `voiceRefusal`, `wouldExceed`), a failed job's sentence (`endGenerateJob`; the worker passes the characters) — `aa27326`
+- [x] 2. Screens: the storyboard's limit note, greyed-out Approve / Generate video with the reason (`StoryboardScreen.tsx`, `Note.tsx`, the storyboard page, `lib/video/narration-cost.ts` `approveLimitFor`, `lib/video/new-video.ts`); the Idea page reuses the shared reset-time helper — `a5a6984`
+- [x] 3. Unit tests (`tests/daily-limits.test.ts`, 48 tests; worker test for the characters in `tests/generate-video.test.ts`) — `e38643b`
+- [x] 4. E2E `tools/e2e/f27-limits.ts` (stand-in voice and Gemini, no render) — `4d5309c`
+- [x] 5. Docs: API.md (§4.3, §10.1, §10.2, D8, E2 "As built (F27)"), this file, the tracker
 
 ## How to try it (founder)
-_Filled in when it is ready._
+**Restart `npm run dev` once** (Ctrl+C, then `npm run dev` again; `npm run inngest` can keep running): the database package got a new file the browser loads. Nothing else to set up: no new setting, no new index. **Cost: nothing.** You only look; nothing is approved, no voice or AI call.
+1. Open **My videos** and click your **new project** (the one without a video yet, id starting `4cd5bb`). It opens on the storyboard.
+2. Above the scenes you now see a red note, e.g. "This video needs about 1,0xx voice characters, but you have 79x left this month. The limit resets on 1 December." (your exact numbers).
+3. At the bottom, **Approve & generate video** is greyed out and next to it: "Not enough voice characters left this month." Clicking it does nothing.
+4. Check that nothing was spent: the header still says the same "Videos today", and your voice characters this month are unchanged.
+5. Optional: open one of your ready videos' storyboards ("Edit storyboard"): no red note there (approving a version that already has its video costs nothing).
+To make that new video this month, shorten the narration (Edit or "Ask for changes") until the note goes away; or wait until 1 December. The 4th-video-of-the-day case is proven by the e2e (on your real account it would cost 3 real videos).
 
 ## Known limits
-_Filled in while building._
+- **The warning is worked out when the page opens.** If you use voice characters or videos in another tab meanwhile, the button may still look enabled; the click then gets the same sentence from the server (D8 checks everything again). Reloading the page updates it.
+- **A failed video's message keeps its date.** A job stopped by the voice limit says e.g. "The limit resets on 1 December."; after that date the old message stays on the failure screen until you press Try again (which works then).
+- **Try again on the failure screen is not greyed out in advance** (kept simple): while the limit still applies it answers with the same sentence and changes nothing.
+- **ElevenLabs refusing on its own** (characters used outside the app, F23's known limit) shows the "paused for everyone" sentence with the end of the app's UTC month, which may not be the day ElevenLabs' own monthly allowance resets.
+- **"About N voice characters"** is what D8 counts (recordings you already have are free). As in F26, it can overstate (never understate) when an earlier attempt of the same video already reserved some characters.
+- The first video shows no cost note (only the reason when it won't fit); the cost note stays an F26 feature of a new video after a change.
+- No Gemini spend ceiling (see "Not in this feature"); the limits stay code constants until F36.
+- `tools/e2e/f23-generate.ts` was updated to expect the new wording but not re-run (it renders real videos); the same refusals are covered by the F27 e2e.
 
 ## How we test it (done when all are ticked)
-- [ ] 4th video in a day is refused with a clear message
-- [ ] Counter updates
-- [ ] Resets next day
+- [x] 4th video in a day is refused with a clear message (e2e: after D8 accepted the 3rd video of the day (cancelled at once, no render), the 4th → 429 "You've made 3 videos today, …", still 3, no job, no approval; the storyboard showed the note and a greyed-out Approve before the click; the other user unaffected; unit: the warning and D8 agree in 18 situations)
+- [x] Counter updates (e2e: the accepted 3rd video took videos today 2 → 3; B1 and the header chip "Videos today: 3 of 3" followed every change of the counters; refused clicks counted nothing)
+- [x] Resets next day (unit: the day changes at 18:30 UTC for India and 05:00 UTC for New York, the month at each creator's 1st and the app's in UTC; 3 of 3 one second before midnight is refused, one second after it is allowed. e2e: 3 videos yesterday don't count today; New York's refusal resets at 05:00 UTC)
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
 
@@ -64,3 +89,4 @@ _Filled in while building._
 | Date | What happened |
 |---|---|
 | 2026-11-18 | Plan approved by the founder (decisions 1–5). |
+| 2026-11-18 | **Built** in small commits on `dev` (see Steps). Unit tests: **1097 pass** (48 new in `tests/daily-limits.test.ts`, 1 new worker test; the F23/F26 tests that checked the old words now check the new ones); typecheck clean; `next build` exit 0 (Next.js 16.4.6). **E2E `tools/e2e/f27-limits.ts`: 48/48 pass** on the first run, on a fresh `bytereel_test` (port 3236, a private Inngest on 8299; stand-in voice and Gemini; no render: limits set by writing the test database's counters, and the one accepted video cancelled at once, before its voice reservation). The stand-in storyboard needs 1,160 voice characters: at 2,999 used → "…needs about 1,160 voice characters, but you have 1 left…", 1 short → "…1,159 left…", exactly enough → allowed. The app at 9,000 → 503 "paused for everyone until 1 December" for the India creator and "until 30 November" on the New York creator's storyboard. A job stopped by the voice limit showed the sentence on the failure screen, and Try again was refused with the same words. Test servers stopped by pid, `bytereel_test` dropped before and after; zero real ElevenLabs and Gemini calls; TMPDIR inside the project. Ready for code review and the founder's test. |

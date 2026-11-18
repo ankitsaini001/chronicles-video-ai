@@ -76,7 +76,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ✅ Done |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ✅ Done |
 | F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | ✅ Done |
-| F27 | [Daily limits](F27-daily-limits.md) | F23 | 🔨 Building |
+| F27 | [Daily limits](F27-daily-limits.md) | F23 | 🧪 Testing |
 
 ### A5 · Instagram publishing
 
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F26 — Revision chat on the video** is ✅ Done (founder OK 2026-11-18: "Ask for changes" on the video page; a change makes a new storyboard version with a cost note, and only the changed scenes get new narration). Next: **F27 — Daily limits**. Done since (2026-11-18): Gemini retries wait 20 s then 60 s (503 "high demand" on 2026-11-17), and Next.js 16.4.3 → 16.4.6 (security fix; verified in a temporary worktree: 1048 unit tests, `next build`, F26 e2e 64/64; never `npm audit fix --force`). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b, F23, F24, F25 and F26 done (v4 hero style is the only video style).
+**Now:** **F27 — Daily limits** is 🧪 Testing (built 2026-11-18: limit messages that say why and when they reset, in the creator's timezone; the storyboard greys out Approve with the reason before the click; unit tests 1097, e2e 48/48). Next: code review, then the founder's free test on the new project (see F27 "How to try it"). Before: **F26 — Revision chat on the video** ✅ Done (founder OK 2026-11-18). Done since (2026-11-18): Gemini retries wait 20 s then 60 s (503 "high demand" on 2026-11-17), and Next.js 16.4.3 → 16.4.6 (security fix; verified in a temporary worktree: 1048 unit tests, `next build`, F26 e2e 64/64; never `npm audit fix --force`). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b, F23, F24, F25 and F26 done (v4 hero style is the only video style).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
