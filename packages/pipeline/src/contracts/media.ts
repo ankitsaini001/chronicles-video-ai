@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HERO_NAMES } from "../planning/hero-catalog";
 import { ICON_NAMES } from "../planning/icon-catalog";
 import { LanguageSchema, SafeIdSchema, SCENE_TYPES, Sha256Schema } from "./common";
 
@@ -146,6 +147,22 @@ export const TimelineEventSchema = z.strictObject({
 });
 export type TimelineEvent = z.infer<typeof TimelineEventSchema>;
 
+/**
+ * One step of a scene's hero track (F22b): from `startFrame` on, the big object in the middle of
+ * the screen is `hero`; null means "no hero fits", and the scene's `icon` is shown large in a
+ * glowing medallion instead. `source` says where the choice came from: the planner's pick for the
+ * narration block ("plan"; hero null when the planner said "none"), the free keyword fallback
+ * ("keyword"), or the icon medallion because nothing was named ("icon").
+ * Computed by the timeline compiler (packages/pipeline/src/timing/heroes.ts).
+ */
+export const HeroStepSchema = z.strictObject({
+  startFrame: z.number().int().nonnegative(),
+  hero: z.enum(HERO_NAMES).nullable(),
+  icon: z.enum(ICON_NAMES),
+  source: z.enum(["plan", "keyword", "icon"]),
+});
+export type HeroStep = z.infer<typeof HeroStepSchema>;
+
 export const TimelineSceneSchema = z.strictObject({
   sceneId: SafeIdSchema,
   type: z.enum(SCENE_TYPES),
@@ -158,11 +175,20 @@ export const TimelineSceneSchema = z.strictObject({
   audioKey: z.string().nullable(),
   objects: z.array(TimelineObjectSchema),
   events: z.array(TimelineEventSchema),
+  /** The hero track, in frame order; the first step starts at `startFrame` (never an empty screen). */
+  heroes: z.array(HeroStepSchema).min(1),
 });
 export type TimelineScene = z.infer<typeof TimelineSceneSchema>;
 
+/**
+ * Version 2 (F22b, video style v4) added the scene hero track and caption word timings. Version 1
+ * files (written before) are never read back: a re-render compiles a fresh timeline from the plan
+ * and the saved alignment, which is free and deterministic.
+ */
+export const TIMELINE_SCHEMA_VERSION = 2;
+
 export const TimelineSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(TIMELINE_SCHEMA_VERSION),
   fps: z.literal(VIDEO_FORMAT.fps),
   width: z.literal(VIDEO_FORMAT.width),
   height: z.literal(VIDEO_FORMAT.height),
@@ -176,6 +202,17 @@ export type Timeline = z.infer<typeof TimelineSchema>;
 
 // ---------- captions (captions.json) ----------
 
+/** One caption word: the display token, when it is spoken, and whether it is a key term (amber). */
+export const CaptionTrackWordSchema = z.strictObject({
+  text: z.string().min(1),
+  /** Absolute frames: start = floor(word start), end = ceil(word end). */
+  startFrame: z.number().int().nonnegative(),
+  endFrame: z.number().int().positive(),
+  /** A number, or a word from the scene's on-screen labels (not a topic word or a stopword). */
+  key: z.boolean(),
+});
+export type CaptionTrackWord = z.infer<typeof CaptionTrackWordSchema>;
+
 export const CaptionSchema = z.strictObject({
   id: z.string().min(1),
   sceneId: SafeIdSchema,
@@ -185,11 +222,28 @@ export const CaptionSchema = z.strictObject({
   text: z.string().min(1),
   /** Pre-broken lines (1 or 2). The renderer never re-wraps them. */
   lines: z.array(z.string().min(1)).min(1).max(2),
+  /**
+   * The phrase's words in order (3-5 words, F22b): the renderer highlights the word being spoken.
+   * Joined with single spaces they equal `text`, and the lines split them in order.
+   */
+  words: z.array(CaptionTrackWordSchema).min(1),
+  /**
+   * Only on a caption drawn smaller than the track's `fontSizePx`: a single word too wide for a line
+   * at the normal size, shrunk or broken at a hyphen, slash or dot (timing/captions.ts
+   * captionWordFit). Absent on every other caption, so other caption files are unchanged.
+   */
+  fontSizePx: z.number().positive().optional(),
+  /**
+   * Only on a caption the creator fixed (F25 caption fixes, timing/caption-overrides.ts): the text
+   * the compiler made from the narration. `text` is then the creator's text. Absent on every other
+   * caption, so other caption files are unchanged.
+   */
+  originalText: z.string().min(1).optional(),
 });
 export type Caption = z.infer<typeof CaptionSchema>;
 
 export const CaptionTrackSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(TIMELINE_SCHEMA_VERSION),
   timingSource: TimingSourceSchema,
   language: LanguageSchema,
   /** How line widths were decided, e.g. "estimate:char-class-v1" (no browser outside rendering). */

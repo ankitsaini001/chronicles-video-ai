@@ -101,12 +101,12 @@ describe("F16 storyboard screen pieces", () => {
   const scene = (id: string) => plan.scenes.find((s) => s.id === id)!;
 
   it("builds the Visual line from the plan's objects (no AI)", () => {
-    expect(visualLine(scene("scene-hook"))).toBe("Hook: The Water Cycle · Where does rain come from?");
-    expect(visualLine(scene("scene-evaporation"))).toBe("Process: Oceans, lakes, rivers → Water vapour");
-    expect(visualLine(scene("scene-condensation"))).toBe("Diagram: Cloud (Colder air, Tiny water droplets)");
-    expect(visualLine(scene("scene-earth-water"))).toMatch(/^Chart: Oceans 97, Ice 2, Fresh water 1$/);
-    expect(visualLine(scene("scene-takeaway"))).toBe("Takeaway: Remember the loop · Evaporation and condensation · Precipitation and collection");
-    expect(visualLine({ id: "x", type: "comparison", narration: [], objects: [{ id: "a", kind: "column", label: "Stocks" }, { id: "b", kind: "column", label: "Mutual funds" }] })).toBe("Comparison: Stocks vs Mutual funds");
+    expect(visualLine(scene("scene-hook"))).toBe("Hero: rain cloud · Hook: The Water Cycle · Where does rain come from?");
+    expect(visualLine(scene("scene-evaporation"))).toBe("Hero: sun, ocean, river… · Process: Oceans, lakes, rivers → Water vapour");
+    expect(visualLine(scene("scene-condensation"))).toMatch(/^Hero: [a-z ,…]+ · Diagram: Cloud \(Colder air, Tiny water droplets\)$/);
+    expect(visualLine(scene("scene-earth-water"))).toMatch(/^Hero: [a-z ,…]+ · Chart: Oceans 97, Ice 2, Fresh water 1$/);
+    expect(visualLine(scene("scene-takeaway"))).toMatch(/^Hero: [a-z ,…]+ · Takeaway: Remember the loop · Evaporation and condensation · Precipitation and collection$/);
+    expect(visualLine({ id: "x", type: "comparison", narration: [], objects: [{ id: "a", kind: "column", label: "Stocks" }, { id: "b", kind: "column", label: "Mutual funds" }] })).toBe("Hero: growth chart · Comparison: Stocks vs Mutual funds");
     expect(sceneNumber(0)).toBe("Scene 01");
   });
 
@@ -165,6 +165,21 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
     expect(base.plan.scenes[0]!.narration[0]!.text).not.toBe(text); // the base is never changed
   });
 
+  it("F22b: new words drop the planner's hero (the keyword fallback picks from them); unchanged words keep it", () => {
+    const base = versionDoc();
+    base.plan.scenes[0]!.narration[0]!.hero = "question-mark";
+    base.plan.scenes[0]!.narration[1]!.hero = null;
+    const text = `${base.plan.scenes[0]!.narration[0]!.text} Let's find out.`;
+    const edited = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text }] }));
+    expect(edited.validation.valid).toBe(true);
+    expect("hero" in edited.plan.scenes[0]!.narration[0]!).toBe(false);
+    expect(edited.plan.scenes[0]!.narration[1]!.hero).toBeNull(); // another block: untouched
+    // only the captions change (same words): the hero stays
+    const sameText = buildPlanVersion(base, ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: base.plan.scenes[0]!.narration[0]!.text, display: "Where does rain come from? And where does it go after it falls?" }] }));
+    expect(sameText.plan.scenes[0]!.narration[0]!.hero).toBe("question-mark");
+    expect(base.plan.scenes[0]!.narration[0]!.hero).toBe("question-mark"); // the base is never changed
+  });
+
   it("an edit that removes a cue is saved as invalid with the problem on that scene", () => {
     const built = buildPlanVersion(versionDoc(), ids, narrationChange({ sceneId: "scene-hook", blocks: [{ narrationId: "line-hook-question", text: "Rain is interesting." }] }));
     expect(built.validation.valid).toBe(false);
@@ -215,7 +230,8 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
   it("allowedActions on a storyboard: edit, change (under 20), approve (until approved), retry a failed change", () => {
     expect(allowedActionsFor(projectDoc(), null)).toEqual(["rename", "edit_storyboard", "request_revision", "approve_storyboard", "archive"]);
     expect(allowedActionsFor(projectDoc({ planRequestCount: 20 }), null)).toEqual(["rename", "edit_storyboard", "approve_storyboard", "archive"]);
-    expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null)).toEqual(["rename", "edit_storyboard", "request_revision", "archive"]);
+    // F23: an approved version without a video job offers "Generate video" (D8 again).
+    expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null)).toEqual(["rename", "edit_storyboard", "request_revision", "generate_video", "archive"]);
     expect(allowedActionsFor(projectDoc({ activeJobId: new ObjectId() }), null)).toEqual([]);
     // Until F30 (post invalidation), a scheduled or failed-publish project's storyboard can't change.
     expect(allowedActionsFor(projectDoc({ state: "scheduled" }), null)).toEqual(["rename", "archive"]);

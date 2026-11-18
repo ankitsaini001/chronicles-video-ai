@@ -6,14 +6,17 @@ Fixture plans use `ownerId: "fixture-owner"` and project IDs starting with `fixt
 
 | File | Expected result |
 |---|---|
-| `water-cycle.plan.json` | Valid English plan, 6 scenes, about 82 s estimated |
+| `water-cycle.plan.json` | Valid English plan, 6 scenes, about 82 s estimated (hook, process flow, labeled diagram, pie chart, takeaway); no heroes picked: shows the keyword fallback |
+| `sip-vs-fd.plan.json` | Valid English plan, 5 scenes, about 68 s (hook, comparison with ✓/✗ points, bar chart, step sequence, takeaway); some narration blocks have a planner-picked `hero`, others use the fallback (F22b) |
+| `internet-journey.plan.json` | Valid English plan, 7 scenes, about 70 s (hook, timeline, labeled diagram, process flow, line chart, counter, takeaway); the counter scene names no hero, so it shows the scene icon in a medallion (F22b) |
+| `long-labels.plan.json` | Valid English plan, 6 scenes, about 80 s: a layout check (F22b review). The longest labels a plan allows (60-character comparison points and takeaway rows, 32-character diagram parts), a 7-step process rail and a 7-bar chart; every block has a planner-picked `hero` |
 | `invalid-unknown-pattern.plan.json` | Schema error: scene type `infographic` is not one of the 8 patterns |
 | `invalid-missing-anchor.plan.json` | Anchor phrase `boils instantly` is not in its narration block |
 | `invalid-bad-target.plan.json` | Event target `lightning` is not an object in the scene |
 | `invalid-wrong-first-last.plan.json` | First scene is not `title-hook` and last scene is not `takeaway` |
 | `invalid-hinglish-devanagari.plan.json` | Hinglish caption (`display`) is written in Devanagari instead of Roman script |
 
-Each invalid fixture is a copy of the valid plan with exactly one defect.
+Each invalid fixture is a copy of the water-cycle plan with exactly one defect. Together the first three valid plans use all 8 scene types, so rendering them (`npm run pipeline -- render-fixture --file fixtures/<name>.plan.json`) shows every v4 layout (F22b).
 
 **Synthetic timing (P1).** `npm run pipeline -- render-fixture` invents a deterministic, *silent* per-character
 alignment for a fixture plan (2.8 words/s; `packages/pipeline/src/timing/synthetic-alignment.ts`) and stores it as

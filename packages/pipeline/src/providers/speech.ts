@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { CharacterAlignmentSchema, type CharacterAlignment, type VoiceSettings } from "../contracts";
 import { parseRetryAfter, ProviderError, type ProviderErrorKind } from "./errors";
 import { withRetries, type RetryOptions } from "./retry";
@@ -121,9 +122,17 @@ export class ElevenLabsSpeech implements SpeechProvider {
   }
 }
 
+/**
+ * ElevenLabs' alignment, read LOOSELY (code review, 2026-11-16): the three arrays we use are checked;
+ * any other field ElevenLabs adds is ignored and dropped (z.object strips unknown keys), so a new
+ * field never turns a billed answer into "bad-response". Only the known fields are kept, so the
+ * app's own stored data still passes its strict schema (CharacterAlignmentSchema).
+ */
+const ProviderAlignmentSchema = z.object(CharacterAlignmentSchema.shape);
+
 function parseAlignment(value: unknown, field: string): CharacterAlignment | null {
   if (value === null || value === undefined) return null;
-  const parsed = CharacterAlignmentSchema.safeParse(value);
+  const parsed = ProviderAlignmentSchema.safeParse(value);
   if (!parsed.success) {
     throw new ProviderError({ provider: ELEVENLABS_PROVIDER, kind: "bad-response", message: `ElevenLabs ${field} has an unexpected shape` });
   }

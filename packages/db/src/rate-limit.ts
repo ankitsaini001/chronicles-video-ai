@@ -46,8 +46,10 @@ export const API_RATE_LIMITS = {
   editProjectPerUser: { name: "edit-project", limit: 60, windowSeconds: 60 },
   /** D5 revision request: 20 per hour (F18). */
   revisionPerUser: { name: "revision", limit: 20, windowSeconds: 60 * 60 },
-  /** D8 approve storyboard (later F4 caption overrides): 10 per hour (F20). */
+  /** D8 approve storyboard: 10 per hour (F20). */
   approvePerUser: { name: "approve-storyboard", limit: 10, windowSeconds: 60 * 60 },
+  /** F4 caption fixes: 10 per hour, its own counter (F25). */
+  captionFixesPerUser: { name: "caption-fixes", limit: 10, windowSeconds: 60 * 60 },
   /** E2 retry (later E3 cancel): 30 per hour, one shared counter (F15). */
   jobActionsPerUser: { name: "job-actions", limit: 30, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;

@@ -1,3 +1,4 @@
+import { isLanguageEnabled } from "@bytereel/db/languages";
 import { Button, cn, Icon, type IconName } from "@/components/ui";
 import { SITE } from "@/lib/site";
 
@@ -10,10 +11,15 @@ const POINTS = ["Storyboard in about 30 seconds", "Motion graphics timed to the 
 // Positions are relative to the 280px phone. Tiles sit beside, above or below it and touch only
 // its frame, never its text. Below `sm` there is no room beside the phone, so three are hidden.
 // Emoji sit outside the gold gradient text so they keep their own colours.
+// While Hindi is switched off (packages/db/src/languages.ts) the हिंदी tile becomes "Notes": a
+// short word, so it covers no more of the phone than हिंदी did and the six tiles stay balanced.
+const HINDI_ON = isLanguageEnabled("hi");
 const TILES = [
   { label: "Explainer", className: "-top-4 -left-4 sm:-left-10 -rotate-8", delay: "0s" },
   { label: "AI", emoji: "✨", className: "hidden sm:block top-10 sm:-right-14 rotate-6", delay: "-1.2s" },
-  { label: "हिंदी", lang: "hi", className: "top-[22%] -left-6 sm:top-1/3 sm:-left-14 -rotate-5", delay: "-2.5s" },
+  HINDI_ON
+    ? { label: "हिंदी", lang: "hi", className: "top-[22%] -left-6 sm:top-1/3 sm:-left-14 -rotate-5", delay: "-2.5s" }
+    : { label: "Notes", className: "top-[22%] -left-6 sm:top-1/3 sm:-left-14 -rotate-5", delay: "-2.5s" },
   { label: "Reels", emoji: "⚡", className: "hidden sm:block top-1/2 sm:-right-20 rotate-9", delay: "-3.8s" },
   { label: "Voice", emoji: "🎙️", className: "hidden sm:block -bottom-6 sm:-left-12 -rotate-12", delay: "-4.3s" },
   { label: "60s", emoji: "⏱️", className: "-bottom-6 -right-2 sm:-right-10 rotate-7", delay: "-0.7s" },
@@ -112,8 +118,8 @@ export function Hero() {
             Turn any topic into a <span className="text-gradient-gold min-[360px]:whitespace-nowrap">ready-to-post Reel</span>
           </h1>
           <p className="max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-            Type an idea or paste your notes. {SITE.name} writes the script, animates every concept and adds a natural voice in
-            English or Hindi.
+            Type an idea or paste your notes. {SITE.name} writes the script, animates every concept and adds a natural voice
+            {HINDI_ON ? " in English or Hindi" : ""}.
           </p>
           <ul className="flex w-full max-w-lg flex-col gap-3.5 pt-2">
             {POINTS.map((point, i) => (

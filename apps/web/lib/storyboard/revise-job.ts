@@ -1,6 +1,6 @@
 import { reviseProgressMessage, REVISE_MESSAGES, type PlanJobContext } from "@bytereel/db";
 import type { Language, VoicePreset } from "@bytereel/pipeline/contracts";
-import { buildRevisionPrompt } from "@bytereel/pipeline/planning";
+import { blocksWithoutHero, buildRevisionPrompt } from "@bytereel/pipeline/planning";
 import type { PlanJobMessages, PreparedRequest } from "../plan/run-plan-job";
 
 // The revise job (Inngest `revise-plan`, F18): the SAME durable steps as the storyboard job
@@ -27,6 +27,8 @@ export function prepareRevisionRequest({ job, project, base, revision }: PlanJob
       language,
       voicePreset,
       sources,
+      // F22b: a block that had no hero before the change keeps having none when the answer says "none"
+      blocksWithoutHero: blocksWithoutHero(base.plan),
     },
   };
 }

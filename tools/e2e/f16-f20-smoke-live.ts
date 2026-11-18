@@ -11,6 +11,8 @@ import { ObjectId } from "mongodb";
  *   2. one English storyboard, then one real revision request "make it shorter" (D5 → revise-plan).
  * Prints times, scene/word counts and the tokens of every Gemini request. At most one Try again per
  * job when Gemini is busy. About 3–8 Gemini requests in total.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: only on `bytereel_test`, port 3230–3239, against a server WITHOUT the stand-in
  * (E2E_FAKE_GEMINI unset) whose Inngest Dev Server is on port 8299. Setup: see f15-smoke-live.ts.
  *   MONGODB_DB=bytereel_test E2E_BASE_URL=http://localhost:3237 npx tsx tools/e2e/f16-f20-smoke-live.ts

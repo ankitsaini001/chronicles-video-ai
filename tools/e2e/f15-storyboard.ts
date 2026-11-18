@@ -12,6 +12,8 @@ import { ObjectId } from "mongodb";
  * PROVIDER_BUSY, PROVIDER_REJECTED, C4 edit idea, E2 retry (an attempt that asks Gemini counts 1 of 20, 429 at the limit, not
  * counted toward 5/day), C6/E1 polling, owner-only 404s, the stuck-job rule (dead job → failed,
  * lost event → sent again), the providerUsage log, the indexes and the project page.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239.
  *
  *   1. in apps/web:  npx next build
@@ -208,14 +210,15 @@ async function main(): Promise<void> {
   r = await createProject(a.cookie, "e2e busy: how vaccines work");
   const busyProject = r.json.project.id as string;
   const busyJob = r.json.job.id as string;
-  done = await waitDone(a.cookie, busyProject, 90_000);
+  // Busy waits are 20 s then 60 s (since after F26), so a busy attempt takes about 1.5 minutes.
+  done = await waitDone(a.cookie, busyProject, 3 * 60_000);
   check("busy → plan_failed PROVIDER_BUSY with 'Your idea is saved' message", done.status.state === "plan_failed" && done.status.lastError?.code === "PROVIDER_BUSY" && /Your idea is saved/.test(done.status.lastError?.message ?? ""), `${done.status.state} ${done.status.lastError?.code}`);
   rows = await usageRows(busyJob);
   check("busy: exactly 3 Gemini requests (first + 2 retries), each logged as failed/busy", rows.length === 3 && rows.every((x) => x.status === "failed" && x.outcome === "busy"), `${rows.length} rows`);
   check("busy: progress said it was trying again", done.messages.some((m) => /trying again/.test(m)), done.messages.join(" | "));
   r = await retry(a.cookie, busyJob);
   check("busy: Try again without editing → 202", r.status === 202 && r.json.attempt === 2);
-  done = await waitDone(a.cookie, busyProject, 90_000);
+  done = await waitDone(a.cookie, busyProject, 3 * 60_000);
   check("busy again → plan_failed; planRequestCount 2", done.status.state === "plan_failed" && (await db.collection("projects").findOne({ _id: new ObjectId(busyProject) }))?.planRequestCount === 2);
 
   // --- 7. Per-project limit: at 20 the Try again is refused, nothing changes.
@@ -282,6 +285,61 @@ async function main(): Promise<void> {
   });
   done = await waitDone(a.cookie, lostId.toHexString());
   check("queued job whose event never reached Inngest → sent again on the next poll → storyboard_ready", done.status.state === "storyboard_ready", done.status.state);
+
+  // --- 10b. Language switch (packages/db/src/languages.ts): Hindi/Hinglish are off. Checked before
+  // the quota: user a already used its 5 projects today, yet gets 422 (not 429), and nothing counts.
+  const projectsBefore = await db.collection("projects").countDocuments({ ownerId: a.id });
+  const todayBefore = await projectsToday(a.id);
+  for (const language of ["hi", "hinglish"]) {
+    r = await send(a.cookie, "POST", "/api/v1/projects", { inputType: "topic", text: "बचत खाता बनाम FD", language, voiceGender: "female" }, { "idempotency-key": key() });
+    check(
+      `C2 ${language} → 422 LANGUAGE_UNAVAILABLE "Only English is available right now.", no project, not counted`,
+      r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && r.json.error.message === "Only English is available right now." && (await db.collection("projects").countDocuments({ ownerId: a.id })) === projectsBefore && (await projectsToday(a.id)) === todayBefore,
+      `${r.status} ${r.json.error?.code}`,
+    );
+  }
+  // An existing Hindi project whose storyboard failed: no Try again (E2 422), no Edit idea, a note.
+  const hiId = new ObjectId();
+  const hiInput = { type: "topic", text: "बचत खाता बनाम FD", brainstormChoice: null };
+  const hiJob = { ...newPlanJob({ ownerId: a.id, projectId: hiId, project: { input: hiInput, language: "hi", voiceGender: "female" }, now }), state: "failed", error: { code: "PROVIDER_BUSY", message: "busy", retryable: true } };
+  await db.collection("jobs").insertOne(hiJob);
+  await db.collection("projects").insertOne({
+    _id: hiId, ownerId: a.id, schemaVersion: 1, title: "बचत खाता बनाम FD", language: "hi", voiceGender: "female", input: hiInput, state: "plan_failed",
+    currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: null, stateVersion: 2, planRequestCount: 1,
+    lastError: { code: "PROVIDER_BUSY", message: "busy", at: now }, createdAt: now, updatedAt: now, archivedAt: null,
+  });
+  r = await send(a.cookie, "GET", `/api/v1/projects/${hiId.toHexString()}`);
+  check("Hindi plan_failed project: allowedActions only rename, archive", r.json.allowedActions?.join() === "rename,archive", r.json.allowedActions?.join());
+  r = await retry(a.cookie, hiJob._id.toHexString());
+  const hiAfter = await db.collection("projects").findOne({ _id: hiId });
+  const hiJobAfter = await db.collection("jobs").findOne({ _id: hiJob._id });
+  check(
+    "Hindi project: E2 Try again → 422 LANGUAGE_UNAVAILABLE; job not re-queued, nothing counted",
+    r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && hiJobAfter?.state === "failed" && hiJobAfter.attempt === 1 && hiAfter?.state === "plan_failed" && hiAfter.planRequestCount === 1 && hiAfter.stateVersion === 2,
+    `${r.status} ${r.json.error?.code}`,
+  );
+  const hiPage = (await (await fetch(`${base}/projects/${hiId.toHexString()}`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
+  check("Hindi project page: viewable, the note, no Try again / Edit idea", hiPage.includes("Hindi storyboards can") && hiPage.includes("Start a new project in English.") && !hiPage.includes(">Try again<") && !hiPage.includes(">Edit idea<"));
+
+  // A Hindi job queued before the switch-off whose event was lost: the stuck-job rule sends it
+  // again, and the worker fails it at the start step (LANGUAGE_UNAVAILABLE, not retryable) with no
+  // Gemini call and nothing counted; the project ends in plan_failed, never stuck in planning.
+  const queuedHiId = new ObjectId();
+  const queuedHiJob = newPlanJob({ ownerId: a.id, projectId: queuedHiId, project: { input: hiInput, language: "hi", voiceGender: "female" }, now });
+  await db.collection("jobs").insertOne(queuedHiJob);
+  await db.collection("projects").insertOne({
+    _id: queuedHiId, ownerId: a.id, schemaVersion: 1, title: "बचत खाता बनाम FD", language: "hi", voiceGender: "female", input: hiInput, state: "planning",
+    currentPlanVersionId: null, approvedPlanVersionId: null, currentRenderId: null, activeJobId: queuedHiJob._id, stateVersion: 1, planRequestCount: 0,
+    lastError: null, createdAt: now, updatedAt: now, archivedAt: null,
+  });
+  done = await waitDone(a.cookie, queuedHiId.toHexString());
+  const queuedHiJobAfter = await db.collection("jobs").findOne({ _id: queuedHiJob._id });
+  const queuedHiAfter = await db.collection("projects").findOne({ _id: queuedHiId });
+  check(
+    "queued Hindi job (lost event) → re-sent → fails LANGUAGE_UNAVAILABLE, not retryable; plan_failed; no Gemini call, nothing counted",
+    done.status.state === "plan_failed" && queuedHiJobAfter?.error?.code === "LANGUAGE_UNAVAILABLE" && queuedHiJobAfter.error.retryable === false && queuedHiAfter?.planRequestCount === 0 && (await usageRows(queuedHiJob._id.toHexString())).length === 0 && done.status.allowedActions?.join() === "rename,archive",
+    `${done.status.state} ${queuedHiJobAfter?.error?.code}`,
+  );
 
   // --- 11. No secrets or provider details in page scripts.
   const scripts = [...failedPage.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]!);

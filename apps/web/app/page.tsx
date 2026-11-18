@@ -1,3 +1,4 @@
+import { isLanguageEnabled } from "@bytereel/db/languages";
 import type { Metadata } from "next";
 import { Hero } from "@/components/home/Hero";
 import { Examples, Faq, FinalCta, HowItWorks, Languages, WhyUs } from "@/components/home/sections";
@@ -7,11 +8,12 @@ import { SITE } from "@/lib/site";
 
 // Public home page (F03), built from the Stitch screen "ByteReel — Home Landing Page"
 // (docs/design/stitch/home-landing-v1.html), chosen by the founder over "Home v2".
+// Hindi copy shows only while Hindi is switched on (packages/db/src/languages.ts; BRAND §8).
 
 export const metadata: Metadata = {
   title: { absolute: `${SITE.name} · Turn any topic into a ready-to-post Reel` },
   description:
-    `Type an idea or paste your notes. ${SITE.name} writes the script, animates every concept and adds a natural voice in English or Hindi.`,
+    `Type an idea or paste your notes. ${SITE.name} writes the script, animates every concept and adds a natural voice${isLanguageEnabled("hi") ? " in English or Hindi" : ""}.`,
 };
 
 export default function HomePage() {

@@ -1,4 +1,4 @@
-import type { PlanJobContext, PlanJobErrorCode, PlannerAnswer, ValidPlanToSave } from "@bytereel/db";
+import type { PlanJobContext, PlanJobErrorCode, PlannerAnswer, PlanRequestReservation, ValidPlanToSave } from "@bytereel/db";
 import { voicePresetFor } from "@bytereel/db/voices";
 import type { Language, VoicePreset } from "@bytereel/pipeline/contracts";
 import {
@@ -8,6 +8,7 @@ import {
   ideaSources,
   PLAN_JOB_MAX_REQUESTS,
   PLAN_STEP_RETRIES,
+  planErrorCode,
   planJobPrompt,
   planRetryWaitMs,
   plannerRequestBase,
@@ -48,20 +49,21 @@ export interface PlanJobStore {
   /**
    * Count one Gemini request before it is sent. The attempt's FIRST request also counts 1 toward
    * the project's 20 (atomically, only below 20): "quota" when the project is already at 20.
+   * "language": the project's language is switched off (nothing counted, no request).
    */
-  reserveRequest(input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number }): Promise<"ok" | "limit" | "quota" | "stale">;
+  reserveRequest(input: { jobId: ObjectId; attempt: number; maxRequests: number; message: string; percent: number }): Promise<PlanRequestReservation>;
   saveAnswer(input: { jobId: ObjectId; attempt: number; answer: PlannerAnswer }): Promise<boolean>;
   setProgress(input: { jobId: ObjectId; attempt: number; stage: string; percent: number; message: string }): Promise<void>;
   complete(input: { jobId: ObjectId; attempt: number; result: ValidPlanToSave }): Promise<boolean>;
   fail(input: { jobId: ObjectId; attempt: number; code: PlanJobErrorCode; stage: "plan" | "validate"; detail?: string }): Promise<boolean>;
   reserveUsage(input: { ownerId: string; projectId: string; jobId: string; model: string }): Promise<unknown>;
-  finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; units: { promptTokens: number; outputTokens: number }; latencyMs: number }): Promise<void>;
+  finishUsage(handle: unknown, input: { status: "final" | "failed"; outcome: string; model: string; units: { promptTokens: number; outputTokens: number }; latencyMs: number; errorCode?: string }): Promise<void>;
 }
 
 /** What one Gemini request of this job is about: the first prompt, the code-owned plan fields and the language. */
 export interface PreparedRequest {
   prompt: string;
-  owned: { ownerId: string; projectId: string; versionId: string; parentVersionId: string | null; language: Language; voicePreset: VoicePreset; sources: ReturnType<typeof ideaSources> };
+  owned: { ownerId: string; projectId: string; versionId: string; parentVersionId: string | null; language: Language; voicePreset: VoicePreset; sources: ReturnType<typeof ideaSources>; blocksWithoutHero?: readonly string[] };
   language: Language;
   /** Progress lines for this request (default: the job's `messages`). */
   messages?: PlanJobMessages;
@@ -77,7 +79,7 @@ export interface PlanJobMessages {
 
 export const PLAN_JOB_MESSAGES: PlanJobMessages = {
   first: "Writing your storyboard…",
-  retrying: "Our AI is busy, trying again…",
+  retrying: "Our AI is busy or slow, trying again…",
   repairing: "Fixing a few details in your storyboard…",
   saving: "Checking your storyboard…",
 };
@@ -103,7 +105,7 @@ export type PlanJobEvent = { jobId: string; attempt: number };
 export type PlanJobOutcome = "saved" | "failed" | "skipped";
 
 /** What one ask step reports back (small and JSON-safe: Inngest stores it as the step's result). */
-type AskResult = { status: "valid" | "invalid" } | { status: "stale" | "limit" | "quota" | "rejected" | "setup" | "busy" };
+type AskResult = { status: "valid" | "invalid" } | { status: "stale" | "limit" | "quota" | "language" | "rejected" | "setup" | "busy" };
 
 /** Saving a paid answer is retried in-process this many times (short waits) before the step fails. */
 const SAVE_TRIES = 3;
@@ -204,7 +206,7 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
       const failure = classifyPlanRequestError(error);
       const message = error instanceof Error ? error.message : String(error);
       const outcome = failure.kind === "rejected" ? "rejected" : failure.kind === "setup" ? "error" : /timeout|timed out|abort/i.test(message) ? "timeout" : "busy";
-      await finishUsageSafely(usage, { status: "failed", outcome, model: provider.model, units: { promptTokens: 0, outputTokens: 0 }, latencyMs: now() - sentAt });
+      await finishUsageSafely(usage, { status: "failed", outcome, model: provider.model, units: { promptTokens: 0, outputTokens: 0 }, latencyMs: now() - sentAt, errorCode: planErrorCode(error) });
       if (failure.kind === "rejected") return { status: "rejected" };
       if (failure.kind === "setup") {
         log("error", `Storyboard job ${event.jobId}: Gemini refused the request (key/model/request problem): ${message}`);
@@ -311,6 +313,8 @@ export async function runPlanJob(input: { event: PlanJobEvent; runId: string | n
         return fail("PROVIDER_BUSY", "plan", result.status === "limit" ? "Request limit for this attempt reached" : "Gemini stayed busy after the allowed retries");
       case "quota":
         return fail("QUOTA_EXCEEDED", "plan", "The project already used its 20 storyboard requests");
+      case "language":
+        return fail("LANGUAGE_UNAVAILABLE", "plan", "The project's language is switched off");
       case "rejected":
         return fail("PROVIDER_REJECTED", "plan", "Gemini refused the content (safety)");
       case "setup":

@@ -3,10 +3,11 @@ import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { cleanIdeaText } from "./idea-text";
+import { isLanguageEnabled, languageUnavailableMessage } from "./languages";
 import { getJob, JOB_SCHEMA_VERSION, JOBS_COLLECTION, PLAN_ERROR_RETRYABLE, PLAN_STAGES, retryEventId, type JobDocument, type PlanCheckpoint, type PlanJobErrorCode } from "./jobs";
 import type { PlanJobContext, ValidPlanToSave } from "./plan-jobs";
 import { decodeCursor, diffScenes, encodeCursor, InvalidCursorError, PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type SceneDiff } from "./plan-versions";
-import { ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument } from "./projects";
+import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument } from "./projects";
 import { assertStoryboardEditable, ObjectIdString } from "./storyboard-edits";
 import { USAGE_LIMITS } from "./usage";
 
@@ -24,6 +25,9 @@ import { USAGE_LIMITS } from "./usage";
 // so a failed change leaves the storyboard as it was. A new version has no approval.
 // An answer that changes nothing ends as `rejected` (job `needs_input`) with a short reply asking
 // the creator to say exactly what to change: no new version.
+// F26: the same chat on the video page (`stage: video`, only on a ready video). It runs the same
+// job; on success the project goes to `storyboard_ready` with `currentRenderId` kept (the older
+// video stays until the new one is ready), and the creator approves the new version on the storyboard.
 
 export const REVISIONS_COLLECTION = "revisions";
 export const REVISION_SCHEMA_VERSION = 1;
@@ -55,15 +59,17 @@ export interface RevisionDocument {
 /** What the creator reads while a change runs and when it ends (API.md §4.3). Shown as is. */
 export const REVISE_MESSAGES = {
   WRITING: "Updating your storyboard…",
-  RETRYING: "Our AI is busy, trying again…",
+  RETRYING: "Our AI is busy or slow, trying again…",
   REPAIRING: "Fixing a few details in your storyboard…",
   SAVING: "Checking the new storyboard…",
   DONE: "Your storyboard is updated.",
   NO_CHANGE: "I couldn't find anything to change for this request. Try saying exactly what to change, for example “scene 2: make it simpler”.",
-  PROVIDER_BUSY: "Our AI is very busy right now. Your storyboard is saved; please try again in a few minutes.",
+  // Also when Gemini doesn't answer within the time limit (F26 founder test): "busy or taking too long".
+  PROVIDER_BUSY: "Our AI is busy or taking too long right now. Your storyboard is saved; please try again in a few minutes.",
   PROVIDER_REJECTED: "We can't make this change. Please ask for something else.",
   PLAN_INVALID: "Our AI couldn't make a good storyboard with this change. Try saying it differently.",
   QUOTA_EXCEEDED: "This project has reached 20 changes. Start a new project to keep going.",
+  LANGUAGE_UNAVAILABLE: languageUnavailableMessage(),
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
 
@@ -142,6 +148,9 @@ export function revisionInputHash(input: { basePlanVersionId: ObjectId; scope: R
 
 export const reviseJobKey = (revisionId: ObjectId) => `rev:${revisionId.toHexString()}`;
 
+/** D5 `stage: video` when the storyboard already has changes the video doesn't show (F26). */
+export const VIDEO_STAGE_NOT_READY = "Your storyboard has changes that aren't in the video yet. Ask for changes on the storyboard.";
+
 const QUOTA = (used: number) =>
   new ProjectActionError("QUOTA_EXCEEDED", REVISE_MESSAGES.QUOTA_EXCEEDED, {
     quota: "plan_requests_per_project",
@@ -181,11 +190,17 @@ export async function requestRevision(
           ? await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: new ObjectId(input.projectId), ownerId: new ObjectId(input.ownerId) }, { session })
           : null;
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this project.");
+      // Language switch: nothing is saved or counted and no AI job starts (422 LANGUAGE_UNAVAILABLE).
+      assertLanguageEnabled(project.language);
       assertStoryboardEditable(project, body.expectedStateVersion);
       if (!project.currentPlanVersionId!.equals(new ObjectId(body.basePlanVersionId))) {
         throw new ProjectActionError("STALE_VERSION", "This storyboard changed in another tab, refresh.", { expectedStateVersion: body.expectedStateVersion, currentStateVersion: project.stateVersion });
       }
-      if (body.stage === "video" && !project.currentRenderId) throw new ProjectActionError("INVALID_STATE", "There is no video to change yet.", { state: project.state });
+      // F26: a change "on the video" is asked while watching it: only on a ready video. After a
+      // storyboard change (storyboard_ready with the older video kept) it is asked on the storyboard.
+      if (body.stage === "video" && (!project.currentRenderId || project.state !== "video_ready")) {
+        throw new ProjectActionError("INVALID_STATE", project.currentRenderId ? VIDEO_STAGE_NOT_READY : "There is no video to change yet.", { state: project.state });
+      }
       const base = await db.collection<PlanVersionDocument>(PLAN_VERSIONS_COLLECTION).findOne({ _id: project.currentPlanVersionId!, projectId: project._id }, { session, projection: { "plan.scenes.id": 1 } });
       if (!base) throw new Error(`Project ${project._id.toHexString()} points to a missing plan version.`);
       const sceneIndex = body.sceneId ? base.plan.scenes.findIndex((s) => s.id === body.sceneId) : -1;
@@ -276,6 +291,13 @@ export async function startReviseAttempt(db: Db, input: { jobId: string; attempt
   if (!job || job.type !== "revise" || job.attempt !== input.attempt || (job.state !== "queued" && job.state !== "running")) return null;
   const project = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: job.projectId, ownerId: job.ownerId });
   if (!project || !project.activeJobId?.equals(job._id) || !STORYBOARD_EDIT_STATES.includes(project.state) || !job.inputRef.planVersionId || !project.currentPlanVersionId?.equals(job.inputRef.planVersionId)) return null;
+  // Language switch (languages.ts): a job queued before the switch-off, re-sent by the stuck-job
+  // rule or retried by Inngest never reaches Gemini. It fails for good (not retryable), the
+  // revision is `failed`, and the project's activeJobId is cleared (failReviseJob).
+  if (!isLanguageEnabled(project.language)) {
+    await failReviseJob(db, { jobId: job._id, attempt: input.attempt, code: "LANGUAGE_UNAVAILABLE", stage: "plan", now });
+    return null;
+  }
 
   let planner: PlanCheckpoint;
   if (job.planner && job.planner.attempt === input.attempt) {
@@ -497,6 +519,34 @@ export function canRetryReviseJob(job: JobDocument): boolean {
 }
 
 /**
+ * The newest change request's failed job, for the page of its stage (F26 code review): its message,
+ * and whether Try again is offered. Null unless `job` (the project's newest revise job) failed AND is
+ * the job of `newestRevision` (the newest request of THIS page's stage, D6), so a failed change asked
+ * on the video never shows on the storyboard and the other way round. Try again follows the same rule
+ * as `allowedActions` for a revise job (and E2): a retryable failure, no job running, not archived,
+ * the storyboard still the version it was asked on, the language on, under the 20 AI requests. It
+ * never relies on the shared `retry_job` flag (which a caption or video job can also set).
+ */
+export function failedChangeFor(
+  project: Pick<ProjectDocument, "state" | "activeJobId" | "language" | "planRequestCount" | "currentPlanVersionId">,
+  job: JobDocument | null | undefined,
+  newestRevision: { jobId: string } | undefined,
+): { id: string; message: string; canRetry: boolean } | null {
+  if (!job || job.type !== "revise" || job.state !== "failed" || !job.error) return null;
+  if (newestRevision?.jobId !== job._id.toHexString()) return null;
+  const canRetry =
+    canRetryReviseJob(job) &&
+    project.state !== "archived" &&
+    project.activeJobId === null &&
+    STORYBOARD_EDIT_STATES.includes(project.state) &&
+    isLanguageEnabled(project.language) &&
+    project.planRequestCount < USAGE_LIMITS.planRequestsPerProject &&
+    project.currentPlanVersionId !== null &&
+    job.inputRef.planVersionId?.equals(project.currentPlanVersionId) === true;
+  return { id: job._id.toHexString(), message: job.error.message, canRetry };
+}
+
+/**
  * E2 "Try again" on a failed change request (API.md E2), ONE transaction: no job running, the
  * storyboard is still the version the request was made on (else the request is out of date: ask
  * again), under the 20 AI requests; the same job back to `queued` with attempt + 1, the revision
@@ -521,6 +571,8 @@ export async function retryReviseJob(
       if (!job) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
       const project = await projects.findOne({ _id: job.projectId, ownerId }, { session });
       if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this job.");
+      // Language switch: no retry, nothing counted (422 LANGUAGE_UNAVAILABLE).
+      assertLanguageEnabled(project.language);
       // Archived first (F21 review), like assertStoryboardEditable: an archived project is read-only.
       if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
       if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");

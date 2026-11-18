@@ -169,6 +169,9 @@ export async function renderFixtureRun(options: RenderFixtureOptions): Promise<R
         outputPath: tempVideo,
         previewFrames: previewFramesFor(compiled),
         previewDir: path.join(tempDir, "preview-frames"),
+        // silent: a fixture render has no narration and no music
+        music: false,
+        workDir: tempDir,
         onProgress,
       });
       manifest = recordArtifact(manifest, await moveIntoStore(writer, ArtifactKeys.output, tempVideo), now());

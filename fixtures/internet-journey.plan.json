@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "projectId": "fixture-internet-journey",
+  "ownerId": "fixture-owner",
+  "versionId": "v1",
+  "parentVersionId": null,
+  "topic": "How a message travels across the internet",
+  "audience": "Curious smartphone users in India with no technical background",
+  "learningObjective": "Explain how a chat message travels from one phone to another: the phone's parts, packets, towers and servers",
+  "language": "en",
+  "voicePreset": "indian-english-male",
+  "sources": [
+    {
+      "id": "topic-notes",
+      "title": "Fixture notes",
+      "notes": "Explain how a chat message reaches a friend: a little history, the phone's parts, the path of packets, and how much data people use. Rounded numbers only."
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-hook",
+      "type": "title-hook",
+      "narration": [
+        {
+          "id": "line-hook",
+          "text": "When you press send on a chat message, how does it reach your friend in under a second?",
+          "hero": "smartphone"
+        }
+      ],
+      "objects": [
+        { "id": "hook-title", "kind": "headline", "label": "Where does your message go?", "icon": "question", "value": null },
+        { "id": "hook-sub", "kind": "subtitle", "label": "A journey in under one second", "value": null }
+      ],
+      "events": [
+        { "id": "ev-hook-title", "anchor": { "narrationId": "line-hook", "phrase": "press send" }, "action": "appear", "target": "hook-title" },
+        { "id": "ev-hook-sub", "anchor": { "narrationId": "line-hook", "phrase": "under a second" }, "action": "appear", "target": "hook-sub" }
+      ]
+    },
+    {
+      "id": "scene-history",
+      "type": "timeline",
+      "narration": [
+        {
+          "id": "line-history",
+          "text": "The internet did not appear overnight. In 1969, four computers were first linked together. In 1991, the World Wide Web opened to everyone. And by 2016, cheap mobile data brought India online."
+        }
+      ],
+      "objects": [
+        { "id": "tl-axis", "kind": "axis", "label": "Internet milestones", "value": null },
+        { "id": "tl-1969", "kind": "milestone", "label": "1969: First network", "value": null },
+        { "id": "tl-1991", "kind": "milestone", "label": "1991: World Wide Web", "value": null },
+        { "id": "tl-2016", "kind": "milestone", "label": "2016: Cheap mobile data", "value": null }
+      ],
+      "events": [
+        { "id": "ev-tl-1969", "anchor": { "narrationId": "line-history", "phrase": "four computers" }, "action": "appear", "target": "tl-1969" },
+        { "id": "ev-tl-1991", "anchor": { "narrationId": "line-history", "phrase": "World Wide Web" }, "action": "appear", "target": "tl-1991" },
+        { "id": "ev-tl-2016", "anchor": { "narrationId": "line-history", "phrase": "cheap mobile data" }, "action": "appear", "target": "tl-2016" }
+      ]
+    },
+    {
+      "id": "scene-phone",
+      "type": "labeled-diagram",
+      "narration": [
+        {
+          "id": "line-phone-intro",
+          "text": "It all starts inside your phone.",
+          "hero": "smartphone"
+        },
+        {
+          "id": "line-phone-parts",
+          "text": "A processor chip cuts the message into small packets, the radio sends them out over Wi-Fi or to a tower, and the battery powers it all."
+        }
+      ],
+      "objects": [
+        { "id": "phone", "kind": "diagram", "label": "Inside your phone", "icon": "gear", "value": null },
+        { "id": "part-chip", "kind": "part", "label": "Processor chip", "icon": "gear", "value": null },
+        { "id": "part-radio", "kind": "part", "label": "Radio and antenna", "icon": "wind", "value": null },
+        { "id": "part-battery", "kind": "part", "label": "Battery", "icon": "flame", "value": null }
+      ],
+      "events": [
+        { "id": "ev-part-chip", "anchor": { "narrationId": "line-phone-parts", "phrase": "A processor chip" }, "action": "appear", "target": "part-chip" },
+        { "id": "ev-part-radio", "anchor": { "narrationId": "line-phone-parts", "phrase": "the radio sends" }, "action": "appear", "target": "part-radio" },
+        { "id": "ev-part-battery", "anchor": { "narrationId": "line-phone-parts", "phrase": "the battery powers" }, "action": "appear", "target": "part-battery" }
+      ]
+    },
+    {
+      "id": "scene-path",
+      "type": "process-flow",
+      "narration": [
+        {
+          "id": "line-path",
+          "text": "Each packet travels from your phone to the nearest tower, then through cables to a server, and finally down to your friend's phone, where the message is put back together."
+        }
+      ],
+      "objects": [
+        { "id": "node-phone", "kind": "node", "label": "Your phone", "value": null },
+        { "id": "arrow-radio", "kind": "arrow", "label": "Radio waves", "icon": "wind", "value": null },
+        { "id": "node-tower", "kind": "node", "label": "Mobile tower", "icon": "flag", "value": null },
+        { "id": "node-server", "kind": "node", "label": "Server", "icon": "gear", "value": null },
+        { "id": "node-friend", "kind": "node", "label": "Friend's phone", "icon": "people", "value": null }
+      ],
+      "events": [
+        { "id": "ev-node-phone", "anchor": { "narrationId": "line-path", "phrase": "from your phone" }, "action": "appear", "target": "node-phone" },
+        { "id": "ev-arrow-radio", "anchor": { "narrationId": "line-path", "phrase": "the nearest tower" }, "action": "flow", "target": "arrow-radio" },
+        { "id": "ev-node-tower", "anchor": { "narrationId": "line-path", "phrase": "through cables" }, "action": "appear", "target": "node-tower" },
+        { "id": "ev-node-server", "anchor": { "narrationId": "line-path", "phrase": "to a server" }, "action": "appear", "target": "node-server" },
+        { "id": "ev-node-friend", "anchor": { "narrationId": "line-path", "phrase": "your friend's phone" }, "action": "appear", "target": "node-friend" }
+      ]
+    },
+    {
+      "id": "scene-data",
+      "type": "chart",
+      "narration": [
+        {
+          "id": "line-data",
+          "text": "We send far more than messages now. In 2016, an Indian user had under one gigabyte a month. By 2018 it was about eight, and today it is roughly twenty."
+        }
+      ],
+      "objects": [
+        { "id": "data-axis", "kind": "axis", "label": "Data per user (GB a month)", "value": null },
+        { "id": "pt-2016", "kind": "line-point", "label": "2016", "value": 0.9 },
+        { "id": "pt-2018", "kind": "line-point", "label": "2018", "value": 8 },
+        { "id": "pt-today", "kind": "line-point", "label": "Today", "value": 20 }
+      ],
+      "events": [
+        { "id": "ev-pt-2016", "anchor": { "narrationId": "line-data", "phrase": "under one gigabyte" }, "action": "appear", "target": "pt-2016" },
+        { "id": "ev-pt-2018", "anchor": { "narrationId": "line-data", "phrase": "about eight" }, "action": "appear", "target": "pt-2018" },
+        { "id": "ev-pt-today", "anchor": { "narrationId": "line-data", "phrase": "roughly twenty" }, "action": "appear", "target": "pt-today" }
+      ]
+    },
+    {
+      "id": "scene-films",
+      "type": "chart",
+      "narration": [
+        {
+          "id": "line-films",
+          "text": "That is enough to watch more than twenty full films."
+        }
+      ],
+      "objects": [
+        { "id": "films-axis", "kind": "axis", "label": "Enough to watch", "icon": "star", "value": null },
+        { "id": "films", "kind": "counter", "label": "Full films", "icon": "star", "value": 20 }
+      ],
+      "events": [
+        { "id": "ev-films", "anchor": { "narrationId": "line-films", "phrase": "more than twenty" }, "action": "count-up", "target": "films" }
+      ]
+    },
+    {
+      "id": "scene-takeaway",
+      "type": "takeaway",
+      "narration": [
+        {
+          "id": "line-take",
+          "text": "So every message is cut into packets, carried by towers and servers, and rebuilt on your friend's phone in the blink of an eye."
+        }
+      ],
+      "objects": [
+        { "id": "take-head", "kind": "headline", "label": "Packets, towers, servers", "value": null },
+        { "id": "take-packets", "kind": "bullet", "label": "Messages travel as packets", "value": null },
+        { "id": "take-rebuilt", "kind": "bullet", "label": "Rebuilt on the other phone", "value": null }
+      ],
+      "events": [
+        { "id": "ev-take-head", "anchor": { "narrationId": "line-take", "phrase": "every message" }, "action": "appear", "target": "take-head" },
+        { "id": "ev-take-packets", "anchor": { "narrationId": "line-take", "phrase": "cut into packets" }, "action": "highlight", "target": "take-packets" },
+        { "id": "ev-take-rebuilt", "anchor": { "narrationId": "line-take", "phrase": "rebuilt on" }, "action": "highlight", "target": "take-rebuilt" }
+      ]
+    }
+  ],
+  "warnings": [
+    { "sceneId": "scene-data", "message": "Approximate, widely reported figures for average mobile data per Indian user; check the latest numbers before publishing." }
+  ]
+}

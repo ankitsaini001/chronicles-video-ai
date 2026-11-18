@@ -4,6 +4,8 @@ import { hashPlan } from "../packages/pipeline/src/planning";
 import { sha256 } from "../packages/pipeline/src/shared/hash";
 import {
   breakLines,
+  captionWordFit,
+  CompileInputError,
   compileTimeline,
   DEFAULT_CAPTION_LAYOUT,
   estimateTextWidth,
@@ -13,10 +15,11 @@ import {
   timeSceneBlocks,
   type CaptionWord,
 } from "../packages/pipeline/src/timing";
-import { validPlan } from "./helpers";
+import { loadFixture, validPlan } from "./helpers";
 
 const words = (text: string): CaptionWord[] => text.split(" ").map((w, i) => ({ text: w, startSec: i * 0.4, endSec: i * 0.4 + 0.35 }));
-const layout = DEFAULT_CAPTION_LAYOUT;
+/** The line-breaking rules are tested with the real caption layout of video style v4 (66 px, 650 px lines). */
+const layout = { fontSizePx: DEFAULT_CAPTION_LAYOUT.fontSizePx, maxLineWidthPx: DEFAULT_CAPTION_LAYOUT.maxLineWidthPx };
 const isNumber = (w: string | undefined) => !!w && /^\d/.test(w);
 const isUnit = (w: string | undefined) => !!w && /^(percent|rupees|crore|km)\b/.test(w);
 
@@ -28,7 +31,7 @@ function compileFixture() {
 
 describe("caption line breaking", () => {
   it("keeps a short phrase on one line", () => {
-    expect(breakLines(["It", "starts", "with", "the", "Sun."], layout)).toEqual([["It", "starts", "with", "the", "Sun."]]);
+    expect(breakLines(["Then", "the", "Sun", "rises."], layout)).toEqual([["Then", "the", "Sun", "rises."]]);
   });
 
   it("never splits a number from its unit across lines", () => {
@@ -42,7 +45,7 @@ describe("caption line breaking", () => {
   });
 
   it("avoids a lone last word when another break fits", () => {
-    const lines = breakLines("The water you drink may once have been a cloud.".split(" "), layout)!;
+    const lines = breakLines("Water you drink was a cloud.".split(" "), layout)!;
     expect(lines).toHaveLength(2);
     expect(lines[1]!.length).toBeGreaterThan(1);
     expect(lines[0]!.length).toBeGreaterThan(1);
@@ -55,7 +58,7 @@ describe("caption line breaking", () => {
 
 describe("caption phrase grouping", () => {
   it("never ends a phrase between a number and its unit", () => {
-    const narrow = { ...layout, maxLineWidthPx: 300 }; // "97 percent" still fits on one line
+    const narrow = { ...layout, maxLineWidthPx: 400 }; // "97 percent" still fits on one line
     const phrases = groupPhrases(words("Around 1 percent is fresh water and about 2 percent is frozen and about 97 percent is salty"), narrow);
     phrases.forEach((phrase, i) => {
       const next = phrases[i + 1];
@@ -147,5 +150,50 @@ describe("timeline compiler", () => {
     expect(() => compileTimeline({ plan, planHash: hashPlan(plan), alignments: missing })).toThrow(/has no alignment/);
     const mixed = { ...alignments, "scene-hook": { ...alignments["scene-hook"]!, source: "elevenlabs" as const } };
     expect(() => compileTimeline({ plan, planHash: hashPlan(plan), alignments: mixed })).toThrow(/mix timing sources/);
+  });
+});
+
+describe("long caption words (F22b review: never fail a video after the narration was paid for)", () => {
+  const real = DEFAULT_CAPTION_LAYOUT; // 66 px, 650 px lines
+
+  it("a word a little too wide is shown smaller; a long hyphenated one is broken in two; one that can't fit is refused", () => {
+    expect(captionWordFit("internationalization", real)).toEqual({ kind: "fits", fontSizePx: 66 });
+    expect(captionWordFit("telecommunications", real)).toEqual({ kind: "shrink", fontSizePx: 64 });
+    expect(captionWordFit("www.instagram.com", real)).toEqual({ kind: "shrink", fontSizePx: 63 });
+    expect(captionWordFit("state-of-the-art-telecommunications", real)).toEqual({ kind: "split", fontSizePx: 64, pieces: ["state-of-the-art-", "telecommunications"] });
+    expect(captionWordFit("Pneumonoultramicroscopicsilicovolcanoconiosis", real)).toBeNull();
+  });
+
+  it("a too-wide word becomes a phrase of its own; a word that can't be shown is a CompileInputError (the run goes to needs-input)", () => {
+    const phrases = groupPhrases(words("We studied telecommunications in college last year."), real);
+    expect(phrases.map((p) => p.map((w) => w.text).join(" "))).toContain("telecommunications");
+    for (const phrase of phrases) if (phrase.length > 1) expect(breakLines(phrase.map((w) => w.text), real)).not.toBeNull();
+    expect(() => groupPhrases(words("A Pneumonoultramicroscopicsilicovolcanoconiosis case."), real)).toThrow(CompileInputError);
+  });
+
+  it("an approved plan with long words compiles: only those captions are smaller (fontSizePx); the others are unchanged", () => {
+    const raw = loadFixture("water-cycle.plan.json");
+    raw.scenes[5].narration[1].text += " See www.instagram.com for state-of-the-art-telecommunications.";
+    const plan = validPlan();
+    plan.scenes[5]!.narration[1]!.text = raw.scenes[5].narration[1].text;
+    const alignments = Object.fromEntries(plan.scenes.map((s) => [s.id, synthesizeSceneAlignment(s, plan.language)]));
+    const { captions } = compileTimeline({ plan, planHash: hashPlan(plan), alignments });
+    expect(CaptionTrackSchema.parse(captions)).toEqual(captions);
+    const small = captions.captions.filter((c) => c.fontSizePx !== undefined);
+    expect(small.map((c) => [c.lines, c.fontSizePx])).toEqual([
+      [["www.instagram.com"], 63],
+      [["state-of-the-art-", "telecommunications."], 63],
+    ]);
+    // both pieces of a broken word light up together (same timing)
+    expect(small[1]!.words[0]!.startFrame).toBe(small[1]!.words[1]!.startFrame);
+    expect(small[1]!.text).toBe(small[1]!.words.map((w) => w.text).join(" "));
+    // every other caption is exactly as before
+    const before = compileFixture().captions.captions;
+    const after = captions.captions.filter((c) => c.sceneId !== "scene-takeaway");
+    expect(after).toEqual(before.filter((c) => c.sceneId !== "scene-takeaway"));
+
+    plan.scenes[5]!.narration[1]!.text += " Pneumonoultramicroscopicsilicovolcanoconiosis.";
+    const longer = Object.fromEntries(plan.scenes.map((s) => [s.id, synthesizeSceneAlignment(s, plan.language)]));
+    expect(() => compileTimeline({ plan, planHash: hashPlan(plan), alignments: longer })).toThrow(CompileInputError);
   });
 });

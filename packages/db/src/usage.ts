@@ -22,6 +22,15 @@ export const USAGE_LIMITS = {
   planRequestsPerProject: 20,
 } as const;
 
+/**
+ * THE app-wide voice guard (F23, founder 2026-11-15). The free ElevenLabs account has 10,000
+ * characters a month in total, shared by every creator, so the whole app stops recording new
+ * narration at 9,000 a month (a 1,000 margin for retries the provider may also have billed).
+ * Counted next to each creator's own 3,000 (`usageCounters` kind `appVoiceChars`, one counter for the
+ * app, calendar month in UTC). Reached: "Voice limit reached this month." Change it here only.
+ */
+export const APP_VOICE_CHARACTERS_PER_MONTH = 9000;
+
 /** Every user starts in this timezone (API.md §2); also the fallback for an unknown zone. */
 export const DEFAULT_TIMEZONE = "Asia/Kolkata";
 

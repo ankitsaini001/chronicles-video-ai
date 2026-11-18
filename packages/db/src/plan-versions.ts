@@ -49,6 +49,8 @@ export interface StoredNarration {
   text: string;
   speech?: string | null;
   display?: string | null;
+  /** F22b: the planner's hero (null: "none", the scene icon); absent: picked from keywords. */
+  hero?: string | null;
 }
 
 export interface StoredObject {

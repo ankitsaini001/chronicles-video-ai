@@ -19,7 +19,7 @@ import {
   type CardTone,
 } from "@/lib/dashboard/cards";
 
-// The My videos cards (F21; Stitch "My videos"). The page sends the first page from the server
+// The My videos cards (F21, F23 thumbnails; Stitch "My videos"). The page sends the first page from the server
 // (same function as C1); "Load more" asks C1 for the next page with its cursor. Each card's ⋯ menu
 // offers Rename (C4 `title`) and Archive (C5, after a confirm step). Both send the card's
 // `stateVersion`, so a change made in another tab is never overwritten (409 → refresh).
@@ -220,16 +220,22 @@ function ProjectCard({
 function Thumbnail({ item }: { item: ProjectSummaryResource }) {
   return (
     <div
-      aria-hidden="true"
       className="relative flex aspect-[9/16] w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-amber/10 sm:w-full"
       style={{ background: PLACEHOLDER_BACKGROUNDS[item.language] }}
     >
       {item.thumbnailUrl ? (
-        // A short-lived signed address (F23+): a plain <img>, nothing for Next.js to optimise.
+        // A short-lived signed address (F23): a plain <img>, nothing for Next.js to optimise.
         <img src={item.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />
       ) : (
-        <span lang={item.language === "hi" ? "hi" : undefined} className="font-display text-3xl font-extrabold text-amber/80 sm:text-6xl">
+        <span aria-hidden="true" lang={item.language === "hi" ? "hi" : undefined} className="font-display text-3xl font-extrabold text-amber/80 sm:text-6xl">
           {titleInitial(item.title)}
+        </span>
+      )}
+      {/* F23 (founder decision 5): the storyboard changed after this video was made; it stays until a new one. */}
+      {item.videoFromOlderVersion && (
+        <span className="absolute inset-x-1 bottom-1 rounded-full bg-bg/85 px-1.5 py-0.5 text-center font-mono text-[10px] leading-tight text-gold-cream sm:inset-x-2 sm:bottom-2 sm:text-[11px]">
+          Older version
+          <span className="sr-only">: this video was made from an older version of the storyboard</span>
         </span>
       )}
     </div>

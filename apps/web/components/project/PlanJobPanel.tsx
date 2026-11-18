@@ -26,6 +26,8 @@ export type PlanJobPanelProps = {
   /** When the current job was started or retried (ISO), for the "taking longer" line. */
   queuedAt: string | null;
   idea: { text: string; min: number; max: number };
+  /** Shown when AI is off for this project's language (packages/db/src/languages.ts). */
+  unavailableNote?: string | null;
 };
 
 const POLL_MS = 2000;
@@ -52,7 +54,7 @@ function failureText(code: string | undefined, fallback: string | undefined): st
     case "PLAN_INVALID":
       return "Couldn't build a good storyboard, try rephrasing.";
     case "PROVIDER_BUSY":
-      return "Our AI is very busy right now. Your idea is saved; please try again in a few minutes.";
+      return "Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes.";
     case "PROVIDER_REJECTED":
       return "We can't make a video about this topic. Please edit your idea.";
     default:
@@ -143,7 +145,7 @@ function Progress({ projectId, progress, queuedAt }: PlanJobPanelProps) {
   );
 }
 
-function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, requestsUsedUp, idea }: PlanJobPanelProps) {
+function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, requestsUsedUp, idea, unavailableNote }: PlanJobPanelProps) {
   const router = useRouter();
   const textId = useId();
   const [editing, setEditing] = useState(false);
@@ -232,9 +234,10 @@ function Failed({ projectId, stateVersion, jobId, lastError, allowedActions, req
   return (
     <div className="flex flex-col gap-5">
       <p role="alert" className="rounded-2xl border border-danger/40 bg-danger-bg px-4 py-3 text-base text-text">
-        {failureText(lastError?.code, lastError?.message)}
+        {/* Language switched off: only the note (the old "busy / edit your idea" text would mislead). */}
+        {unavailableNote ?? failureText(lastError?.code, lastError?.message)}
       </p>
-      {requestsUsedUp && <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>}
+      {requestsUsedUp && !unavailableNote && <p className="text-sm text-muted">This project has used all its storyboard requests. Start a new project to keep going.</p>}
 
       {editing ? (
         <div className="flex flex-col gap-3">

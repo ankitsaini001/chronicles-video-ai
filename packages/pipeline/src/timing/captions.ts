@@ -1,14 +1,18 @@
+import { CompileInputError } from "./errors";
 import { isNumberToken, isUnitToken } from "./text";
 import { estimateTextWidth } from "./text-width";
 
 /**
  * Caption phrase grouping and line breaking (PIPELINE_DESIGN.md §7).
  *
- * - Captions are phrases (no word-by-word effects), at most 2 lines.
+ * - Captions are phrases of at most 2 lines. Video style v4 (F22b) uses short phrases of 3-5 words
+ *   (`minWords`/`maxWords`); the renderer highlights the word being spoken inside the phrase.
  * - Phrases end at sentence ends, and at clause punctuation once they are long enough.
  * - Line width is decided with the deterministic width estimate (see text-width.ts).
  * - A number is never separated from its unit (line or phrase), e.g. "97 percent".
  * - A lone last word is avoided when another grouping fits.
+ * - A single word wider than a line (rare: plan validation stops new ones, see captionWordFit) is a
+ *   phrase of its own, shown a little smaller or broken at a hyphen, slash or dot.
  */
 
 export interface CaptionWord {
@@ -20,13 +24,19 @@ export interface CaptionWord {
 export interface CaptionLayout {
   fontSizePx: number;
   maxLineWidthPx: number;
+  /** Hard limit of words per phrase (no limit when absent). */
+  maxWords?: number;
+  /** Soft minimum: shorter phrases cost extra unless the sentence itself is shorter. */
+  minWords?: number;
+  /** Width (em) of a character the estimate doesn't know; default 0.6 (F25 caption fixes use 1.0). */
+  unknownCharEm?: number;
 }
 
 const SENTENCE_END = /[.?!।]["')\]]?$/u;
 const CLAUSE_END = /[,;:—–]["')\]]?$/u;
 
 function width(words: readonly string[], layout: CaptionLayout): number {
-  return estimateTextWidth(words.join(" "), layout.fontSizePx);
+  return estimateTextWidth(words.join(" "), layout.fontSizePx, layout.unknownCharEm !== undefined ? { unknownCharEm: layout.unknownCharEm } : {});
 }
 
 function fitsLine(words: readonly string[], layout: CaptionLayout): boolean {
@@ -73,6 +83,7 @@ function bestLineLayout(words: readonly string[], layout: CaptionLayout): LineLa
 }
 
 function fits(words: readonly CaptionWord[], layout: CaptionLayout): boolean {
+  if (layout.maxWords !== undefined && words.length > layout.maxWords) return false;
   return bestLineLayout(words.map((w) => w.text), layout) !== null;
 }
 
@@ -95,28 +106,66 @@ function breakCost(word: string): number {
 
 const PHRASE_COST = 1000;
 
+/** A word wider than a line may be shown down to this share of the caption size (66 px -> 50 px). */
+export const MIN_CAPTION_FONT_SCALE = 0.75;
+
+/**
+ * How one caption word fits a line (F22b review: long words such as "telecommunications" or
+ * "www.instagram.com" no longer fail a paid-for video):
+ * - "fits": at the normal size;
+ * - "shrink": alone in its phrase at `fontSizePx`, at least MIN_CAPTION_FONT_SCALE of the normal size;
+ * - "split": broken after a hyphen, slash or dot into two lines at `fontSizePx`;
+ * - null: it can't be shown. Plan validation reports such a word before any voice is recorded,
+ *   and the compiler stops with a CompileInputError (the run goes to needs-input).
+ */
+export type CaptionWordFit =
+  | { kind: "fits"; fontSizePx: number }
+  | { kind: "shrink"; fontSizePx: number }
+  | { kind: "split"; fontSizePx: number; pieces: [string, string] };
+
+export function captionWordFit(word: string, layout: CaptionLayout): CaptionWordFit | null {
+  const minSize = Math.ceil(layout.fontSizePx * MIN_CAPTION_FONT_SCALE);
+  const sizeFor = (text: string) => Math.min(layout.fontSizePx, Math.floor((layout.fontSizePx * layout.maxLineWidthPx) / estimateTextWidth(text, layout.fontSizePx)));
+  if (fitsLine([word], layout)) return { kind: "fits", fontSizePx: layout.fontSizePx };
+  const shrunk = sizeFor(word);
+  if (shrunk >= minSize) return { kind: "shrink", fontSizePx: shrunk };
+  let best: { fontSizePx: number; pieces: [string, string] } | null = null;
+  for (let i = 1; i < word.length - 1; i++) {
+    if (!/[-/.]/u.test(word[i - 1]!)) continue;
+    const pieces: [string, string] = [word.slice(0, i), word.slice(i)];
+    const size = Math.min(sizeFor(pieces[0]), sizeFor(pieces[1]));
+    if (size >= minSize && (!best || size > best.fontSizePx)) best = { fontSizePx: size, pieces };
+  }
+  return best ? { kind: "split", ...best } : null;
+}
+
 /**
  * Group one scene's words into caption phrases. Each sentence is split on its own with a small
  * dynamic program that minimises: number of phrases, breaks that are not at punctuation, phrases
  * ending on a weak word ("the", "of"), one-word phrases, and uneven phrase lengths.
- * A number and its unit are never split across phrases.
+ * A number and its unit are never split across phrases. A word wider than a line becomes a phrase
+ * of its own (see captionWordFit); one that can't be shown at all is a CompileInputError.
  */
 export function groupPhrases(words: readonly CaptionWord[], layout: CaptionLayout): CaptionWord[][] {
-  for (const word of words) {
-    if (!fitsLine([word.text], layout)) {
-      throw new Error(`caption word "${word.text}" is wider than a caption line; shorten it or add a display form`);
-    }
-  }
   const phrases: CaptionWord[][] = [];
   let sentence: CaptionWord[] = [];
+  const flush = () => {
+    if (sentence.length > 0) phrases.push(...splitSentence(sentence, layout));
+    sentence = [];
+  };
   for (const word of words) {
-    sentence.push(word);
-    if (SENTENCE_END.test(word.text)) {
-      phrases.push(...splitSentence(sentence, layout));
-      sentence = [];
+    if (!fitsLine([word.text], layout)) {
+      if (!captionWordFit(word.text, layout)) {
+        throw new CompileInputError(`the caption word "${word.text}" is too long to fit on a caption line; use a shorter word or a "display" form`);
+      }
+      flush();
+      phrases.push([word]);
+      continue;
     }
+    sentence.push(word);
+    if (SENTENCE_END.test(word.text)) flush();
   }
-  if (sentence.length > 0) phrases.push(...splitSentence(sentence, layout));
+  flush();
   return mergeLoneWords(phrases, layout);
 }
 
@@ -128,6 +177,7 @@ function splitSentence(words: readonly CaptionWord[], layout: CaptionLayout): Ca
     best[end] = { cost: Infinity, from: -1 };
     for (let start = end - 1; start >= 0; start--) {
       const phrase = words.slice(start, end);
+      if (layout.maxWords !== undefined && phrase.length > layout.maxWords) break;
       const lines = bestLineLayout(phrase.map((w) => w.text), layout);
       if (!lines) break; // longer phrases will not fit either
       if (end < n && keepsTogether(words[end - 1]!.text, words[end]!.text, layout)) continue;
@@ -135,6 +185,7 @@ function splitSentence(words: readonly CaptionWord[], layout: CaptionLayout): Ca
       let cost = best[start]!.cost + PHRASE_COST + (1 - fill) * (1 - fill) * 400 + lines.penalty;
       if (end < n) cost += breakCost(words[end - 1]!.text);
       if (phrase.length === 1 && n > 1) cost += 2000;
+      else if (layout.minWords !== undefined && phrase.length < layout.minWords && n >= layout.minWords) cost += 900;
       if (cost < best[end]!.cost) best[end] = { cost, from: start };
     }
   }

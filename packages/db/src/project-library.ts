@@ -1,5 +1,5 @@
 import { type Db, type Filter, ObjectId, type UpdateFilter } from "mongodb";
-import { isTerminal, JOBS_COLLECTION, type JobDocument, type JobType } from "./jobs";
+import { isTerminal, JOBS_COLLECTION, type JobDocument, type JobState, type JobType } from "./jobs";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./plan-versions";
 import {
   currentStepOf,
@@ -13,6 +13,7 @@ import {
   type ProjectStep,
   type VoiceGender,
 } from "./projects";
+import { rendersForCards } from "./renders";
 
 // "My videos" (F21; docs/API.md C1, C4 rename, C5 archive; DATABASE.md §4.8, §6.6).
 // - C1 lists ONLY the signed-in owner's projects, never archived ones, newest-updated first
@@ -47,7 +48,9 @@ export function libraryTabOf(state: ProjectState): LibraryTab | null {
  * API.md §11.3 `ProjectSummary` (one card). Two additive fields (F21): `stateVersion`, sent back
  * by the card's Rename (C4) and Archive (C5) so another tab's change is never overwritten; and
  * `storyboardApproved`, the storyboard on screen is the approved one, so the card can say
- * "Approved" instead of "Storyboard ready".
+ * "Approved" instead of "Storyboard ready". F23 adds two more: `activeJobState` (a video job still
+ * `queued` = "Waiting to start…", only one video is made at a time) and `videoFromOlderVersion` (the
+ * project's video was made from an older storyboard version: it stays until a new one is made).
  */
 export type ProjectSummaryResource = {
   id: string;
@@ -59,13 +62,18 @@ export type ProjectSummaryResource = {
   thumbnailUrl: string | null;
   latestPost: null;
   activeJobType: JobType | null;
+  activeJobState: JobState | null;
   stateVersion: number;
   storyboardApproved: boolean;
+  videoFromOlderVersion: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
-export function toProjectSummary(doc: ProjectDocument, activeJobType: JobType | null): ProjectSummaryResource {
+/** The card's video: a short-lived thumbnail link and the storyboard version it was made from (F23). */
+export type CardVideo = { thumbnailUrl: string | null; planVersionId: ObjectId };
+
+export function toProjectSummary(doc: ProjectDocument, activeJobType: JobType | null, activeJobState: JobState | null = null, video: CardVideo | null = null): ProjectSummaryResource {
   return {
     id: doc._id.toHexString(),
     title: doc.title,
@@ -73,12 +81,15 @@ export function toProjectSummary(doc: ProjectDocument, activeJobType: JobType | 
     voiceGender: doc.voiceGender,
     state: doc.state,
     currentStep: currentStepOf(displayStateOf(doc)),
-    // Thumbnails arrive with videos (F23); posts with publishing (F30).
-    thumbnailUrl: null,
+    // The current video's thumbnail (F23; a 15-minute presigned link, issued after the owner check);
+    // posts arrive with publishing (F30).
+    thumbnailUrl: video?.thumbnailUrl ?? null,
     latestPost: null,
     activeJobType: doc.activeJobId ? activeJobType : null,
+    activeJobState: doc.activeJobId ? activeJobState : null,
     stateVersion: doc.stateVersion,
     storyboardApproved: doc.currentPlanVersionId !== null && doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId) === true,
+    videoFromOlderVersion: video !== null && doc.currentPlanVersionId !== null && !video.planVersionId.equals(doc.currentPlanVersionId),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
@@ -95,12 +106,16 @@ const NOT_ARCHIVED = { $ne: "archived" as const };
  * each card's active job. It only writes when a job is really stuck, so a healthy page costs no
  * extra query; if a job changed (e.g. a dead one became failed), the page is read once more, so
  * the card shows "Storyboard failed" instead of "Writing storyboard…" forever.
+ * `thumbnailUrl` (F23): turns a render's thumbnail key into a short-lived link (the web app's R2
+ * store). Only the owner's own renders are read (owner-scoped query), so a link is only ever made
+ * after the ownership check. Without it (or when it fails), cards show the placeholder.
  */
 export async function listProjects(
   db: Db,
   ownerId: string,
   page: { tab: LibraryTab | null; limit: number; cursor: string | null },
   refreshJob?: (job: JobDocument) => Promise<JobDocument>,
+  thumbnailUrl?: (thumbnailKey: string) => Promise<string | null>,
 ): Promise<LibraryPage> {
   if (!/^[0-9a-f]{24}$/.test(ownerId)) return { items: [], nextCursor: null };
   const tabKey = page.tab ?? "all";
@@ -133,12 +148,27 @@ export async function listProjects(
       const fresh = await refreshJob(job);
       if (fresh.state !== job.state) changed = true;
     }
-    if (changed) return listProjects(db, ownerId, page);
+    if (changed) return listProjects(db, ownerId, page, undefined, thumbnailUrl);
   }
-  const typeOf = (id: ObjectId | null) => (id ? (jobs.find((j) => j._id.equals(id))?.type ?? null) : null);
+  const jobOf = (id: ObjectId | null) => (id ? (jobs.find((j) => j._id.equals(id)) ?? null) : null);
+  const renderIds = items.flatMap((d) => (d.currentRenderId ? [d.currentRenderId] : []));
+  const renders = await rendersForCards(db, new ObjectId(ownerId), renderIds);
+  const videos = new Map<string, CardVideo>();
+  for (const render of renders) {
+    let url: string | null = null;
+    try {
+      url = thumbnailUrl ? await thumbnailUrl(render.thumbnailKey) : null;
+    } catch {
+      url = null; // storage not reachable: the card shows its placeholder
+    }
+    videos.set(render._id.toHexString(), { thumbnailUrl: url, planVersionId: render.planVersionId });
+  }
   const last = items[items.length - 1];
   return {
-    items: items.map((d) => toProjectSummary(d, typeOf(d.activeJobId))),
+    items: items.map((d) => {
+      const job = jobOf(d.activeJobId);
+      return toProjectSummary(d, job?.type ?? null, job?.state ?? null, d.currentRenderId ? (videos.get(d.currentRenderId.toHexString()) ?? null) : null);
+    }),
     nextCursor: docs.length > page.limit && last ? encodeCursor({ u: last.updatedAt.toISOString(), i: last._id.toHexString(), t: tabKey }) : null,
   };
 }

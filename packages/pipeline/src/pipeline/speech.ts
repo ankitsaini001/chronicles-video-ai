@@ -1,20 +1,13 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import {
-  SceneAlignmentSchema,
-  type Plan,
-  type Scene,
-  type SceneAlignment,
-  type VoicePreset,
-  type VoiceSettings,
-} from "../contracts";
-import { canonicalJson } from "../planning";
+import { SceneAlignmentSchema, type Plan, type Scene, type SceneAlignment } from "../contracts";
 import { ProviderError, type SpeechRequest, type SpeechResponse } from "../providers";
 import { sha256 } from "../shared/hash";
 import type { SpeechCacheRecord } from "../storage";
 import { localeFor, resolveProviderAlignment, speechInputForScene, timeSceneBlocks } from "../timing";
 import type { AudioProbe } from "../validation/audio";
+import type { SpeechConfig } from "./speech-key";
+
+// The voice setup and cache key live in speech-key.ts (no provider code); re-exported here.
+export { DEFAULT_VOICE_SETTINGS, SPEECH_OUTPUT_FORMAT, SPEECH_SEED, speechCacheKey, speechConfigFor, speechConfigFromRecord, type SpeechConfig } from "./speech-key";
 
 /**
  * Speech stage helpers (PIPELINE_DESIGN.md §6 "Start with scene-level speech synthesis", §8 "Speech").
@@ -29,61 +22,9 @@ import type { AudioProbe } from "../validation/audio";
  *   wording change in one scene re-synthesizes only that scene (§9).
  */
 
-export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  stability: 0.5,
-  similarity_boost: 0.75,
-  style: 0,
-  use_speaker_boost: true,
-  speed: 1,
-};
-/** 128 kbps MP3 at 44.1 kHz: the provider default, available on the free tier. */
-export const SPEECH_OUTPUT_FORMAT = "mp3_44100_128";
-/** Fixed seed for repeatability (the provider says determinism is not guaranteed). */
-export const SPEECH_SEED = 1;
-
-export interface SpeechConfig {
-  voicePreset: VoicePreset;
-  voiceId: string;
-  modelId: string;
-  settings: VoiceSettings;
-  outputFormat: string;
-  seed: number | null;
-  applyTextNormalization: "auto" | "on" | "off";
-}
-
-export function speechConfigFor(plan: Plan, voiceId: string, modelId: string): SpeechConfig {
-  return {
-    voicePreset: plan.voicePreset,
-    voiceId,
-    modelId,
-    settings: DEFAULT_VOICE_SETTINGS,
-    outputFormat: SPEECH_OUTPUT_FORMAT,
-    seed: SPEECH_SEED,
-    applyTextNormalization: "auto",
-  };
-}
-
 /** Characters as the provider counts them (code points). */
 export function countCharacters(text: string): number {
   return [...text].length;
-}
-
-export function speechCacheKey(scene: Scene, config: SpeechConfig): string {
-  const { speechText } = speechInputForScene(scene);
-  return sha256(
-    canonicalJson({
-      v: 1,
-      provider: "elevenlabs",
-      speechText,
-      pronunciation: scene.narration.map((block) => ({ text: block.text, speech: block.speech })),
-      voiceId: config.voiceId,
-      modelId: config.modelId,
-      settings: config.settings,
-      outputFormat: config.outputFormat,
-      seed: config.seed,
-      applyTextNormalization: config.applyTextNormalization,
-    }),
-  );
 }
 
 /** Continuity context: the last block of the previous scene and the first block of the next scene. */
@@ -187,18 +128,6 @@ export function buildSceneAlignment(input: {
   });
   timeSceneBlocks(scene, alignment, plan.language); // throws if the text cannot be mapped with certainty
   return alignment;
-}
-
-/** Probe audio bytes by writing them to a temp file (used for cached audio before it is in the run). */
-export async function probeAudioBytes(audio: Uint8Array, probe: (file: string) => Promise<AudioProbe>): Promise<AudioProbe> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "bytereel-audio-"));
-  try {
-    const file = path.join(dir, "scene.mp3");
-    await fs.writeFile(file, audio);
-    return await probe(file);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
 }
 
 export class SpeechBudgetError extends ProviderError {

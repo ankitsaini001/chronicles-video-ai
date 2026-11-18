@@ -15,7 +15,7 @@ with narration. The first live speech request was refused: the four configured v
 | Folder | What it holds |
 |---|---|
 | `packages/pipeline/` (`@bytereel/pipeline`) | AI engine: contracts, planning, providers, timing/captions compiler, validation, storage, config, `theme.ts` |
-| `packages/video/` (`@bytereel/video`) | Remotion animation code: composition, 8 patterns, primitives, fonts, captions |
+| `packages/video/` (`@bytereel/video`) | Remotion animation code (video style v4, F22b): composition, 8 pattern layouts, hero object library, captions, fonts |
 | `tools/cli/` | The `npm run pipeline -- …` developer commands |
 | `apps/web/` | The website (Next.js), from F02 |
 | `tests/`, `fixtures/`, `examples/` | Tests and sample inputs |
@@ -57,6 +57,7 @@ the project, but the storyboard waits; start `npm run inngest` and it begins wit
 npm run dev                                                       # the website (http://localhost:3000)
 npm run inngest                                                   # F15: Inngest Dev Server for the background jobs (second terminal)
 npm run db -- indexes --feature F15 --apply                       # create a feature's MongoDB indexes (here: jobs, planVersions)
+npm run storage -- check                                          # R2 check (F22): test file in healthcheck/, private + expiring links (~80 s)
 npm run pipeline -- preflight                                    # runtime, disk, output folder, config presence (no network)
 npm run pipeline -- preflight --network                          # + read-only provider checks: Gemini model get/list, ElevenLabs models + voices
 npm run pipeline -- plan --topic-file examples/water-cycle.md --voice indian-english-female   # LIVE Gemini planner -> plan.json + plan-review.html
@@ -74,9 +75,10 @@ npm run typecheck                                                 # strict TypeS
 ```
 
 **Studio:** `npm run studio` opens Remotion Studio (it prints a local URL, usually http://localhost:3000).
-Compositions: `Explainer` (the water-cycle fixture, compiled in the browser with the same synthetic timing),
-`PatternGallery` (all 8 patterns with sample data, 5 s each) and `DevanagariCheck` (Hindi conjuncts and matras).
-Set `showSafeZones` to `true` in the props panel to see the Reels safe zones.
+Compositions: `Explainer` (the water-cycle fixture, compiled in the browser with the same synthetic timing) and
+`HeroGallery` (the hero object library, 12 per page). Set `showSafeZones` to `true` in the props panel to see the
+Reels safe zones. The fixtures `sip-vs-fd` and `internet-journey` show the other scene types; review tools for
+renders are in `tools/video/` (see tools/README.md).
 
 Try an invalid fixture to see the error messages, e.g.
 `npm run pipeline -- fixture --file fixtures/invalid-missing-anchor.plan.json`.
@@ -116,7 +118,7 @@ Run artifacts go to `runs/<owner>/<project>/<version>/` (ignored by git):
 | Folder | What it does |
 |---|---|
 | `packages/pipeline/src/timing/` | Deterministic compiler: alignment validation, alignment → word mapping (Intl.Segmenter, many-to-many atoms for `97%` ↔ "ninety-seven percent"), event resolution, frame accounting, caption phrases (max 2 lines, number + unit kept together, no lone last word), the synthetic timing fixture. |
-| `packages/video/src/` | Remotion composition `Explainer` (1080×1920, 30 fps, duration from the timeline), style tokens and safe zones (`theme.ts`), primitives, local icon set, packaged fonts (Inter + Noto Sans Devanagari), the 8 pattern components, captions, fixture badge. |
+| `packages/video/src/` | Remotion composition `Explainer` (1080×1920, 30 fps, duration from the timeline). Since F22b it draws video style v4: `scenes/` (the 8 pattern layouts), `heroes/` (the hero object library), `Captions.tsx` (3–5 word phrases), `icons/`, packaged fonts (Inter + Noto Sans Devanagari), fixture badge. |
 | `packages/pipeline/src/pipeline/render*.ts` | Render stage (bundle, render H.264, preview PNGs) and the fixture run: compile → render → validate with manifest stages. |
 | `packages/pipeline/src/validation/` | MP4 probe with Remotion's bundled ffprobe: codec, resolution, fps, decoded frame count, duration vs timeline. Writes `qa.json`. |
 

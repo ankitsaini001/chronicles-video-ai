@@ -1,9 +1,22 @@
-import { API_RATE_LIMITS, getOwnedJob, IdempotencyLockLostError, retryPlanJob, retryReviseJob, toJobResource } from "@bytereel/db";
+import {
+  API_RATE_LIMITS,
+  assertLanguageEnabled,
+  getOwnedJob,
+  getOwnedProject,
+  IdempotencyLockLostError,
+  ProjectActionError,
+  retryCaptionJob,
+  retryGenerateJob,
+  retryPlanJob,
+  retryReviseJob,
+  toJobResource,
+} from "@bytereel/db";
 import { z } from "zod";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
 import { assertPlanJobsReady, toApiProblem } from "@/lib/plan/api";
 import { sendPlanEvent } from "@/lib/plan/jobs";
+import { assertCaptionJobsReady, assertGenerateReady } from "@/lib/video/api";
 
 // E2 POST /api/v1/jobs/{jobId}/retry (docs/API.md E2): the "Try again" button after a failed
 // storyboard. Idempotency-Key required; body `{}`. Rate: 30 per hour.
@@ -16,6 +29,17 @@ import { sendPlanEvent } from "@/lib/plan/jobs";
 // F18: a failed `revise` job (a storyboard change request) is retried the same way
 // (packages/db/src/revisions.ts retryReviseJob): only while the storyboard is still the version the
 // request was made on; the project keeps its state, only `activeJobId` is set.
+// F23: a failed `generate` job (the video) is retried the same way (packages/db/src/generate-jobs.ts
+// retryGenerateJob): language first (422), only a retryable failure, only while the storyboard is
+// still the approved version (409 APPROVAL_REQUIRED), the voice characters still to record must fit
+// (recordings already made are reused for free); project → `generating`. Never counts toward videos/day.
+// Order: the job (404) and, for a video job, its project's language (422) BEFORE the set-up checks
+// (500 when Inngest, the voice or R2 isn't set up).
+// F25: a failed (retryable) or cancelled `caption` job (caption fixes) is retried the same way
+// (packages/db/src/caption-fixes.ts retryCaptionJob): only while the video the fixes were made on is
+// still the project's video and the project is `video_ready`; project → `generating`. Nothing is
+// counted and no voice set-up is needed (Inngest and R2 only). Like a video job, its project's
+// language is checked first (422 LANGUAGE_UNAVAILABLE, the same rule as F4).
 // After the commit the event `{jobId}:retry:{attempt}` goes to Inngest. Answer: 202 Job.
 
 const EmptyBody = z.strictObject({});
@@ -27,15 +51,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     body: EmptyBody,
     idempotent: true,
     handle: async ({ db, user, idempotencyLock }) => {
-      assertPlanJobsReady();
+      const owned = await getOwnedJob(db, user.id, jobId);
+      if (!owned) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
+      if (owned.type === "generate" || owned.type === "caption") {
+        const project = await getOwnedProject(db, user.id, owned.projectId.toHexString());
+        if (!project) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
+        try {
+          assertLanguageEnabled(project.language);
+        } catch (error) {
+          toApiProblem(error);
+        }
+      }
+      const voice = owned.type === "generate" ? assertGenerateReady() : null;
+      if (owned.type === "caption") assertCaptionJobsReady();
+      else if (owned.type !== "generate") assertPlanJobsReady();
       let job;
       try {
         const respond = (j: Parameters<typeof toJobResource>[0]) => ({ status: 202, body: toJobResource(j) });
-        const owned = await getOwnedJob(db, user.id, jobId);
         job =
-          owned?.type === "revise"
-            ? await retryReviseJob(db, { ownerId: user.id, jobId, idempotencyLock, respond })
-            : await retryPlanJob(db, { ownerId: user.id, jobId, idempotencyLock, respond });
+          owned.type === "generate" && voice
+            ? await retryGenerateJob(db, { ownerId: user.id, jobId, timezone: user.timezone, voice, idempotencyLock, respond })
+            : owned.type === "caption"
+              ? await retryCaptionJob(db, { ownerId: user.id, jobId, idempotencyLock, respond })
+              : owned.type === "revise"
+              ? await retryReviseJob(db, { ownerId: user.id, jobId, idempotencyLock, respond })
+              : await retryPlanJob(db, { ownerId: user.id, jobId, idempotencyLock, respond });
       } catch (error) {
         // Like C2: a repeat of the same click took the Idempotency-Key over; nothing was saved here.
         if (error instanceof IdempotencyLockLostError) throw new ApiProblem(409, "IDEMPOTENCY_IN_PROGRESS", API_MESSAGES.IDEMPOTENCY_IN_PROGRESS);

@@ -42,7 +42,7 @@ A 'Writing storyboard…' state, then the storyboard.
 - **Stuck jobs are fixed when someone looks**, not by a cron yet: a job with no progress for 10 min, or never started after 15 min, becomes failed with Try again; a start message that didn't reach Inngest is sent again (API.md §8.5).
 - **C4 in F15 is "edit idea" only**: rename alone arrives with F21 (with archive). `allowedActions` lists only `edit_idea` and `retry_job` for now.
 - **Old F12 projects** (state `draft`, saved before this feature) stay as they are; their page says to start a new project.
-- The plan copy in R2 waits for F22 (R2 isn't set up yet); MongoDB holds the plan.
+- ~~The plan copy in R2 waits for F22 (R2 isn't set up yet); MongoDB holds the plan.~~ Decided in F22 (2026-11-14): no plan copy in R2 for now; MongoDB holds every version.
 
 ## How we test it (done when all are ticked)
 - [x] A real storyboard is created and saved (live smoke run, 2026-11-14: "Why is the sky blue?", English, gemini-3.6-flash: 6 scenes, 174 words, about 70 s, 1 request, 57 s; plan version 1 saved)

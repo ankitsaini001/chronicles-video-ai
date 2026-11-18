@@ -13,10 +13,13 @@ import {
   type VoicePreset,
 } from "../contracts";
 import { COMPONENT_CATALOG } from "./component-catalog";
+import { HERO_NAMES } from "./hero-catalog";
 import { ICON_NAMES } from "./icon-catalog";
 
 /** Planner-only icon value meaning "no icon" (dropped by assemblePlan; plans never contain it). */
 export const NO_ICON = "none";
+/** Planner-only hero value meaning "no hero object fits" (assemblePlan stores it as `hero: null`). */
+export const NO_HERO = "none";
 
 /**
  * Planner-output contract (PIPELINE_DESIGN.md §5): the part of a plan the MODEL writes.
@@ -70,6 +73,9 @@ const PlannerNarrationSchema = NarrationBlockSchema.extend({
   text: NarrationBlockSchema.shape.text.describe("Approved narration wording, spoken and shown as captions."),
   speech: NarrationBlockSchema.shape.speech.describe("Pronunciation hint sent to text-to-speech when it must differ from text; otherwise null."),
   display: NarrationBlockSchema.shape.display.describe("Caption text when it must differ from text; otherwise null."),
+  hero: z
+    .enum([...HERO_NAMES, NO_HERO])
+    .describe(`The big object shown in the middle of the screen while this block is spoken, from the hero catalog; "${NO_HERO}" when no hero fits (the scene's icon is shown instead).`),
 });
 
 const PlannerObjectSchema = VisualObjectSchema.extend({
@@ -186,6 +192,13 @@ export interface CodeOwnedPlanFields {
   language: Language;
   voicePreset: VoicePreset;
   sources: Source[];
+  /**
+   * Revisions only: ids of the base plan's narration blocks that have no `hero` at all (written
+   * before heroes existed). The revision view shows them as "none"; when the answer still says
+   * "none" for such a block, it keeps having no hero (keyword fallback, as before) instead of
+   * becoming an explicit "none" (the icon medallion).
+   */
+  blocksWithoutHero?: readonly string[];
 }
 
 export interface AssembledPlan {
@@ -213,6 +226,7 @@ export function assemblePlan(modelOutput: unknown, owned: CodeOwnedPlanFields): 
     }
   }
   normalizeIcons(body);
+  normalizeHeroes(body, new Set(owned.blocksWithoutHero ?? []));
   const plan = {
     schemaVersion: PLAN_SCHEMA_VERSION,
     ownerId: owned.ownerId,
@@ -225,6 +239,29 @@ export function assemblePlan(modelOutput: unknown, owned: CodeOwnedPlanFields): 
     ...body,
   };
   return { plan, ignoredFields };
+}
+
+/**
+ * The planner says "none" (or null) for "no hero fits": the plan stores `hero: null`, and the video
+ * shows the scene's icon in a medallion for that block. Exception (revisions): a block that had no
+ * hero at all in the base plan and still says "none" keeps having none (see `blocksWithoutHero`).
+ */
+function normalizeHeroes(body: Record<string, unknown>, keepWithout: ReadonlySet<string>): void {
+  if (!Array.isArray(body.scenes)) return;
+  for (const scene of body.scenes) {
+    const blocks = (scene as { narration?: unknown } | null)?.narration;
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks) {
+      if (block && typeof block === "object" && Object.hasOwn(block, "hero")) {
+        const record = block as Record<string, unknown>;
+        if (record.hero === undefined) delete record.hero;
+        else if (record.hero === NO_HERO || record.hero === null) {
+          if (typeof record.id === "string" && keepWithout.has(record.id)) delete record.hero;
+          else record.hero = null;
+        }
+      }
+    }
+  }
 }
 
 /** The planner says "none" (or null) for "no icon"; the plan contract simply leaves `icon` out. */

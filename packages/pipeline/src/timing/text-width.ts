@@ -19,7 +19,10 @@ const SPECIAL: Record<string, number> = {
   W: 0.98, J: 0.5, "।": 0.3,
 };
 
-function charWidthEm(ch: string): number {
+/** Width of a character the table and the classes below don't know (the compiler's default). */
+export const UNKNOWN_CHAR_EM = 0.6;
+
+function charWidthEm(ch: string, unknownEm: number): number {
   const known = LOWER[ch] ?? SPECIAL[ch];
   if (known !== undefined) return known;
   if (/\p{Mn}/u.test(ch)) return 0; // non-spacing marks (most matras above/below, virama, nukta)
@@ -27,11 +30,17 @@ function charWidthEm(ch: string): number {
   if (/\p{Script=Devanagari}/u.test(ch)) return 0.66;
   if (/\d/u.test(ch)) return 0.62;
   if (/\p{Lu}/u.test(ch)) return 0.7;
-  return 0.6;
+  return unknownEm;
 }
 
-export function estimateTextWidth(text: string, fontSizePx: number): number {
+/**
+ * `unknownCharEm`: the width of a character the table doesn't know (default 0.6 em, the compiler's
+ * estimate). Caption fixes (F25 review) check with 1.0 em, so the server is never more lenient than
+ * the browser for a character it can't predict.
+ */
+export function estimateTextWidth(text: string, fontSizePx: number, options: { unknownCharEm?: number } = {}): number {
+  const unknownEm = options.unknownCharEm ?? UNKNOWN_CHAR_EM;
   let em = 0;
-  for (const ch of text.normalize("NFC")) em += charWidthEm(ch);
+  for (const ch of text.normalize("NFC")) em += charWidthEm(ch, unknownEm);
   return em * fontSizePx * 1.04;
 }

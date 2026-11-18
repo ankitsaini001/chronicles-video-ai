@@ -8,6 +8,8 @@ import { ObjectId } from "mongodb";
  * F16–F20 end-to-end check over real HTTP (storyboard screen, narration edit + versions + undo,
  * revision chat, voice switch, approval #1): a running `next start` server whose Gemini is the local
  * stand-in (E2E_FAKE_GEMINI=1: NO real AI call) and a private Inngest Dev Server on port 8299.
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239 (never 3000/8288).
  *
  *   1. in apps/web:  npx next build
@@ -20,6 +22,11 @@ import { ObjectId } from "mongodb";
  *
  * Before ANY request it reads the environment of the server process on the port (Linux /proc) and
  * stops unless it has E2E_FAKE_GEMINI=1, MONGODB_DB=bytereel_test and INNGEST_DEV on port 8299.
+ *
+ * F23 NOTE: the "F20: approve" checks below describe F20's approve-only answer (200, job null). Since
+ * F23, D8 approves AND starts the video job (202), and on bytereel_test it needs the stand-in voice
+ * (E2E_FAKE_ELEVENLABS=1; the real voice is refused there, so no real characters can be spent: without
+ * it D8 answers 500). D8 is now checked by tools/e2e/f23-generate.ts.
  */
 
 const TEST_DB = "bytereel_test";
@@ -231,13 +238,14 @@ async function main(): Promise<void> {
   ({ project, version } = await current(a.cookie, pid));
   r = await send(a.cookie, "POST", `/api/v1/projects/${pid}/revisions`, { stage: "storyboard", scope: "project", message: "e2e busy: shorter", basePlanVersionId: version.id, expectedStateVersion: project.stateVersion }, { "idempotency-key": key() });
   const busyJob = r.json.job?.id as string;
-  let st = await waitIdle(a.cookie, pid);
+  // Busy waits are 20 s then 60 s (since after F26), so a busy attempt takes about 1.5 minutes.
+  let st = await waitIdle(a.cookie, pid, 3 * 60_000);
   r = await send(a.cookie, "GET", `/api/v1/jobs/${busyJob}`);
   check("busy → job failed PROVIDER_BUSY (retryable); storyboard unchanged; retry_job offered", r.json.state === "failed" && r.json.error?.code === "PROVIDER_BUSY" && r.json.error?.retryable === true && st.currentPlanVersionId === version.id && st.allowedActions?.includes("retry_job"));
   check("busy: revision failed", (await db.collection("revisions").findOne({ jobId: oid(busyJob) }))?.status === "failed");
   r = await send(a.cookie, "POST", `/api/v1/jobs/${busyJob}/retry`, {}, { "idempotency-key": key() });
   check("E2 Try again on the failed change → 202 attempt 2, revision pending", r.status === 202 && r.json.attempt === 2 && r.json.type === "revise" && (await db.collection("revisions").findOne({ jobId: oid(busyJob) }))?.status === "pending");
-  st = await waitIdle(a.cookie, pid);
+  st = await waitIdle(a.cookie, pid, 3 * 60_000);
   check("…fails again (still busy); planRequestCount counted per attempt", st.state === "storyboard_ready" && (await projectOf(pid))!.planRequestCount === countBefore + 4);
 
   // ---------- the 20 cap ----------
@@ -273,6 +281,37 @@ async function main(): Promise<void> {
   check("project unchanged by the other user", (await projectOf(pid))?.stateVersion === sv);
   check("signed out: D2 → 401", (await send("", "GET", `/api/v1/projects/${pid}/plan-versions/current`)).status === 401);
   check("no Origin: D3 → 403", (await fetch(`${base}/api/v1/projects/${pid}/narration-edits`, { method: "POST", headers: { cookie: a.cookie, "content-type": "application/json", origin: "https://evil.example" }, body: "{}" })).status === 403);
+
+  // ---------- Language switch (packages/db/src/languages.ts): an existing Hindi storyboard ----------
+  // Hindi/Hinglish are off: the project stays viewable and editable by hand, but nothing that costs
+  // AI or voice (D5, E2) is allowed, and the voice switch is hidden.
+  const hiPid = await newStoryboard(a.cookie, "How do rainbows form?");
+  await db.collection("projects").updateOne({ _id: oid(hiPid) }, { $set: { language: "hi" } });
+  ({ project, version } = await current(a.cookie, hiPid));
+  check("Hindi project: allowedActions without request_revision (narration edit, approve, rename, archive stay)", project.allowedActions?.join() === "rename,edit_storyboard,approve_storyboard,archive", project.allowedActions?.join());
+  const hiBefore = await projectOf(hiPid);
+  const countFor = (c: string) => db.collection(c).countDocuments({ projectId: oid(hiPid) });
+  const [revisionsBefore, jobsBefore] = [await countFor("revisions"), await countFor("jobs")];
+  r = await send(a.cookie, "POST", `/api/v1/projects/${hiPid}/revisions`, { stage: "storyboard", scope: "project", message: "make it shorter", basePlanVersionId: version.id, expectedStateVersion: project.stateVersion }, { "idempotency-key": key() });
+  let hiAfter = await projectOf(hiPid);
+  check(
+    "Hindi project: D5 → 422 LANGUAGE_UNAVAILABLE; no revision, no job, nothing counted, project unchanged",
+    r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && r.json.error.message === "Only English is available right now." && (await countFor("revisions")) === revisionsBefore && (await countFor("jobs")) === jobsBefore && hiAfter?.planRequestCount === hiBefore?.planRequestCount && hiAfter?.stateVersion === hiBefore?.stateVersion && hiAfter?.activeJobId === null,
+    `${r.status} ${r.json.error?.code}`,
+  );
+  // A failed change request on it (copied from a real revise job): Try again is refused too.
+  const template = await db.collection("jobs").findOne({ projectId: oid(pid), type: "revise" });
+  const failedReviseId = new ObjectId();
+  await db.collection("jobs").insertOne({ ...template!, _id: failedReviseId, projectId: oid(hiPid), idempotencyKey: `rev:${failedReviseId.toHexString()}`, state: "failed", attempt: 1, error: { code: "PROVIDER_BUSY", message: "busy", retryable: true }, inputRef: { ...template!.inputRef, planVersionId: oid(version.id), revisionId: null } });
+  r = await send(a.cookie, "POST", `/api/v1/jobs/${failedReviseId.toHexString()}/retry`, {}, { "idempotency-key": key() });
+  const failedAfter = await db.collection("jobs").findOne({ _id: failedReviseId });
+  hiAfter = await projectOf(hiPid);
+  check("Hindi project: E2 Try again on a change request → 422; job stays failed, nothing counted", r.status === 422 && r.json.error?.code === "LANGUAGE_UNAVAILABLE" && failedAfter?.state === "failed" && failedAfter.attempt === 1 && hiAfter?.activeJobId === null && hiAfter.planRequestCount === hiBefore?.planRequestCount, `${r.status} ${r.json.error?.code}`);
+  page = (await (await fetch(`${base}/projects/${hiPid}/storyboard`, { headers: { cookie: a.cookie } })).text()).replace(/<!-- -->/g, "");
+  check("Hindi storyboard page: viewable, no voice switch, a note instead of the change box", page.includes("Scene 01") && !page.includes("change the voice") && page.includes("available for Hindi videos right now") && !page.includes("Send change request"));
+  const hiScene = version.plan.scenes[0];
+  r = await send(a.cookie, "POST", `/api/v1/projects/${hiPid}/narration-edits`, { basePlanVersionId: version.id, sceneId: hiScene.id, blocks: [{ narrationId: hiScene.narration[0].id, text: `${hiScene.narration[0].text} Really.` }], expectedStateVersion: project.stateVersion });
+  check("Hindi project: the free narration edit (D3) still works → 201", r.status === 201, `status ${r.status}`);
 }
 
 main()

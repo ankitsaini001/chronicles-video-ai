@@ -28,7 +28,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F00 | [Prototype: first voiced test video](F00-prototype-first-voiced-video.md) | — | ⏸ Parked (founder will do it later; must be done before F23) |
+| F00 | [Prototype: first voiced test video](F00-prototype-first-voiced-video.md) | — | ✅ Done |
 
 ### A1 · Foundation (project setup)
 
@@ -70,12 +70,13 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | ⬜ Not started |
-| F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ⬜ Not started |
-| F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ⬜ Not started |
-| F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ⬜ Not started |
-| F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | ⬜ Not started |
-| F27 | [Daily limits](F27-daily-limits.md) | F23 | ⬜ Not started |
+| F22 | [Cloudflare R2 storage setup (together)](F22-r2-storage.md) | F20 | ✅ Done |
+| F22b | [Video style upgrade (v4 hero visuals)](F22b-video-style-v4.md) | F22, F00 | ✅ Done |
+| F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ✅ Done |
+| F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ✅ Done |
+| F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ✅ Done |
+| F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | ✅ Done |
+| F27 | [Daily limits](F27-daily-limits.md) | F23 | ✅ Done |
 
 ### A5 · Instagram publishing
 
@@ -98,10 +99,23 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Next up:** phase A4 (F22 Cloudflare R2 storage setup, together). Phases A1, A2 and A3 done (F01–F21); A3 merged to main 2026-11-14.
+**Now:** **F27 — Daily limits** is ✅ Done (founder OK 2026-11-18: limit messages that say why and when they reset, in the creator's timezone; the storyboard warns and greys out Approve when a new video won't fit). **Phase A4 (generate and review video) is complete: F22–F27 done.** Next: merge `dev` → `main` for the phase (temporary worktree), then **F28 — Connect / disconnect Instagram**. Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A4 done; F00, F22, F22b and F23–F27 done (v4 hero style is the only video style).
+
+## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
+Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
+- **The switch:** `ENABLED_LANGUAGES` in `packages/db/src/languages.ts` (now `["en"]`). A code constant, used by both the web app and the database/API code.
+- **While off:** home page without Hindi (nav "Hindi voices NEW", हिंदी hero tile → "Notes", the Hindi sample card, the Languages section, Hindi in the hero/meta/FAQ copy); Idea screen without the Language row (sends `"en"`); brainstorm in English only; the server answers `422 LANGUAGE_UNAVAILABLE` to C2, C7, D5, D8 and E2 before counting anything or calling AI or the voice, and the video job (F23) refuses them before any ElevenLabs call. Existing Hindi/Hinglish projects stay viewable (rename, archive, narration edit, undo), without the voice chip, change requests, Try again, or (since F23, when approving started the paid video job) **Approve & generate video**.
+- **To turn back on:** set `ENABLED_LANGUAGES = ["en", "hi", "hinglish"]` (after the voice plan is decided, the Hindi voice ids work with the ElevenLabs plan, and the Hindi samples are recorded), then run `npm test` (update `tests/language-switch.test.ts` and the language checks in `tests/generate-video.test.ts`) and the F13/F14/F15/F16–F20/F23 e2e checks (their Hindi checks say what to expect when re-enabled). The video job checks both voices of every enabled language at D8 (no fallback voice).
 
 ## Open decisions (must be settled before the named feature)
-- **Before F23: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
+- **Before Hindi/Hinglish come back on: decide the Hindi/Hinglish voice plan** — a paid ElevenLabs plan (also check the free plan's commercial-use/attribution rules) or another text-to-speech service for Hindi; then run `npm run voices:samples` for the 4 missing preview files (about 202 characters). (F13 found that the Hindi voices need a paid plan; the free premade voices are all American/British/Australian.) F23 was built English-only with the free voices Matilda and Brian (founder, 2026-11-15). Also: ElevenLabs lists both "Indian English" voices as *British* accent; founder to listen.
+- **Before F38 (go-live): where videos are rendered online** (Vercel Sandbox, a small render server, …). F23 renders on this computer (founder, 2026-11-15).
+
+## Follow-ups to re-check in manual testing
+- **A real "Approve & make new video" after a video change (F26, founder 2026-11-18):** the real test stopped before approving (to save voice characters); check once that the new video shows the change and that the voice characters rise by about the number in the cost note.
+- **A real caption fix (F25):** no caption fix was saved in a real run yet (proven by the e2e only); save one once and check the new video (free: no voice characters).
+- **Narration and pictures in sync (founder, 2026-11-16, after the first real F23 video):** "the explanation and the picturization somewhere might not be in sync, or some visualization part is missing." Known part: the test storyboard (2026-11-14) predates the planner's hero picks (F22b), so heroes came from single spoken words (a map pin for "every single direction", a steam picture for "nitrogen and oxygen"). In the manual testing phase, make a new storyboard on the same topic and check scene by scene; fix then if it still shows. Video and frame sheet: `runs/f23-work/real-video/`.
+- **A failed second video hides the kept one (F26 code review, 2026-11-17):** after "Approve & make new video", if the new video fails (`generate_failed`), the video page shows only the failure screen; the older video is still the project's video but can't be played or downloaded from there. Decide in manual testing whether the failure screen should also show the kept video (not built).
 
 ## Future ideas (not planned yet, nothing built)
 Discussed with the founder on 2026-11-13. To be turned into features when the time comes.

@@ -1,0 +1,608 @@
+{
+  "schemaVersion": 1,
+  "projectId": "fixture-long-labels",
+  "ownerId": "fixture-owner",
+  "versionId": "v1",
+  "parentVersionId": null,
+  "topic": "How plastic recycling works",
+  "audience": "Families in Indian cities who sort their household waste",
+  "learningObjective": "Follow a plastic bottle from the bin through a recycling plant and back into a new product",
+  "language": "en",
+  "voicePreset": "indian-english-female",
+  "sources": [
+    {
+      "id": "topic-notes",
+      "title": "Fixture notes",
+      "notes": "Layout fixture (F22b review): the longest labels a plan allows (60 characters for comparison points and takeaway rows, 32 for diagram parts), a 7-step process rail and a 7-bar chart. Illustrative numbers only."
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-hook",
+      "type": "title-hook",
+      "narration": [
+        {
+          "id": "line-hook",
+          "text": "Have you ever wondered where your plastic bottle goes after the bin? It starts a long journey.",
+          "hero": "question-mark"
+        }
+      ],
+      "objects": [
+        {
+          "id": "hook-title",
+          "kind": "headline",
+          "label": "Where does your plastic go?",
+          "value": null
+        },
+        {
+          "id": "hook-sub",
+          "kind": "subtitle",
+          "label": "From your bin to a new bottle in a few weeks",
+          "value": null
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-hook-title",
+          "anchor": {
+            "narrationId": "line-hook",
+            "phrase": "where your plastic bottle goes"
+          },
+          "action": "appear",
+          "target": "hook-title"
+        },
+        {
+          "id": "ev-hook-sub",
+          "anchor": {
+            "narrationId": "line-hook",
+            "phrase": "a long journey"
+          },
+          "action": "appear",
+          "target": "hook-sub"
+        }
+      ]
+    },
+    {
+      "id": "scene-compare",
+      "type": "comparison",
+      "narration": [
+        {
+          "id": "line-compare-recycled",
+          "text": "Recycled plastic uses far less energy than new plastic made from crude oil. It keeps bottles out of our rivers and seas, and it comes back as clothes, benches and pipes.",
+          "hero": "globe"
+        },
+        {
+          "id": "line-compare-new",
+          "text": "New plastic needs oil or gas pumped out of the ground. Every new bottle may end up as waste, but it often costs less, because collecting used plastic is costly.",
+          "hero": "factory"
+        }
+      ],
+      "objects": [
+        {
+          "id": "col-recycled",
+          "kind": "column",
+          "label": "Recycled plastic",
+          "value": null
+        },
+        {
+          "id": "pt-energy",
+          "kind": "point",
+          "label": "Uses far less energy than making new plastic from crude oil.",
+          "value": null
+        },
+        {
+          "id": "pt-rivers",
+          "kind": "point",
+          "label": "Keeps old bottles and bags out of our rivers, seas and parks",
+          "value": null
+        },
+        {
+          "id": "pt-clothes",
+          "kind": "point",
+          "label": "Comes back as new clothes, benches, pipes and drink bottles.",
+          "value": null
+        },
+        {
+          "id": "col-new",
+          "kind": "column",
+          "label": "New plastic",
+          "value": null
+        },
+        {
+          "id": "pt-oil",
+          "kind": "point",
+          "label": "Needs oil or gas pumped out of the ground before it is made.",
+          "value": null
+        },
+        {
+          "id": "pt-waste",
+          "kind": "point",
+          "label": "Every new bottle adds plastic that may end up as waste later",
+          "value": null
+        },
+        {
+          "id": "pt-cost",
+          "kind": "point",
+          "label": "Often costs less today, as collecting used plastic is costly",
+          "value": null
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-col-recycled",
+          "anchor": {
+            "narrationId": "line-compare-recycled",
+            "phrase": "Recycled plastic uses"
+          },
+          "action": "appear",
+          "target": "col-recycled"
+        },
+        {
+          "id": "ev-pt-energy",
+          "anchor": {
+            "narrationId": "line-compare-recycled",
+            "phrase": "far less energy"
+          },
+          "action": "check",
+          "target": "pt-energy"
+        },
+        {
+          "id": "ev-pt-rivers",
+          "anchor": {
+            "narrationId": "line-compare-recycled",
+            "phrase": "out of our rivers"
+          },
+          "action": "check",
+          "target": "pt-rivers"
+        },
+        {
+          "id": "ev-pt-clothes",
+          "anchor": {
+            "narrationId": "line-compare-recycled",
+            "phrase": "comes back as clothes"
+          },
+          "action": "check",
+          "target": "pt-clothes"
+        },
+        {
+          "id": "ev-col-new",
+          "anchor": {
+            "narrationId": "line-compare-new",
+            "phrase": "New plastic needs"
+          },
+          "action": "appear",
+          "target": "col-new"
+        },
+        {
+          "id": "ev-pt-oil",
+          "anchor": {
+            "narrationId": "line-compare-new",
+            "phrase": "pumped out of the ground"
+          },
+          "action": "cross",
+          "target": "pt-oil"
+        },
+        {
+          "id": "ev-pt-waste",
+          "anchor": {
+            "narrationId": "line-compare-new",
+            "phrase": "end up as waste"
+          },
+          "action": "cross",
+          "target": "pt-waste"
+        },
+        {
+          "id": "ev-pt-cost",
+          "anchor": {
+            "narrationId": "line-compare-new",
+            "phrase": "often costs less"
+          },
+          "action": "check",
+          "target": "pt-cost"
+        }
+      ]
+    },
+    {
+      "id": "scene-plant",
+      "type": "labeled-diagram",
+      "narration": [
+        {
+          "id": "line-plant",
+          "text": "Inside a recycling plant, trucks unload on a tipping floor. Optical scanners sort the plastic by colour, and magnets pull out tins. Shredders cut bottles into chips, hot water tanks wash them, and extruders melt the flakes into pellets.",
+          "hero": "factory"
+        }
+      ],
+      "objects": [
+        {
+          "id": "plant",
+          "kind": "diagram",
+          "label": "Recycling plant",
+          "icon": "gear",
+          "value": null
+        },
+        {
+          "id": "part-floor",
+          "kind": "part",
+          "label": "Trucks unload on a tipping floor",
+          "value": null
+        },
+        {
+          "id": "part-scanners",
+          "kind": "part",
+          "label": "Optical scanners sort by colours",
+          "value": null
+        },
+        {
+          "id": "part-magnets",
+          "kind": "part",
+          "label": "Magnets pull out the tins & cans",
+          "value": null
+        },
+        {
+          "id": "part-shredders",
+          "kind": "part",
+          "label": "Shredders cut bottles into chips",
+          "value": null
+        },
+        {
+          "id": "part-tanks",
+          "kind": "part",
+          "label": "Hot water tanks wash every flake",
+          "value": null
+        },
+        {
+          "id": "part-extruders",
+          "kind": "part",
+          "label": "Extruders melt flakes to pellets",
+          "value": null
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-floor",
+          "anchor": {
+            "narrationId": "line-plant",
+            "phrase": "trucks unload"
+          },
+          "action": "appear",
+          "target": "part-floor"
+        },
+        {
+          "id": "ev-scanners",
+          "anchor": {
+            "narrationId": "line-plant",
+            "phrase": "Optical scanners sort"
+          },
+          "action": "appear",
+          "target": "part-scanners"
+        },
+        {
+          "id": "ev-magnets",
+          "anchor": {
+            "narrationId": "line-plant",
+            "phrase": "magnets pull out"
+          },
+          "action": "appear",
+          "target": "part-magnets"
+        },
+        {
+          "id": "ev-shredders",
+          "anchor": {
+            "narrationId": "line-plant",
+            "phrase": "Shredders cut bottles"
+          },
+          "action": "appear",
+          "target": "part-shredders"
+        },
+        {
+          "id": "ev-tanks",
+          "anchor": {
+            "narrationId": "line-plant",
+            "phrase": "hot water tanks"
+          },
+          "action": "appear",
+          "target": "part-tanks"
+        },
+        {
+          "id": "ev-extruders",
+          "anchor": {
+            "narrationId": "line-plant",
+            "phrase": "extruders melt"
+          },
+          "action": "appear",
+          "target": "part-extruders"
+        }
+      ]
+    },
+    {
+      "id": "scene-path",
+      "type": "process-flow",
+      "narration": [
+        {
+          "id": "line-path",
+          "text": "The path is long. Your bin goes to a truck, then to the tipping floor, through sorting and washing, into pellets, and finally into a new bottle on a shop shelf.",
+          "hero": "truck"
+        }
+      ],
+      "objects": [
+        {
+          "id": "node-bin",
+          "kind": "node",
+          "label": "Your bin",
+          "value": null
+        },
+        {
+          "id": "node-truck",
+          "kind": "node",
+          "label": "Truck",
+          "value": null
+        },
+        {
+          "id": "node-floor",
+          "kind": "node",
+          "label": "Tipping floor",
+          "value": null
+        },
+        {
+          "id": "node-sorting",
+          "kind": "node",
+          "label": "Sorting",
+          "value": null
+        },
+        {
+          "id": "node-washing",
+          "kind": "node",
+          "label": "Washing",
+          "value": null
+        },
+        {
+          "id": "node-pellets",
+          "kind": "node",
+          "label": "Pellets",
+          "value": null
+        },
+        {
+          "id": "node-bottle",
+          "kind": "node",
+          "label": "New bottle",
+          "value": null
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-bin",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "Your bin goes"
+          },
+          "action": "appear",
+          "target": "node-bin"
+        },
+        {
+          "id": "ev-truck",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "to a truck"
+          },
+          "action": "appear",
+          "target": "node-truck"
+        },
+        {
+          "id": "ev-floor",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "the tipping floor"
+          },
+          "action": "appear",
+          "target": "node-floor"
+        },
+        {
+          "id": "ev-sorting",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "through sorting"
+          },
+          "action": "appear",
+          "target": "node-sorting"
+        },
+        {
+          "id": "ev-washing",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "and washing"
+          },
+          "action": "appear",
+          "target": "node-washing"
+        },
+        {
+          "id": "ev-pellets",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "into pellets"
+          },
+          "action": "appear",
+          "target": "node-pellets"
+        },
+        {
+          "id": "ev-bottle",
+          "anchor": {
+            "narrationId": "line-path",
+            "phrase": "a new bottle"
+          },
+          "action": "appear",
+          "target": "node-bottle"
+        }
+      ]
+    },
+    {
+      "id": "scene-week",
+      "type": "chart",
+      "narration": [
+        {
+          "id": "line-week",
+          "text": "One collection point counts bottles every day: forty on Monday, more in the middle of the week, and ninety on Sunday."
+        }
+      ],
+      "objects": [
+        {
+          "id": "week-axis",
+          "kind": "axis",
+          "label": "Bottles collected each day",
+          "value": null
+        },
+        {
+          "id": "bar-mon",
+          "kind": "bar",
+          "label": "Monday",
+          "value": 40
+        },
+        {
+          "id": "bar-tue",
+          "kind": "bar",
+          "label": "Tuesday",
+          "value": 45
+        },
+        {
+          "id": "bar-wed",
+          "kind": "bar",
+          "label": "Wednesday",
+          "value": 60
+        },
+        {
+          "id": "bar-thu",
+          "kind": "bar",
+          "label": "Thursday",
+          "value": 55
+        },
+        {
+          "id": "bar-fri",
+          "kind": "bar",
+          "label": "Friday",
+          "value": 70
+        },
+        {
+          "id": "bar-sat",
+          "kind": "bar",
+          "label": "Saturday",
+          "value": 80
+        },
+        {
+          "id": "bar-sun",
+          "kind": "bar",
+          "label": "Sunday",
+          "value": 90
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-mon",
+          "anchor": {
+            "narrationId": "line-week",
+            "phrase": "forty on Monday"
+          },
+          "action": "grow",
+          "target": "bar-mon"
+        },
+        {
+          "id": "ev-wed",
+          "anchor": {
+            "narrationId": "line-week",
+            "phrase": "middle of the week"
+          },
+          "action": "grow",
+          "target": "bar-wed"
+        },
+        {
+          "id": "ev-sun",
+          "anchor": {
+            "narrationId": "line-week",
+            "phrase": "ninety on Sunday"
+          },
+          "action": "grow",
+          "target": "bar-sun"
+        }
+      ]
+    },
+    {
+      "id": "scene-takeaway",
+      "type": "takeaway",
+      "narration": [
+        {
+          "id": "line-take",
+          "text": "So remember three things. Rinse every bottle before it goes in the bin, keep plastic bags apart from the rest, and buy things made from recycled plastic to keep the loop going.",
+          "hero": "checklist"
+        }
+      ],
+      "objects": [
+        {
+          "id": "take-head",
+          "kind": "headline",
+          "label": "Keep the loop going",
+          "value": null
+        },
+        {
+          "id": "take-rinse",
+          "kind": "bullet",
+          "label": "Rinse every bottle and tub before it goes in a recycling bin",
+          "value": null
+        },
+        {
+          "id": "take-bags",
+          "kind": "bullet",
+          "label": "Keep plastic bags apart, because they jam the sorting belts.",
+          "value": null
+        },
+        {
+          "id": "take-buy",
+          "kind": "bullet",
+          "label": "Buy things made from recycled plastic to keep the loop going",
+          "value": null
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-take-head",
+          "anchor": {
+            "narrationId": "line-take",
+            "phrase": "remember three things"
+          },
+          "action": "appear",
+          "target": "take-head"
+        },
+        {
+          "id": "ev-take-rinse",
+          "anchor": {
+            "narrationId": "line-take",
+            "phrase": "Rinse every bottle"
+          },
+          "action": "highlight",
+          "target": "take-rinse"
+        },
+        {
+          "id": "ev-take-bags",
+          "anchor": {
+            "narrationId": "line-take",
+            "phrase": "keep plastic bags apart"
+          },
+          "action": "highlight",
+          "target": "take-bags"
+        },
+        {
+          "id": "ev-take-buy",
+          "anchor": {
+            "narrationId": "line-take",
+            "phrase": "buy things made"
+          },
+          "action": "highlight",
+          "target": "take-buy"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "sceneId": "scene-week",
+      "message": "Illustrative numbers for a layout fixture, not real collection data."
+    }
+  ]
+}

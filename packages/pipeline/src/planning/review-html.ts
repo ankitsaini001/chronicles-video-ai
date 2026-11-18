@@ -1,5 +1,6 @@
 import type { Plan, Scene } from "../contracts";
 import { COMPONENT_CATALOG, WORDS_PER_MINUTE } from "./component-catalog";
+import { heroForText, heroTitle } from "./hero-catalog";
 import { iconFor } from "./icon-catalog";
 import { countWords, validatePlanSemantics, type PlanStats } from "./semantic-validation";
 
@@ -94,10 +95,18 @@ function sceneCard(scene: Scene, index: number, plan: Plan): string {
       const extra = [
         block.speech ? `<div class="alt"><span>Speech:</span> ${escapeHtml(block.speech)}</div>` : "",
         block.display ? `<div class="alt"><span>Captions:</span> ${escapeHtml(block.display)}</div>` : "",
+        heroLine(block),
       ].join("");
       return `<div class="line"><div class="line-id">${escapeHtml(block.id)}</div><p>${highlightNarration(block.text, anchors)}</p>${extra}</div>`;
     })
     .join("");
+
+  function heroLine(block: { hero?: Parameters<typeof heroTitle>[0] | null | undefined; text: string }): string {
+    if (block.hero) return `<div class="alt"><span>Hero:</span> ${escapeHtml(heroTitle(block.hero))}</div>`;
+    if (block.hero === null) return `<div class="alt"><span>Hero:</span> <span class="muted">scene icon (the planner picked none)</span></div>`;
+    const guess = heroForText(block.text, "spoken");
+    return `<div class="alt"><span>Hero:</span> <span class="muted">${guess ? `${escapeHtml(heroTitle(guess))} (from keywords)` : "scene icon (no hero picked)"}</span></div>`;
+  }
 
   const objects = scene.objects
     .map(

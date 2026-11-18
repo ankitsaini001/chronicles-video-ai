@@ -21,6 +21,8 @@ import { ObjectId } from "mongodb";
  * Checks C7 POST /api/v1/brainstorm (pipeline checks, 5 ideas per language, repair, busy, safety,
  * the providerUsage log, 10/hour, 30/day also under concurrent clicks, nothing saved as a project),
  * the Idea page markup and C2 with a picked idea (`inputType: "brainstorm"`).
+ * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
+ *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
  * SAFETY: works only on the separate test database `bytereel_test`, port 3230–3239.
  *
  *   1. in apps/web:  npx next build
@@ -155,12 +157,18 @@ async function main(): Promise<void> {
   check("providerUsage: no project or job, and never the subject text", !("projectId" in (row ?? {})) && !("jobId" in (row ?? {})) && !JSON.stringify(row).includes("monsoon"));
   check("brainstorms today: 1 (usageCounters, user timezone)", (await dailyCount(a.id)) === 1);
 
-  r = await brainstorm(a.cookie, { subject: "मानसून", language: "hi" });
-  json = (await r.json()) as Json;
-  check("Hindi: 5 ideas in Devanagari", r.status === 200 && json.ideas?.length === 5 && json.ideas.every((i) => /\p{Script=Devanagari}/u.test(i.title)), json.ideas?.[0]?.title);
-  r = await brainstorm(a.cookie, { subject: "Monsoon kaise aata hai", language: "hinglish" });
-  json = (await r.json()) as Json;
-  check("Hinglish: 5 ideas in Roman script", r.status === 200 && json.ideas?.length === 5 && json.ideas.every((i) => !/\p{Script=Devanagari}/u.test(i.title)));
+  // Language switch (packages/db/src/languages.ts, 2026-11-14): Hindi and Hinglish are switched off.
+  // Re-enabled, these must answer 200 with 5 ideas in Devanagari / Roman script again.
+  for (const [subject, language] of [["मानसून", "hi"], ["Monsoon kaise aata hai", "hinglish"]] as const) {
+    const rowsBefore = (await usageRows(a.id)).length;
+    r = await brainstorm(a.cookie, { subject, language });
+    json = (await r.json()) as Json;
+    check(
+      `${language}: 422 LANGUAGE_UNAVAILABLE "Only English is available right now."; no AI call, not counted`,
+      r.status === 422 && json.error?.code === "LANGUAGE_UNAVAILABLE" && json.error.message === "Only English is available right now." && (await usageRows(a.id)).length === rowsBefore && (await dailyCount(a.id)) === 1,
+      `${r.status} ${json.error?.code}`,
+    );
+  }
 
   // --- Repair, invalid twice, busy, safety.
   let before = (await usageRows(a.id)).length;
@@ -247,8 +255,8 @@ async function main(): Promise<void> {
   });
   const created = (await r.json()) as { project?: { input?: { type?: string; text?: string; brainstormChoice?: unknown } } };
   check(
-    "C2 with the picked idea → 201, input.type brainstorm + brainstormChoice saved",
-    r.status === 201 && created.project?.input?.type === "brainstorm" && created.project.input.text === text && JSON.stringify(created.project.input.brainstormChoice) === JSON.stringify({ subject: "Indian monsoon", title: picked.title, hook: picked.hook }),
+    "C2 with the picked idea → 202 (since F15), input.type brainstorm + brainstormChoice saved",
+    r.status === 202 && created.project?.input?.type === "brainstorm" && created.project.input.text === text && JSON.stringify(created.project.input.brainstormChoice) === JSON.stringify({ subject: "Indian monsoon", title: picked.title, hook: picked.hook }),
     `${r.status}`,
   );
 

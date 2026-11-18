@@ -58,7 +58,7 @@ ByteReel is a web application where an educational creator turns a topic or note
 | G6 | Reuse the proven pipeline | Prototype contracts, validation, compiler, providers and Remotion components move into a shared package (§6) |
 | G7 | Languages: English, Hindi, Hinglish | Language and voice preset are plan fields; fonts and validation already support Devanagari |
 
-**Out of scope for V1** (per the PRD): billing, branding, teams, series/autopilot, uploads, other platforms, analytics, music.
+**Out of scope for V1** (per the PRD): billing, branding, teams, series/autopilot, uploads, other platforms, analytics, music choices (only the built-in code-generated music bed, PRD decision #28).
 
 ---
 
@@ -125,7 +125,7 @@ ByteReel is a web application where an educational creator turns a topic or note
 | **Server actions / route handlers** | AuthN/AuthZ, input validation (Zod), calling domain services, emitting Inngest events | Long-running work (> a few seconds) |
 | **Domain services** (`packages/core`) | Project lifecycle, versioning, approvals, state transitions, quotas | Know about HTTP or React |
 | **Pipeline library** (`packages/pipeline`, from the prototype) | Plan contracts, validation, hashing, planner, speech, alignment mapping, timeline/caption compiler | Know about users or HTTP |
-| **Video package** (`packages/video`) | Remotion composition, 8 patterns, primitives, fonts, captions | Call any network service |
+| **Video package** (`packages/video`) | Remotion composition (video style v4, §15.6): 8 pattern layouts, the hero object library, captions, fonts | Call any network service |
 | **Inngest functions** | Durable orchestration, retries, concurrency limits, scheduling | Hold state outside MongoDB/R2 |
 | **Render worker** (Vercel Sandbox) | Bundle + render the deterministic timeline to MP4, upload to R2 | Call AI providers |
 | **Repositories** (`packages/db`) | Typed MongoDB access, **every query owner-scoped** | Return another owner's data |
@@ -172,7 +172,7 @@ A single repo using **npm workspaces**; no extra monorepo tooling.
 │     └─ inngest/               # Inngest client + function registrations
 ├─ packages/
 │  ├─ pipeline/                 # ← moved from prototype src/: contracts, planning, timing, providers, validation
-│  ├─ video/                    # ← moved from prototype src/video: Remotion composition, patterns, fonts
+│  ├─ video/                    # Remotion composition (style v4): scenes/ layouts, heroes/ object library, captions, fonts
 │  ├─ core/                     # domain services: projects, versions, approvals, quotas, state machines
 │  ├─ db/                       # MongoDB client, repositories (owner-scoped), index definitions, migrations
 │  ├─ storage/                  # R2 ArtifactStore implementation, key builder, presigned URLs
@@ -185,7 +185,7 @@ A single repo using **npm workspaces**; no extra monorepo tooling.
 
 **Migration rules**
 1. Move the prototype code into `packages/pipeline` and `packages/video` **without behavior changes**; all 185 tests keep passing.
-2. Replace `LocalArtifactStore` with an `R2ArtifactStore` that implements the same `ArtifactStore` interface. The local store stays for tests and the CLI.
+2. Files go to R2 through `R2ArtifactStore` (`packages/storage`, F22): a simple store (`put`/`get`/`head`/`presignedGet` with keys from `StorageKeys`) that F23 calls directly. It does **not** implement the pipeline's run-based `ArtifactStore` (decided in the F22 code review: the R2 layout is per render and per speech clip, not per run). `LocalArtifactStore` stays for the CLI and tests.
 3. Replace the local `manifest.json` run state with MongoDB `jobs` records (§8.9). The manifest states map 1:1.
 4. Stage functions keep their signatures; they receive an **owner-scoped job reference** instead of a filesystem run path (as required by PIPELINE_DESIGN §4).
 
@@ -418,11 +418,10 @@ One document with `_id: "global"`: `version`, `maintenance { active, message }`,
 
 ## 9. Object Storage (Cloudflare R2)
 
-- **One private bucket** per environment (`bytereel-dev`, `bytereel-prod`). No public bucket access.
-- **Key layout** (built only by `storage` code from IDs, never from client or model input):
+- **One private bucket** per environment: **`reel-app-dev`**, **`reel-app-prod`** (F22; brand-neutral names because the product name may change, BRAND.md §10: do not rename a bucket). No public bucket access, no `r2.dev` address. The API token has **Object Read & Write on that one bucket only**.
+- **Code:** `packages/storage` (F22): `readR2Config` (checks `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, naming what is missing, never printing values), `StorageKeys` (the key builder), `R2ArtifactStore` (`checkBucket`, `put` with an optional create-only mode, `get`, `head`, `presignedGet`; the content type comes from the key's extension; every failure is a `StorageError` with a plain message, the operation and the HTTP status, and a redacted cause). AWS SDK v3 S3 client, region `auto`, endpoint `https://<account>.r2.cloudflarestorage.com`, path-style, connection timeout 5 s, request timeout 120 s, 3 attempts. `get` returns "missing" only for R2's `NoSuchKey`; workers call `checkBucket()` at start so a wrong bucket fails loudly. Check: `npm run storage -- check`.
+- **Key layout** (built only by `StorageKeys` from validated ObjectIds (24 lowercase hex) and hashes, never from client or model input; anything else, `..`, slashes in ids and empty values are refused):
 ```
-users/{ownerId}/projects/{projectId}/plans/{planVersionId}/plan.json
-users/{ownerId}/projects/{projectId}/plans/{planVersionId}/review.html
 users/{ownerId}/speech/{cacheKey}/audio.mp3
 users/{ownerId}/speech/{cacheKey}/alignment.json
 users/{ownerId}/speech/{cacheKey}/alignment.normalized.json
@@ -432,10 +431,21 @@ users/{ownerId}/projects/{projectId}/renders/{renderId}/output.mp4
 users/{ownerId}/projects/{projectId}/renders/{renderId}/thumbnail.jpg
 users/{ownerId}/projects/{projectId}/renders/{renderId}/frames/{n}.png
 users/{ownerId}/projects/{projectId}/renders/{renderId}/qa.json
+healthcheck/{UTC timestamp}-hello.txt     ← only `npm run storage -- check` (F22); the app never writes outside users/
 ```
-- **Access:** the browser plays and downloads via **presigned GET URLs** (TTL 15 min), issued only after an ownership check. Downloads use `Content-Disposition: attachment; filename="<title>.mp4"`.
+  - `{cacheKey}` in a key is the 64 hex characters of the speech `cacheKey` (stored in MongoDB as `sha256:<hex>`), without the `sha256:` prefix.
+  - `{n}` in `frames/{n}.png` is a whole number 0–9999.
+  - **Decision (F22): no storyboard copy in R2.** The former `plans/{planVersionId}/plan.json` and `review.html` keys are dropped for now: MongoDB `planVersions` holds every version, and the render step reads the plan from there. Add them back only if a step really needs a file.
+  - Content types are limited to JSON, MP4, MP3, PNG, JPEG and plain text (no HTML is ever served from the bucket).
+- **Writers and locks (MUST for F23, from the F22 code review).** R2 has no lock objects; MongoDB provides them:
+  1. **Speech:** the unique `{ownerId, cacheKey}` `speechArtifacts` document is the lock. Claim it as `pending` with a conditional insert **before** calling ElevenLabs; whoever loses waits for `ready` or reuses it. No double payment, no audio and alignment from two different requests.
+  2. **Renders:** a **new `renderId` for every attempt**, so two attempts never write into the same folder.
+  - *As built (F23):* 1–3 as described (`packages/db/src/speech-artifacts.ts`, `apps/web/lib/video/run-generate-job.ts`); the provider's answer AND the paid audio bytes are saved on the `speechArtifacts` document in one write BEFORE any upload (bytes removed once ready), so a failed upload, a crash, a retry, a Try again or another job of the owner uploads them and never pays again; a fresh claim without a saved answer is never taken over (not even by its own job) until it is 10 minutes old; waiting for a claim uses `step.sleep`; a job that ends releases its claims; every ElevenLabs request is counted before it is sent and logged in `providerUsage` (code review, 2026-11-16); `already_exists` is accepted only when the stored file has the same SHA-256. 4 is for F30.
+  3. **Finished artifacts are uploaded create-only** (`put(key, data, { createOnly: true })`, `If-None-Match: *`): an existing file is never overwritten (`StorageError` `already_exists`).
+  4. **Publishing:** the publish job verifies the R2 object's SHA-256 against `renders.mp4Sha256` before sending it to Instagram.
+- **Access:** the browser plays and downloads via **presigned GET URLs** (TTL 15 min = `presignedGet` default 900 s; the code refuses more than 7200 s), issued only after an ownership check. Downloads use `Content-Disposition: attachment; filename="<title>.mp4"` (safe ASCII) plus `filename*=UTF-8''…` (RFC 5987) when the title isn't plain ASCII, e.g. Hindi.
 - **Instagram fetch:** Meta needs a **public URL** for `video_url`. We issue a presigned GET with a TTL of **2 hours** (enough for container processing), used only for that container (decision D5). Verify during integration that Meta accepts presigned R2 URLs with query strings; if it doesn't, use a short-lived Next.js proxy route `/api/media/{token}` that streams from R2.
-- **Integrity:** the SHA-256 of each artifact is stored in MongoDB, and the render worker verifies inputs before rendering.
+- **Integrity:** `put` computes the SHA-256 before upload, sends it as the upload checksum (R2 refuses the upload if the bytes differ), saves it on the object (`x-amz-meta-sha256`, returned by `head`) and returns it; the caller stores it in MongoDB, and the render worker verifies inputs before rendering.
 - **Lifecycle:** keep everything in V1. Later: delete preview frames after 30 days, and delete unreferenced speech after 90 days.
 - **Account deletion:** delete the `users/{ownerId}/` prefix (§22).
 
@@ -516,19 +526,19 @@ Every endpoint still follows the same order: auth → input validation (Zod) →
 |---|---|---|---|
 | `plan-video` | `plan.requested` | key `ownerId`, limit 2; global limit 5 | load project → quota check → Gemini plan (+1 repair) → validate → insert `planVersion` → project `storyboard_ready`. **As built (F15):** steps `start` → `ask-1` (one Gemini request) → `ask-2` (the repair, only if needed) → `save` or `fail-…`; each request is counted on the job before it is sent and its answer saved as soon as it arrives (DATABASE.md §4.9 `planner`); 2 retries per step; Inngest timeouts start 15 min, finish 20 min; code `apps/web/inngest/functions/plan-video.ts`, `apps/web/lib/plan/run-plan-job.ts` |
 | `revise-plan` | `revision.requested` | key `projectId`, limit 1 | load base version → Gemini revise → validate → diff → insert version → state. **As built (F18):** the same durable steps as `plan-video` (`runPlanJob` with a `prepare` hook: `start` → `ask-1` → `ask-2` repair → `save`/`fail-…`; count before sending, save each answer, 2 retries per step), the revision prompt in `packages/pipeline/src/planning/revision.ts` (current storyboard + change request as delimited data); ONE concurrency limit shared with `plan-video` (`PLANNER_CONCURRENCY` in `apps/web/inngest/client.ts`, `scope: env`: 2 per creator and 5 in total across both functions; one per project anyway); code `apps/web/inngest/functions/revise-plan.ts`, `packages/db/src/revisions.ts` |
-| `generate-video` | `video.generate.requested` | key `ownerId` limit 1; global limit **📏 2** | verify approval → spend check → **speech per scene** (`step.run` per scene, cache-aware) → validate audio + alignment → compile timeline/captions → upload → **render** (invoke `render-video`) → validate MP4 → project `video_ready` |
-| `render-video` | invoked | global limit **📏 1–2** (Sandbox cost) | create Sandbox → run render-worker → wait for completion (poll with `step.sleep`) → verify the R2 outputs → teardown |
-| `recaption-video` | `video.recaption.requested` | key `projectId`, limit 1 | apply overrides → recompile captions → render → validate |
+| `generate-video` | `video.generate.requested` | key `ownerId` limit 1; global limit **📏 2** | verify approval → spend check → **speech per scene** (`step.run` per scene, cache-aware) → validate audio + alignment → compile timeline/captions → upload → **render** (invoke `render-video`) → validate MP4 → project `video_ready`. **As built (F23):** ONE limit, `scope: env`, fixed key, **limit 1 for the whole app** (`VIDEO_CONCURRENCY` in `apps/web/inngest/client.ts`; Inngest counts steps, so a render, one step, never overlaps another; other videos wait, "Waiting to start…"); retries 3 per step; timeouts start 2 h, finish 2 h. Steps: `start` (job running; language and approval re-checked; `checkBucket()`: R2 refusing ends the job at once; inside the job's error handling, so it is never left running) → `reserve-voice` (all narration still to record, creator 3,000 + app 9,000 a month, BEFORE any ElevenLabs call) → `speech-1…N` (speech lock; every request counted right before it is sent and logged in `providerUsage`; answer + paid bytes saved before the create-only upload; a lock held by another run → `step.sleep` 60 s and look again) → `render` (new `renderId`; narration downloaded and SHA-256 checked; the render child process does timing, captions v2, the v4 render with the music bed, a JPEG thumbnail, the MP4 checks; files uploaded create-only; render saved and project `video_ready` in one transaction; work folder removed). No `render-video` function and no Sandbox: rendering runs on this computer (§15, decision F23). Code `apps/web/inngest/functions/generate-video.ts`, `apps/web/lib/video/run-generate-job.ts` |
+| `render-video` | invoked | global limit **📏 1–2** (Sandbox cost) | create Sandbox → run render-worker → wait for completion (poll with `step.sleep`) → verify the R2 outputs → teardown. **Not built (F23):** the render runs inside `generate-video` on this computer; the online render setup is decided at go-live (F38) |
+| `recaption-video` | `video.recaption.requested` | key `projectId`, limit 1 | apply overrides → recompile captions → render → validate. **As built (F25): id `fix-captions`**, the SAME one-at-a-time limit as `generate-video` (`VIDEO_CONCURRENCY`: a caption render never overlaps a video render); retries 3 per step; timeouts start 2 h, finish 2 h. Steps: `start` (job running; R2 bucket checked) → `render` (new `renderId`; the video's EXISTING recordings downloaded and checked by SHA-256 and cache key, **no voice dependency at all**: missing narration fails the job, it never records; the render child compiles timeline + captions, applies the fixes per phrase, renders v4 with music, thumbnail, MP4 checks; files create-only; the new render saved as the project's video). Code `apps/web/inngest/functions/fix-captions.ts`, `apps/web/lib/video/run-caption-job.ts` |
 | `publish-post` | `post.publish.requested` (optional `ts` for scheduling) | key `connectionId` limit 1 | `step.sleepUntil(scheduledAt)` → **re-check approval** (§18) → check the publishing limit → create container → poll status (`step.sleep` 15 s, up to 10 min) → publish → save permalink |
 | `reconcile-publish` | `post.publish.unknown` | key `postId` | list recent media → match by container/caption/time → `published` or safe retry |
 | `refresh-instagram-tokens` | cron daily 03:00 IST | — | refresh tokens expiring in < 10 days (and older than 24 h) |
-| `sweep-stuck-jobs` | cron every 15 min (F18: the on-read rule, `packages/db/src/stuck-jobs.ts`, covers `plan` and `revise` jobs) | — | jobs `running` with no update for > 30 min → mark failed with a retry option (one short transaction that also clears `activeJobId`); jobs still `queued` after ~2 min → **re-send their event** (event id = the job key, so Inngest drops a duplicate). **F15: not a cron yet.** The same rule runs whenever an active plan job's status is read (C6, E1, the project page): running with no update for 10 min → failed (retryable); unsent event → re-sent after 15 s, sent but not started → re-sent every 2 min; queued 15 min → failed (API.md §8.5). The cron comes with the longer jobs (F23) |
+| `sweep-stuck-jobs` | cron every 15 min (F18: the on-read rule, `packages/db/src/stuck-jobs.ts`, covers `plan` and `revise` jobs) | — | jobs `running` with no update for > 30 min → mark failed with a retry option (one short transaction that also clears `activeJobId`); jobs still `queued` after ~2 min → **re-send their event** (event id = the job key, so Inngest drops a duplicate). **F15: not a cron yet.** The same rule runs whenever an active plan job's status is read (C6, E1, the project page): running with no update for 10 min → failed (retryable); unsent event → re-sent after 15 s, sent but not started → re-sent every 2 min; queued 15 min → failed (API.md §8.5). The cron comes with the longer jobs (F23). **F23:** still no cron (kept simple); the on-read rule now covers `generate` jobs too (also on the My videos cards): a video job is failed (`INTERNAL`, retryable) only when nothing in the whole video queue moved for 15 min (its own progress or queue time, and every other video job's progress/start/finish), so a video waiting for its turn is never failed for waiting; a render writes progress every 2 s |
 | `spend-rollup` | cron hourly | — | aggregate `providerUsage` → ceilings cache |
 
 ### 13.2 Rules
 - **Every step is idempotent** (keyed by job + stage + scene). Inngest's retries replay completed steps from memo.
 - **Retries:** transient provider errors use a ≤2 retry policy honoring `Retry-After` (as in the prototype). Inngest function-level retries are 3 for infrastructure errors. Non-retriable errors use Inngest's `NonRetriableError`.
-- **Cancellation:** `cancelOn` matches `job.cancelled` with the same `jobId`; steps also check `cancelRequestedAt`.
+- **Cancellation:** `cancelOn` matches `job.cancelled` with the same `jobId`; steps also check `cancelRequestedAt`. **As built (F23):** no `cancelOn`; every video step checks `cancelRequestedAt` itself (so the job always ends in a known state), and during a render the worker checks it every 2 s and stops the renderer with Remotion's cancel signal.
 - **Vercel function duration:** each step must finish within the plan's function limit. Long waits use `step.sleep` / `step.waitForEvent`, never in-process waiting. Rendering happens **in the Sandbox**, not in the function.
 - **Events carry IDs only** (no plan bodies, no secrets).
 - **Dev vs cloud mode (F15):** `apps/web/inngest/client.ts` never guesses: dev mode only when `INNGEST_DEV` asks for it (`npm run dev` sets `INNGEST_DEV=1`; the local Inngest Dev Server, `npm run inngest`, http://localhost:8288; or a local Dev Server address such as the e2e test's http://localhost:8299). Otherwise cloud mode on any host, with `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` required. `INNGEST_DEV` is refused on Vercel, and `INNGEST_DEV=1` is refused in a production build (dev mode turns signature checks off). App id: the fixed, brand-neutral `reel-app` (BRAND.md §10: never change it). `/api/inngest` has `maxDuration` 300 s (one Gemini request may take 180 s).
@@ -564,6 +574,8 @@ approveStoryboard ─► generate-video
 
 ## 15. Rendering Subsystem (Remotion on Vercel Sandbox)
 
+> **Decision (F23, founder 2026-11-15): render on this computer for now.** The video is rendered inside the `generate-video` worker, in its own Node process (`packages/pipeline/src/pipeline/render-child.ts`, run with tsx; IPC for progress, the result and Cancel), with the existing Remotion path. Its temp folder is the job's work folder inside the project (`runs/.tmp/generate/<renderId>/tmp`), removed after success or failure. It gets only the environment rendering needs (PATH, HOME, NODE_ENV, the locale, TZ, `REMOTION_SHARED_MEMORY_BACKEND`, its TMPDIR: no secrets, no other `REMOTION_*` name) and runs detached in its own process group: Cancel or the 20-minute limit sends "cancel" first, then kills the whole group (Chrome, ffmpeg) after 20 s. Vercel Sandbox (below) is NOT used now; where videos are rendered online is decided at go-live (F38).
+
 ### 15.1 Why separate
 Rendering 60–90 s of 1080×1920 video takes minutes of CPU (≈4–5 min locally in the prototype). It can't run inside a normal serverless function, so it runs in an isolated, short-lived **Vercel Sandbox** microVM.
 
@@ -583,6 +595,15 @@ Sandbox creation failure / timeout → retry once → `generate_failed` with **R
 ### 15.5 Benchmark and fallback (📏 P3/P4)
 Measure cold start, render time and cost per 60/90 s video at 2/4/8 vCPUs. If too slow or costly: **fallback A** is Remotion Lambda (AWS); **fallback B** is a small always-on VPS render worker pulling jobs (cheapest at low volume). The `Renderer` interface keeps this swappable.
 
+### 15.6 The video engine: style v4 "hero visuals" (F22b, 2026-11-15)
+- **Inputs:** only `timeline.json` and `captions.json` (schema version 2) plus the scene audio. The compiler (`packages/pipeline/src/timing`) writes everything the screen needs: per scene a **hero track** (`heroes`: which object is on screen from which frame; `timing/heroes.ts`) and per caption its **words** with frames and a key-term flag. The renderer has no randomness and no AI.
+- **Hero choice:** the planner picks `hero` per narration block from the hero catalog (`planning/hero-catalog.ts`, 46 names with keywords, shared with the prompt and the storyboard screen); its "none" is stored as `hero: null` and shows the scene icon in a medallion (no keyword guess). Without a pick the compiler uses a free, deterministic keyword fallback (events on content objects, then spoken words, with hold/look-ahead/no-flicker rules; generic words such as "time" or "monthly" are label-only and never spoken cues; a spoken word switches to a hero of another group only after 3 s), else an object label, else the scene icon in a medallion. Old plans without `hero` render unchanged (the field is optional and omitted, so their hash is unchanged).
+- **Temporary files:** every render and tool keeps its temporary files inside the project (`runs/.tmp` via `TMPDIR`, set by the npm scripts, `tools/project-tmp.ts` and `apps/web/scripts/dev.mjs`), because Remotion and Chrome use the process temp folder, not `RenderJob.workDir`. Never `/tmp` (shared on the dev machine).
+- **Composition** (`packages/video/src/Explainer.tsx`): backdrop → one layout per pattern (`scenes/`) with the hero layer (`heroes/HeroLayer.tsx`) and a camera → light-wipe transitions → phrase captions → progress bar → narration + music bed. Hero artwork: `heroes/*.tsx` (no SVG/CSS filters: glows are gradient shapes, for render speed).
+- **Music bed:** generated in Node at render time (`pipeline/music.ts`, about 1.5 s), written into the render's public folder; one switch `BACKGROUND_MUSIC`. Silent fixture renders never get music.
+- **Encoding:** JPEG frames, H.264 CRF 26 (`RENDER_SETTINGS` in `pipeline/render.ts`). Measured locally on 2026-11-15 (8 threads, Remotion's default concurrency 4), 68 s water-cycle video: old engine 78 s / 2.9 MB, v4 sample 241 s / 17.9 MB, **v4 engine about 105 s idle, up to 140 s busy / 6.6 MB** depending on other load on the machine (details in F22b). Concurrency 6 was about 10% faster on this machine; the Sandbox benchmark (§15.5) picks the value for production.
+- **Review tools:** `tools/video/rerender-run.ts` (free re-render of a recorded run), `tools/video/hero-gallery.ts` (the hero library as stills), `tools/video/contact_sheet.py` (frames of an MP4 in a grid). Temporary files stay inside the run folder or the given work folder.
+
 ---
 
 ## 16. AI Provider Integration
@@ -592,7 +613,7 @@ Measure cold start, render time and cost per 60/90 s video at 2/4/8 vCPUs. If to
 - **Model config:** one model, `GEMINI_MODEL` (currently `gemini-3.6-flash`). **No automatic model fallback** (decision D4). When Gemini stays busy after the allowed retries, the job fails with `PROVIDER_BUSY` and the creator sees: *"Our AI is very busy right now. Your idea is saved; please try again in a few minutes."* with a **Try again** button. Changing the model is an admin config change, recorded on each plan version (`plannerUsage.model`).
 - Schema compatibility: no `minItems`/`maxItems` in the response schema (verified incompatibility); limits are enforced by our validation + one repair.
 - **Brainstorm (C7, F14):** its own model, `GEMINI_BRAINSTORM_MODEL` (optional, default `gemini-3.1-flash-lite`; PRD decision #26), sent with `thinkingConfig { thinkingLevel: "low" }` (gemini-3.6-flash took 55–57 s on the free tier); same adapter, no retries of its own; `packages/pipeline/src/brainstorm/` runs it with a **30 s limit for the whole brainstorm**, at most 2 quick retries for busy errors (never past the 30 s), 1 repair of an invalid answer, then `PROVIDER_BUSY` with the brainstorm wording *"Our AI is very busy right now. Please try again in a few minutes."* (no project exists). Each request is logged in `providerUsage`.
-- Timeouts: 180 s per request; at most 3 requests per plan job (initial + up to 2 transient retries) plus 1 repair. **As built (F15):** at most **4 requests per job attempt** in any mix (the first answer with up to 2 retries for busy/network errors, the repair with retries while the 4 last), counted on the job before each request; waits 2 s then 5 s, or the Retry-After (up to 60 s; longer → `PROVIDER_BUSY` at once). A Try again (E2) starts a new attempt with a new budget; an attempt counts 1 toward the project's 20 when it sends its first Gemini request.
+- Timeouts: 180 s per request (**240 s since F26**, `PLAN_REQUEST_TIMEOUT_MS`: on 2026-11-17 a slow Gemini ran every change request past 180 s; 240 s still fits one step under Vercel's 300 s); at most 3 requests per plan job (initial + up to 2 transient retries) plus 1 repair. **As built (F15):** at most **4 requests per job attempt** in any mix (the first answer with up to 2 retries for busy/network errors, the repair with retries while the 4 last), counted on the job before each request; waits 2 s then 5 s, or the Retry-After (up to 60 s; longer → `PROVIDER_BUSY` at once). **Since after F26 (2026-11-18): waits 20 s then 60 s** (`PLAN_RETRY_BACKOFF_MS`; on 2026-11-17 Gemini answered 503 "high demand" three times within seconds, so every retry landed in the same spike); a Retry-After longer than our wait is honoured up to 60 s, a shorter one doesn't shorten it. The wait is an Inngest retry: no server is busy and nothing is paid while waiting. A Try again (E2) starts a new attempt with a new budget; an attempt counts 1 toward the project's 20 when it sends its first Gemini request.
 - **Data use:** on the free tier, Google may use content to improve its products. **Before real beta users, switch to the paid tier** (§22).
 
 ### 16.2 ElevenLabs (speech)
@@ -695,7 +716,7 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 ### 20.2 Retry matrix
 | Failure | Retry | User sees |
 |---|---|---|
-| Gemini 503/504/timeout | ≤2 (Retry-After) then fail; **no model switch** | "Our AI is very busy right now. Your idea is saved; please try again in a few minutes." + Try again |
+| Gemini 503/504/timeout | ≤2 (Retry-After) then fail; **no model switch** | "Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes." (since F26) + Try again |
 | Gemini 400 / safety | none | Safety: "We can't make a video about this topic"; 400: internal alert |
 | Invalid plan after repair | none | "Couldn't build a good storyboard, try rephrasing" |
 | ElevenLabs transient | ≤2 | "Voice service busy" + Retry |

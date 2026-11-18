@@ -1,11 +1,13 @@
 "use client";
 
+import { isLanguageEnabled, LANGUAGE_NAMES as LANGUAGE_WORDS } from "@bytereel/db/languages";
 import { VOICE_TEXT_LANG, type VoiceLanguage, type VoicePresetId } from "@bytereel/db/voices";
 import type { PlanVersionResource, ProjectResource, RevisionResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 import { sceneNotes, sceneNumber, type SceneLike } from "@/lib/storyboard/view";
+import { approveLabel } from "@/lib/video/new-video";
 import { ChangesPanel } from "./ChangesPanel";
 import { apiSend, CLIENT_MESSAGES, newIdempotencyKey } from "./client";
 import { NarrationEditor } from "./NarrationEditor";
@@ -14,7 +16,7 @@ import { SceneCard } from "./SceneCard";
 import { VersionMenu } from "./VersionMenu";
 import { VoiceMenu } from "./VoiceMenu";
 
-// ② Review storyboard (F16–F20; Stitch "Step 2 Storyboard"): the title strip (title, language,
+// ② Review storyboard (F16–F20, F23; Stitch "Step 2 Storyboard"): the title strip (title, language,
 // voice, about N seconds, scene count), "Version N ▾" and Undo (F17), the scene cards with inline
 // narration editing (F17), the notes for the whole storyboard and the bottom bar.
 // The data is the C3 project and the D2 current version, read by the server page. After any change
@@ -24,18 +26,29 @@ import { VoiceMenu } from "./VoiceMenu";
 // (`problem`) and where keyboard focus goes back to (`focusTarget`: the scene's Edit button after
 // a save or cancel, the Version button after an undo or restore, the voice chip after a switch).
 // Every change sends the stateVersion this page was loaded with: another tab's change → "refresh".
+// F26: when the project already has a video and this version isn't approved, the page notes what
+// the new video costs (`newVideoNote`, worked out on the server), the button reads "Approve & make
+// new video", and "Back to video" shows the current (older) video.
+// F27: when a limit would refuse the video right now (no videos left today, not enough voice
+// characters, the app's monthly voice used up), a note says why and when it resets, and Approve /
+// Generate video is greyed out with a short reason next to it (worked out on the server with the
+// same functions D8 uses; D8 still checks everything).
 
 export type StoryboardScreenProps = {
   project: ProjectResource;
   version: PlanVersionResource;
   /** Change requests on the storyboard, oldest first (D6). */
   revisions: RevisionResource[];
-  /** The newest change request's job, when it failed (for its message and Try again). */
-  failedChange: { id: string; message: string } | null;
+  /** The newest storyboard change request's job, when it failed (its message; Try again when `canRetry`). */
+  failedChange: { id: string; message: string; canRetry: boolean } | null;
   /** The project used all its 20 AI requests. */
   requestsUsedUp: boolean;
   /** Voices with a recorded ▶ sample (F13). */
   samplePresets: VoicePresetId[];
+  /** F26: what a new video of this version would record (null when there is no video yet or nothing to approve). */
+  newVideoNote?: string | null;
+  /** F27: the limit that would refuse approving now (the full sentence, and the short reason by the button), or null. */
+  approveLimit?: { message: string; short: string } | null;
 };
 
 const LANGUAGE_NAMES: Record<VoiceLanguage, { text: string; lang?: string; english?: string }> = {
@@ -84,7 +97,7 @@ function focusMarked(target: string): void {
   (find(target) ?? find("version"))?.focus();
 }
 
-function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
+function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, newVideoNote, approveLimit, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
   const router = useRouter();
   const language = project.language as VoiceLanguage;
   const lang = VOICE_TEXT_LANG[language];
@@ -95,6 +108,9 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
   const languageName = LANGUAGE_NAMES[language];
   const changed = new Set(version.changedSceneIds);
   const canEdit = project.allowedActions.includes("edit_storyboard");
+  // Language switch (packages/db/src/languages.ts): a Hindi/Hinglish storyboard stays viewable and
+  // editable by hand, but has no voice switch (no voice exists yet) and no AI changes.
+  const languageOn = isLanguageEnabled(language);
 
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -159,7 +175,11 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
     router.refresh();
   }
 
-  /** D8: approve this exact version (id + plan hash). F20: the video job comes with F23. */
+  /**
+   * D8: approve this exact version (id + plan hash) and start the video (F23). The same call is the
+   * "Generate video" button for a version that is already approved but has no video job.
+   * Then straight to ③ Video ("Making your video", or the existing video when this version has one).
+   */
   const approveKey = useRef<string | null>(null);
   const [approving, setApproving] = useState(false);
   async function approve() {
@@ -177,14 +197,23 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
       }
       return fail(answer);
     }
-    announce(`Storyboard approved (version ${version.versionNumber}).`);
-    router.refresh();
+    announce(`Storyboard approved (version ${version.versionNumber}). Making your video.`);
+    router.push(`/projects/${project.id}/video`);
   }
 
   const locked = busy || !canEdit;
   const approved = project.approvedPlanVersionId === version.id;
   const changeRunning = project.activeJob !== null;
-  const canApprove = project.allowedActions.includes("approve_storyboard") && version.valid && !busy && editing === null;
+  const limited = Boolean(approveLimit);
+  const canApprove = project.allowedActions.includes("approve_storyboard") && version.valid && !busy && editing === null && !limited;
+  const canGenerate = approved && project.allowedActions.includes("generate_video") && version.valid && !busy && editing === null && !limited;
+  // F27: the button points screen readers to the full reason (the note above the scenes).
+  const limitReason = approveLimit ? <p className="text-xs text-danger">{approveLimit.short}</p> : null;
+  // F23: the video job stopped because the storyboard must change (too long/short, unclear wording).
+  const needsChange = project.lastError?.code === "NEEDS_INPUT" ? project.lastError.message : null;
+  // F23 (founder decision 5): an older video stays the project's video until a new one is made.
+  const hasOlderVideo = project.currentRenderId !== null && project.state === "storyboard_ready";
+  const hasVideo = project.currentRenderId !== null;
 
   return (
     <div className="flex flex-col">
@@ -198,9 +227,11 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
               <span lang={languageName.lang}>{languageName.text}</span>
               {languageName.english && <span className="text-muted">{languageName.english}</span>}
             </li>
-            <li>
-              <VoiceMenu language={language} current={project.voiceGender} samplePresets={samplePresets} disabled={locked || editing !== null} onChoose={(g) => void switchVoice(g)} />
-            </li>
+            {languageOn && (
+              <li>
+                <VoiceMenu language={language} current={project.voiceGender} samplePresets={samplePresets} disabled={locked || editing !== null} onChoose={(g) => void switchVoice(g)} />
+              </li>
+            )}
             <li className={`${chip} font-mono`}>
               <span aria-hidden="true">≈ {seconds}s</span>
               <span className="sr-only">about {seconds} seconds</span>
@@ -235,6 +266,23 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             >
               Refresh
             </button>
+          )}
+        </div>
+      )}
+
+      {(needsChange || hasOlderVideo || newVideoNote || approveLimit) && (
+        <div className="mt-4 flex flex-col gap-2">
+          {needsChange && (
+            <Note tone="problem">
+              We couldn&apos;t make the video yet. {needsChange}
+            </Note>
+          )}
+          {hasOlderVideo && <Note tone="warning">Your earlier video (made from an older version) is kept until you make a new one.</Note>}
+          {newVideoNote && <Note tone="warning">{newVideoNote}</Note>}
+          {approveLimit && (
+            <Note tone="problem" id="approve-limit" label="Can't approve now: ">
+              {approveLimit.message}
+            </Note>
           )}
         </div>
       )}
@@ -296,6 +344,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
       <aside className="min-w-0 lg:col-span-4">
         <div className="lg:sticky lg:top-6">
           <ChangesPanel
+            stage="storyboard"
             projectId={project.id}
             baseVersionId={version.id}
             stateVersion={project.stateVersion}
@@ -304,8 +353,9 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             activeJob={project.activeJob}
             failedJob={failedChange}
             canRequest={project.allowedActions.includes("request_revision")}
-            canRetry={project.allowedActions.includes("retry_job")}
+            canRetry={failedChange?.canRetry === true}
             requestsUsedUp={requestsUsedUp}
+            unavailableNote={languageOn ? null : `AI changes aren't available for ${LANGUAGE_WORDS[language]} videos right now. You can still edit the narration yourself.`}
             disabled={busy || editing !== null}
             announce={announce}
           />
@@ -321,16 +371,36 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
           {project.state === "archived" ? (
             <p className="ml-auto text-sm text-muted">Archived. This storyboard is read-only.</p>
           ) : approved ? (
-            <p className="ml-auto inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
-              <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
-            </p>
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">
+              <p className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
+                <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
+              </p>
+              {project.allowedActions.includes("generate_video") && limitReason}
+              {project.allowedActions.includes("generate_video") && (
+                <Button type="button" onClick={() => void approve()} disabled={!canGenerate} aria-describedby={limited ? "approve-limit" : undefined} className="whitespace-nowrap">
+                  {approving ? "Starting…" : "Generate video"}
+                </Button>
+              )}
+              {/* F23: opened with "Edit storyboard" from a failed or ready video: the way back to it. */}
+              {(project.state === "generate_failed" || project.state === "video_ready") && (
+                <Button href={`/projects/${project.id}/video`} variant="secondary" className="whitespace-nowrap">
+                  Back to video
+                </Button>
+              )}
+            </div>
           ) : (
             <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
               {!version.valid && <p className="text-xs text-danger">Fix the scenes marked in red first.</p>}
               {version.valid && changeRunning && <p className="text-xs text-muted">Wait for your change to finish.</p>}
-              <Button type="button" onClick={() => void approve()} disabled={!canApprove} className="whitespace-nowrap">
-                {/* F23 MUST rename it "Approve & generate video" when approving starts the video. */}
-                {approving ? "Approving…" : "Approve storyboard"}
+              {version.valid && !changeRunning && limitReason}
+              {/* F26: the video the project already has (an older version) stays one click away. */}
+              {hasVideo && (
+                <Button href={`/projects/${project.id}/video`} variant="secondary" className="whitespace-nowrap">
+                  Back to video
+                </Button>
+              )}
+              <Button type="button" onClick={() => void approve()} disabled={!canApprove} aria-describedby={limited ? "approve-limit" : undefined} className="whitespace-nowrap">
+                {approving ? "Starting…" : approveLabel(hasVideo)}
               </Button>
             </div>
           )}

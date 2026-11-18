@@ -179,12 +179,19 @@ describe("B1 getMe", () => {
   });
 
   it("projects today is the real count for this user and today in their timezone (F12)", async () => {
-    const seen: { id: string; timezone: string; now: Date }[] = [];
-    const me = await getMe(user, now, async (u, at) => {
-      seen.push({ id: u.id, timezone: u.timezone, now: at });
-      return 2;
+    const seen: { id: string; timezone: string; now: Date; kind: string }[] = [];
+    const me = await getMe(user, now, async (u, at, kind) => {
+      seen.push({ id: u.id, timezone: u.timezone, now: at, kind });
+      return kind === "projects" ? 2 : 0;
     });
     expect(me.usage.projectsToday).toEqual({ used: 2, limit: 5, resetsAt: "2026-11-13T18:30:00.000Z" });
-    expect(seen).toEqual([{ id: user.id, timezone: "Asia/Kolkata", now }]);
+    expect(seen).toContainEqual({ id: user.id, timezone: "Asia/Kolkata", now, kind: "projects" });
+  });
+
+  it("videos today and voice characters this month are the real counts (F23: the header pill no longer stays at 0)", async () => {
+    const counts: Record<string, number> = { videos: 1, projects: 2, voiceChars: 965 };
+    const me = await getMe(user, now, async (_u, _at, kind) => counts[kind] ?? 0);
+    expect(me.usage.videosToday).toEqual({ used: 1, limit: 3, resetsAt: "2026-11-13T18:30:00.000Z" });
+    expect(me.usage.voiceCharactersThisMonth).toEqual({ used: 965, limit: 3000, resetsAt: "2026-11-30T18:30:00.000Z" });
   });
 });

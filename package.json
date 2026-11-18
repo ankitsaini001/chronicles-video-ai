@@ -14,13 +14,16 @@
   "scripts": {
     "dev": "npm run dev -w @bytereel/web",
     "inngest": "npx --yes inngest-cli@1.49.0 dev --no-discovery -u http://localhost:3000/api/inngest",
-    "pipeline": "tsx tools/cli/index.ts",
-    "db": "tsx tools/cli/db.ts",
-    "voices:samples": "tsx tools/cli/index.ts voice-samples",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "pipeline": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" tsx tools/cli/index.ts",
+    "db": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" tsx tools/cli/db.ts",
+    "storage": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" tsx tools/cli/storage.ts",
+    "voices:samples": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" tsx tools/cli/index.ts voice-samples",
+    "video:rerender": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" tsx tools/video/rerender-run.ts",
+    "video:heroes": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" tsx tools/video/hero-gallery.ts",
+    "test": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" vitest run",
+    "test:watch": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" vitest",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @bytereel/web",
-    "studio": "remotion studio packages/video/src/index.ts"
+    "studio": "mkdir -p runs/.tmp && TMPDIR=\"$PWD/runs/.tmp\" remotion studio packages/video/src/index.ts"
   },
   "dependencies": {
     "@fontsource/inter": "5.2.8",

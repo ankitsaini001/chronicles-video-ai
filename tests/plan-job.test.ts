@@ -5,7 +5,9 @@ import {
   CREATE_PROJECT_STATUS,
   UpdateProjectBodySchema,
   indexesForFeatures,
+  isLanguageEnabled,
   newPlanJob,
+  PLAN_ERROR_RETRYABLE,
   planInputHash,
   planJobKey,
   retryEventId,
@@ -114,6 +116,8 @@ class FakeStore implements PlanJobStore {
   async reserveRequest({ attempt, maxRequests, message }: { attempt: number; maxRequests: number; message: string }) {
     if (this.job.state !== "running" || this.job.attempt !== attempt) return "stale" as const;
     if (this.job.planner!.requests >= maxRequests) return "limit" as const;
+    // Language switch: checked before anything is counted (like reservePlanRequest).
+    if (!isLanguageEnabled(this.project.language)) return "language" as const;
     // The attempt's first real request counts 1 toward the project's 20 (only below 20).
     if (this.job.planner!.requests === 0) {
       if (this.project.planRequestCount >= 20) return "quota" as const;
@@ -237,6 +241,19 @@ describe("plan-video job (runPlanJob)", () => {
     expect(store.usage).toEqual([]);
   });
 
+  it("language switched off after the start step → LANGUAGE_UNAVAILABLE (not retryable), zero Gemini calls, nothing counted", async () => {
+    const store = new FakeStore();
+    store.project.planRequestCount = 0;
+    store.project.language = "hi";
+    const planner = new FakePlanner([VALID]);
+    expect((await run(store, planner)).outcome).toBe("failed");
+    expect(store.failedWith).toEqual({ code: "LANGUAGE_UNAVAILABLE", stage: "plan" });
+    expect(planner.requests).toHaveLength(0);
+    expect(store.project.planRequestCount).toBe(0);
+    expect(store.usage).toEqual([]);
+    expect(PLAN_ERROR_RETRYABLE.LANGUAGE_UNAVAILABLE).toBe(false);
+  });
+
   it("a paid answer is saved first, with in-process save retries; the usage row is final, never 'busy'", async () => {
     const store = new FakeStore();
     store.saveFailures = 2;
@@ -311,23 +328,31 @@ describe("plan-video job (runPlanJob)", () => {
     expect(planner.requests).toHaveLength(2);
   });
 
-  it("busy: 2 retries (2 s, 5 s waits), then PROVIDER_BUSY; each request logged as failed/busy", async () => {
+  it("busy: 2 retries (20 s, 60 s waits), then PROVIDER_BUSY; each request logged as failed/busy", async () => {
     const store = new FakeStore();
     const planner = new FakePlanner([busy(), busy(), busy(), VALID]);
     const { outcome, runner } = await run(store, planner);
     expect(outcome).toBe("failed");
     expect(store.failedWith).toEqual({ code: "PROVIDER_BUSY", stage: "plan" });
     expect(planner.requests).toHaveLength(3);
-    expect(runner.retries).toEqual([2000, 5000]);
+    expect(runner.retries).toEqual([20_000, 60_000]);
     expect(store.usage.map((u) => `${u.status}/${u.outcome}`)).toEqual(["failed/busy", "failed/busy", "failed/busy"]);
   });
 
-  it("busy once, then fine: the retry honours Retry-After and the job succeeds", async () => {
+  it("busy once, then fine: a longer Retry-After is honoured and the job succeeds", async () => {
+    const store = new FakeStore();
+    const planner = new FakePlanner([busy(45_000), VALID]);
+    const { outcome, runner } = await run(store, planner);
+    expect(outcome).toBe("saved");
+    expect(runner.retries).toEqual([45_000]);
+  });
+
+  it("a Retry-After shorter than our wait doesn't shorten it (a short hint lands in the same spike)", async () => {
     const store = new FakeStore();
     const planner = new FakePlanner([busy(7000), VALID]);
     const { outcome, runner } = await run(store, planner);
     expect(outcome).toBe("saved");
-    expect(runner.retries).toEqual([7000]);
+    expect(runner.retries).toEqual([20_000]);
   });
 
   it("a Retry-After longer than 60 s is not waited for: PROVIDER_BUSY at once", async () => {
@@ -439,7 +464,8 @@ describe("planner pieces for the job", () => {
     expect(classifyPlanRequestError(busy(3000))).toEqual({ kind: "busy", retryAfterMs: 3000 });
     expect(classifyPlanRequestError(new ProviderError({ provider: "gemini", kind: "safety", message: "x" }))).toEqual({ kind: "rejected" });
     expect(classifyPlanRequestError(new ProviderError({ provider: "gemini", kind: "model-unavailable", message: "x" }))).toEqual({ kind: "setup" });
-    expect([planRetryWaitMs(1, null), planRetryWaitMs(2, null), planRetryWaitMs(1, 60_000), planRetryWaitMs(1, 60_001)]).toEqual([2000, 5000, 60_000, null]);
+    expect([planRetryWaitMs(1, null), planRetryWaitMs(2, null), planRetryWaitMs(3, null)]).toEqual([20_000, 60_000, 60_000]);
+    expect([planRetryWaitMs(1, 5_000), planRetryWaitMs(1, 30_000), planRetryWaitMs(2, 30_000), planRetryWaitMs(1, 60_000), planRetryWaitMs(1, 60_001)]).toEqual([20_000, 30_000, 60_000, 60_000, null]);
   });
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import type { VoicePresetId } from "@bytereel/db/voices";
+import { ENABLED_LANGUAGES, enabledLanguageOr } from "@bytereel/db/languages";
 import { brainstormIdeaText, cleanIdeaText, fitsBrainstormText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaProblem } from "@bytereel/db/idea-text";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
@@ -32,7 +33,9 @@ const MAX_CHARS = IDEA_MAX_CHARS;
 /** Only a safety stop for huge pastes; the real limit is checked on the cleaned text. */
 const SAFETY_MAX_LENGTH = 4 * IDEA_MAX_CHARS;
 
-const LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
+// Only the languages switched on (packages/db/src/languages.ts). With just one (English for now),
+// the whole Language row is hidden and that language is sent.
+const ALL_LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
   { value: "en", label: "English" },
   {
     value: "hi",
@@ -44,6 +47,7 @@ const LANGUAGE_OPTIONS: readonly ChoiceOption<Language>[] = [
   },
   { value: "hinglish", label: "Hinglish" },
 ];
+const LANGUAGE_OPTIONS = ALL_LANGUAGE_OPTIONS.filter((o) => ENABLED_LANGUAGES.includes(o.value));
 
 const MESSAGES = {
   EMPTY: "Type a topic or paste your notes first.",
@@ -70,21 +74,9 @@ function newIdempotencyKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function resetTimeText(resetsAt: string | undefined, timezone: string): string {
-  if (!resetsAt) return "";
-  const date = new Date(resetsAt);
-  if (Number.isNaN(date.getTime())) return "";
-  try {
-    const time = new Intl.DateTimeFormat("en-IN", { timeZone: timezone, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(date);
-    return ` You can create more from ${time}.`;
-  } catch {
-    return "";
-  }
-}
-
 export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, timezone, samplePresets }: IdeaFormProps) {
   const [text, setText] = useState("");
-  const [language, setLanguage] = useState<Language>(defaultLanguage);
+  const [language, setLanguage] = useState<Language>(enabledLanguageOr(defaultLanguage));
   const [voiceGender, setVoiceGender] = useState<VoiceGender>(defaultVoiceGender);
   const [textError, setTextError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -158,8 +150,9 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         if (textIssue) return showTextError(idea.length > IDEA_TOPIC_MAX_CHARS ? `Your notes ${textIssue.message}.` : `Your topic ${textIssue.message}.`);
         return setFormError(message);
       }
+      // F27: the server's sentence already says when more can be created (in the creator's timezone).
       case "QUOTA_EXCEEDED":
-        return setFormError(message + resetTimeText(json.error?.details?.resetsAt, timezone));
+        return setFormError(message);
       default:
         return setFormError(response.status >= 500 ? MESSAGES.INTERNAL : message);
     }
@@ -229,18 +222,20 @@ export function IdeaForm({ defaultLanguage, defaultVoiceGender, projectsToday, t
         {announcement}
       </p>
 
-      <ChoiceChips
-        label="Language"
-        options={LANGUAGE_OPTIONS}
-        value={language}
-        onChange={(next) => {
-          // A sample of the old language must not keep playing (F13).
-          preview.stop();
-          setLanguage(next);
-        }}
-        disabled={busy}
-        className="mb-6"
-      />
+      {LANGUAGE_OPTIONS.length > 1 && (
+        <ChoiceChips
+          label="Language"
+          options={LANGUAGE_OPTIONS}
+          value={language}
+          onChange={(next) => {
+            // A sample of the old language must not keep playing (F13).
+            preview.stop();
+            setLanguage(next);
+          }}
+          disabled={busy}
+          className="mb-6"
+        />
+      )}
       <VoicePicker
         language={language}
         value={voiceGender}

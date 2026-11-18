@@ -1,3 +1,5 @@
+// First: keep Remotion's and Chrome's temporary files inside the project (runs/.tmp), never in /tmp.
+import "../project-tmp";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { redactSecrets } from "@bytereel/pipeline/config/config";

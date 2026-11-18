@@ -1,3 +1,4 @@
+import { isLanguageEnabled } from "@bytereel/db/languages";
 import Image from "next/image";
 import type { ReactNode } from "react";
 import { Button, cn, Icon, type IconName, PlayIcon } from "@/components/ui";
@@ -7,6 +8,10 @@ import { SITE } from "@/lib/site";
 // Page" (docs/design/stitch/home-landing-v1.html). Copy follows the design, except claims V1 can't
 // back up (made-up creators, view counts, user numbers, voice names, extra platforms/languages),
 // which use the honest wording from the approved Home v2. See docs/features/F03-home-page.md.
+// Hindi is advertised only while it is switched on (packages/db/src/languages.ts, founder
+// 2026-11-14): the Hindi sample card, the Languages section and the Hindi FAQ wording hide with it.
+
+const HINDI_ON = isLanguageEnabled("hi");
 
 function Eyebrow({ children }: { children: ReactNode }) {
   return <p className="mb-2 font-mono text-xs font-medium uppercase tracking-widest text-amber">{children}</p>;
@@ -130,6 +135,12 @@ const EXAMPLES = [
   },
 ] as const;
 
+const SHOWN_EXAMPLES = EXAMPLES.filter((ex) => HINDI_ON || !("lang" in ex));
+// 4 cards: 2 columns from 480px, then 4 (the design). 3 cards: one centred column (at most 384px)
+// on phones, 3 columns from 768px (about 224px each), capped at 960px on desktop so each card keeps
+// the 4-card size (about 300px). Never a lone card on a row.
+const FOUR_EXAMPLES = SHOWN_EXAMPLES.length === 4;
+
 export function Examples() {
   return (
     <Section id="examples" band>
@@ -140,8 +151,8 @@ export function Examples() {
         </div>
         <p className="font-mono text-xs text-muted">Sample reels · 1080 × 1920 vertical</p>
       </div>
-      <ul className="grid gap-6 min-[480px]:grid-cols-2 lg:grid-cols-4">
-        {EXAMPLES.map((ex) => {
+      <ul className={cn("grid gap-6", FOUR_EXAMPLES ? "min-[480px]:grid-cols-2 lg:grid-cols-4" : "mx-auto max-w-sm md:max-w-none md:grid-cols-3 lg:max-w-[960px]")}>
+        {SHOWN_EXAMPLES.map((ex) => {
           const lang = "lang" in ex ? ex.lang : undefined;
           return (
             <li key={ex.title} className="flex flex-col overflow-hidden rounded-2xl border border-line bg-surface">
@@ -150,7 +161,7 @@ export function Examples() {
                   src={ex.image}
                   alt=""
                   fill
-                  sizes="(min-width: 1024px) 300px, (min-width: 480px) 50vw, 100vw"
+                  sizes={FOUR_EXAMPLES ? "(min-width: 1024px) 300px, (min-width: 480px) 50vw, 100vw" : "(min-width: 1024px) 300px, (min-width: 768px) 33vw, 384px"}
                   className="object-cover opacity-60"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-bg from-10% via-bg/40 via-45% to-bg/80" />
@@ -212,7 +223,9 @@ const LANGUAGES = [
   },
 ] as const;
 
+/** Hidden while only English is switched on: one language card is not a "languages" section. */
 export function Languages() {
+  if (!HINDI_ON) return null;
   return (
     <Section id="languages">
       <div className="mb-16 max-w-2xl">
@@ -326,10 +339,12 @@ const FAQ: { q: string; a: ReactNode }[] = [
   },
   {
     q: "Which languages are supported?",
-    a: (
+    a: HINDI_ON ? (
       <>
         English and Hindi (<span lang="hi">हिंदी</span>). For every video you choose a female or male voice.
       </>
+    ) : (
+      "English. For every video you choose a female or male voice."
     ),
   },
   { q: "How long are the generated videos?", a: "Between 60 and 90 seconds, in vertical 1080 × 1920 format, made for Instagram Reels." },

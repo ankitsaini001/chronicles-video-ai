@@ -1,5 +1,7 @@
 import type { Language, Plan, Scene } from "../contracts";
 import { VOICE_PRESETS_BY_LANGUAGE } from "../contracts";
+import { CAPTION_STYLE } from "../theme";
+import { captionWordFit } from "../timing/captions";
 import { COMPONENT_CATALOG, PLAN_LIMITS, SCENE_LIMITS, WORDS_PER_MINUTE } from "./component-catalog";
 import { looksLikeKeywordList } from "./icon-catalog";
 import type { ValidationIssue } from "./validation-issue";
@@ -124,6 +126,14 @@ function checkScene(scene: Scene, path: string, language: Language, add: AddIssu
     const displayField = block.display === null ? "text" : "display";
     const scriptProblem = checkDisplayScript(block.display ?? block.text, language);
     if (scriptProblem) at(`narration[${i}].${displayField}`, scriptProblem);
+    const tooLong = longCaptionWords(block.display ?? block.text);
+    if (tooLong.length) {
+      at(
+        `narration[${i}].${displayField}`,
+        `${tooLong.map((w) => `"${w}"`).join(", ")} ${tooLong.length === 1 ? "is" : "are"} too long to fit on a caption line. ` +
+          `Use a shorter word, or a "display" form that breaks it up (for example with a space or a hyphen).`,
+      );
+    }
   });
 
   // Objects: unique IDs, catalog kinds, label lengths, values, counts.
@@ -206,6 +216,17 @@ function checkWarningsAndSources(plan: Plan, add: AddIssue): void {
 }
 
 // ---------- helpers ----------
+
+const CAPTION_LAYOUT = { fontSizePx: CAPTION_STYLE.fontSizePx, maxLineWidthPx: CAPTION_STYLE.maxLineWidthPx };
+
+/**
+ * Caption words that can't be shown on a caption line, even a little smaller or broken at a
+ * hyphen, slash or dot (the same rule the timeline compiler uses). Caught here, on the storyboard,
+ * before any voice is recorded, instead of failing the video after the narration was paid for.
+ */
+export function longCaptionWords(captionText: string): string[] {
+  return captionText.split(/\s+/u).filter((word) => word && !captionWordFit(word, CAPTION_LAYOUT));
+}
 
 /** Lowercase, Unicode-normalize and collapse whitespace so matching ignores trivial differences. */
 function normalizeForMatch(text: string): string {

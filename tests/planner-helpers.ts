@@ -8,8 +8,11 @@ import { loadFixture } from "./helpers";
 export function modelOutputFromFixture(): Record<string, any> {
   const plan = loadFixture("water-cycle.plan.json");
   for (const field of CODE_OWNED_PLAN_FIELDS) delete plan[field];
-  // The planner always writes an icon (or "none"); the fixture plan predates the field.
-  for (const scene of plan.scenes) for (const object of scene.objects) object.icon ??= "none";
+  // The planner always writes an icon and a hero (or "none"); the fixture plan predates both fields.
+  for (const scene of plan.scenes) {
+    for (const object of scene.objects) object.icon ??= "none";
+    for (const block of scene.narration) block.hero ??= "none";
+  }
   return plan;
 }
 

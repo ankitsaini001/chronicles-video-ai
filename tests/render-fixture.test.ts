@@ -19,7 +19,7 @@ async function fakeRender(job: RenderJob): Promise<RenderReport> {
     await writeFile(path, `png ${p.frame}`);
     previews.push({ ...p, path });
   }
-  return { bundleMs: 1, renderMs: 2, stillsMs: 3, previews };
+  return { musicMs: 0, bundleMs: 1, renderMs: 2, stillsMs: 3, previews };
 }
 
 const RUN = { ownerId: "fixture-owner", projectId: "fixture-water-cycle", versionId: "v1" };
@@ -84,6 +84,25 @@ describe("render-fixture stage orchestration", () => {
       // Same input again: nothing to do (artifacts verified by hash).
       const again = await renderFixtureRun({ input: loadFixture("water-cycle.plan.json"), store, render: fakeRender, probe: async () => goodProbe(probedFrames) });
       expect(again.status).toBe("already-rendered");
+    });
+  });
+
+  it("renders silently (no music) with its temporary files inside the run folder (never the system temp folder)", async () => {
+    await withTempDir(async (dir) => {
+      const store = new LocalArtifactStore(dir);
+      const jobs: RenderJob[] = [];
+      const render = async (job: RenderJob) => {
+        jobs.push(job);
+        return fakeRender(job);
+      };
+      await renderFixtureRun({ input: loadFixture("water-cycle.plan.json"), store, render, probe: async () => goodProbe(0) });
+      expect(jobs).toHaveLength(1);
+      const job = jobs[0]!;
+      expect(job.music).toBe(false);
+      const runDir = store.runDir(RUN);
+      expect(job.workDir.startsWith(`${runDir}/`)).toBe(true);
+      expect(job.outputPath.startsWith(`${job.workDir}/`)).toBe(true);
+      expect(job.previewDir.startsWith(`${job.workDir}/`)).toBe(true);
     });
   });
 

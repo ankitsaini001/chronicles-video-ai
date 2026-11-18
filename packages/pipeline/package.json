@@ -7,15 +7,25 @@
   "exports": {
     "./brainstorm": "./src/brainstorm/index.ts",
     "./config/config": "./src/config/config.ts",
+    "./config/voice-env": "./src/config/voice-env.ts",
     "./contracts": "./src/contracts/index.ts",
     "./pipeline": "./src/pipeline/index.ts",
+    "./pipeline/music": "./src/pipeline/music.ts",
+    "./pipeline/process-tree": "./src/pipeline/process-tree.ts",
+    "./pipeline/render": "./src/pipeline/render.ts",
     "./pipeline/render-fixture": "./src/pipeline/render-fixture.ts",
+    "./pipeline/render-protocol": "./src/pipeline/render-protocol.ts",
+    "./pipeline/speech": "./src/pipeline/speech.ts",
+    "./pipeline/speech-key": "./src/pipeline/speech-key.ts",
     "./planning": "./src/planning/index.ts",
+    "./planning/hero-catalog": "./src/planning/hero-catalog.ts",
     "./planning/icon-catalog": "./src/planning/icon-catalog.ts",
     "./providers": "./src/providers/index.ts",
     "./storage": "./src/storage/index.ts",
     "./theme": "./src/theme.ts",
     "./timing": "./src/timing/index.ts",
+    "./timing/caption-fit": "./src/timing/caption-fit.ts",
+    "./timing/text-width": "./src/timing/text-width.ts",
     "./validation": "./src/validation/index.ts"
   }
 }

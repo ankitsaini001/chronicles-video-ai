@@ -1,12 +1,14 @@
 import { brainstormIdeas, BrainstormError, type BrainstormInput, type BrainstormUsageSink, type TokenUsage } from "@bytereel/pipeline/brainstorm";
 import type { BrainstormBody, BrainstormCountResult } from "@bytereel/db/brainstorm";
+import { isLanguageEnabled, languageUnavailableMessage } from "@bytereel/db/languages";
 import { API_MESSAGES, ApiProblem } from "../api/v1";
 import type { SessionUser } from "../auth/session";
 import type { BrainstormProviderResult } from "./provider";
 
 // C7 POST /api/v1/brainstorm, the endpoint's own work (docs/API.md C7). Kept free of Next.js and
 // of the real database (route.ts passes them in), so the tests run it with fakes.
-// Order: provider set up? → 30 brainstorms/day (user timezone) → Gemini. A refused request never
+// Order: language switched on? (else 422 LANGUAGE_UNAVAILABLE, packages/db/src/languages.ts) →
+// provider set up? → 30 brainstorms/day (user timezone) → Gemini. A refused request never
 // reaches Gemini. Each Gemini request is logged before it is sent and after it ends (providerUsage,
 // operation "brainstorm"); the subject itself is never logged or stored.
 // TODO(F27/F36): 503 SPEND_CEILING and 503 MAINTENANCE (from the `settings` document), checked
@@ -48,6 +50,8 @@ export async function runBrainstorm(
 ): Promise<BrainstormResponse> {
   const { user, body, requestId } = context;
   const log = deps.log ?? ((level, message) => console[level](message));
+
+  if (!isLanguageEnabled(body.language)) throw new ApiProblem(422, "LANGUAGE_UNAVAILABLE", languageUnavailableMessage(), { language: body.language });
 
   const ai = deps.provider();
   // Not set up (missing key/model, or the test switch where it isn't allowed): 500, reason logged.

@@ -1,5 +1,6 @@
 import {
   API_RATE_LIMITS,
+  assertLanguageEnabled,
   CREATE_PROJECT_STATUS,
   createProject,
   CreateProjectBodySchema,
@@ -8,12 +9,15 @@ import {
   isLibraryTab,
   LIBRARY_TAB_IDS,
   listProjects,
+  ProjectActionError,
   ProjectQuotaExceededError,
+  projectsPerDayMessage,
 } from "@bytereel/db";
 import { apiRoute } from "@/lib/api/server";
 import { API_MESSAGES, ApiProblem, ApiResult } from "@/lib/api/v1";
-import { assertPlanJobsReady } from "@/lib/plan/api";
+import { assertPlanJobsReady, toApiProblem } from "@/lib/plan/api";
 import { refreshJob, sendPlanEvent } from "@/lib/plan/jobs";
+import { thumbnailLink } from "@/lib/video/storage";
 import { pageQuery } from "@/lib/storyboard/api";
 
 // C1 GET /api/v1/projects (docs/API.md C1, F21): "My videos". Only the signed-in user's projects,
@@ -34,7 +38,8 @@ export const GET = apiRoute({
     const tab = rawTab !== null && isLibraryTab(rawTab) ? rawTab : null;
     try {
       // The stuck-job rule on each card's active job, like C3 (writes only when a job is stuck).
-      return await listProjects(db, user.id, { tab, limit: page.limit, cursor: page.cursor }, (job) => refreshJob(db, job));
+      // F23: each card's video thumbnail as a 15-minute private link (only the owner's own renders).
+      return await listProjects(db, user.id, { tab, limit: page.limit, cursor: page.cursor }, (job) => refreshJob(db, job), thumbnailLink);
     } catch (error) {
       if (error instanceof InvalidCursorError) throw new ApiProblem(400, "INVALID_INPUT", error.message, { issues: [{ path: "cursor", message: "invalid cursor" }] });
       throw error;
@@ -45,6 +50,8 @@ export const GET = apiRoute({
 // C2 POST /api/v1/projects (docs/API.md §14.3): ① "Create storyboard".
 // Pipeline (lib/api/v1.ts): Origin → session → 10 per hour per user → JSON body (64 KB, strict) →
 // Idempotency-Key → here. Then (F15, full spec):
+//   0. the language must be switched on (packages/db/src/languages.ts), else 422
+//      LANGUAGE_UNAVAILABLE: nothing saved or counted, no AI job;
 //   1. the AI planner and Inngest must be set up (else 500, nothing saved or counted);
 //   2. ONE transaction: the projects/day quota (5, user timezone), the project in state `planning`
 //      (planRequestCount 0: counted when the job really asks Gemini), its queued `plan` job, and the
@@ -59,19 +66,27 @@ export const POST = apiRoute({
   body: CreateProjectBodySchema,
   idempotent: true,
   handle: async ({ db, user, body, idempotencyLock }) => {
+    // Before the set-up check, so a switched-off language gets its clear 422 (createProject checks too).
+    try {
+      assertLanguageEnabled(body.language);
+    } catch (error) {
+      toApiProblem(error);
+    }
     assertPlanJobsReady();
     let created: Awaited<ReturnType<typeof createProject>>;
     try {
       created = await createProject(db, { ownerId: user.id, timezone: user.timezone, body, idempotencyLock });
     } catch (error) {
       if (error instanceof ProjectQuotaExceededError) {
-        throw new ApiProblem(429, "QUOTA_EXCEEDED", `You've created ${error.limit} projects today. Try again tomorrow.`, {
+        // F27 (founder 2026-11-18): the same wording as videos/day, with the reset time in the creator's timezone.
+        throw new ApiProblem(429, "QUOTA_EXCEEDED", projectsPerDayMessage({ limit: error.limit, resetsAt: error.resetsAt, timezone: user.timezone }), {
           quota: "projects_per_day",
           limit: error.limit,
           used: error.used,
           resetsAt: error.resetsAt.toISOString(),
         });
       }
+      if (error instanceof ProjectActionError) toApiProblem(error);
       if (error instanceof IdempotencyLockLostError) {
         // This request was so slow that a repeat of the same click took over; nothing was saved
         // here. The repeat's answer is what counts: the client tries again and gets it replayed.

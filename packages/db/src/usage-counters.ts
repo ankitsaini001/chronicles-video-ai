@@ -8,7 +8,15 @@ import { usagePeriods } from "./usage";
 
 export const USAGE_COUNTERS_COLLECTION = "usageCounters";
 
-export type UsageKind = "videos" | "projects" | "voiceChars" | "brainstorms";
+/** `appVoiceChars` (F23): the app-wide voice guard, one counter for the whole app (APP_USAGE_OWNER_ID). */
+export type UsageKind = "videos" | "projects" | "voiceChars" | "brainstorms" | "appVoiceChars";
+
+/**
+ * The owner id of the app-wide counters (F23): all zeros, which no user ever has (ObjectIds start
+ * with their creation time). Counted in UTC calendar months.
+ */
+export const APP_USAGE_OWNER_ID = "000000000000000000000000";
+export const APP_USAGE_TIMEZONE = "UTC";
 
 export interface UsageCounterDocument {
   _id: ObjectId;
@@ -26,18 +34,30 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 /** The counter's period and its expiry (a week after the period ends). */
 export function usageCounterPeriod(kind: UsageKind, timezone: string, now: Date = new Date()): { period: string; resetsAt: Date; expiresAt: Date } {
   const p = usagePeriods(timezone, now);
-  const resetsAt = kind === "voiceChars" ? p.monthResetsAt : p.dayResetsAt;
-  return { period: kind === "voiceChars" ? p.month : p.day, resetsAt, expiresAt: new Date(resetsAt.getTime() + WEEK_MS) };
+  const monthly = kind === "voiceChars" || kind === "appVoiceChars";
+  const resetsAt = monthly ? p.monthResetsAt : p.dayResetsAt;
+  return { period: monthly ? p.month : p.day, resetsAt, expiresAt: new Date(resetsAt.getTime() + WEEK_MS) };
 }
 
 /** How much this user used in the current period (0 when there is no counter yet). */
-export async function readUsageCount(db: Db, ownerId: string, kind: UsageKind, timezone: string, now: Date = new Date()): Promise<number> {
+export async function readUsageCount(db: Db, ownerId: string, kind: UsageKind, timezone: string, now: Date = new Date(), session?: ClientSession): Promise<number> {
   const { period } = usageCounterPeriod(kind, timezone, now);
-  const doc = await db.collection<UsageCounterDocument>(USAGE_COUNTERS_COLLECTION).findOne({ ownerId: new ObjectId(ownerId), kind, period }, { projection: { count: 1 } });
+  const doc = await db
+    .collection<UsageCounterDocument>(USAGE_COUNTERS_COLLECTION)
+    .findOne({ ownerId: new ObjectId(ownerId), kind, period }, { projection: { count: 1 }, ...(session ? { session } : {}) });
   return doc?.count ?? 0;
 }
 
 export type UsageAddResult = { ok: true; used: number } | { ok: false; used: number; limit: number; resetsAt: Date };
+
+/**
+ * THE limit rule (F27): adding `amount` to `used` goes over `limit`. Reaching the limit exactly is
+ * allowed. addUsageWithinLimit counts with it; the storyboard's pre-check (approveLimitCheck) reads
+ * with it, so the warning before Approve and the refusal at D8 can't disagree.
+ */
+export function wouldExceed(used: number, amount: number, limit: number): boolean {
+  return used + amount > limit;
+}
 
 /**
  * Add `amount` to the counter, only if the total stays within `limit`. MUST run inside the
@@ -63,6 +83,6 @@ export async function addUsageWithinLimit(
       { upsert: true, returnDocument: "after", session },
     );
   const used = doc?.count ?? amount;
-  if (used > input.limit) return { ok: false, used: used - amount, limit: input.limit, resetsAt };
+  if (wouldExceed(used - amount, amount, input.limit)) return { ok: false, used: used - amount, limit: input.limit, resetsAt };
   return { ok: true, used };
 }

@@ -1,6 +1,6 @@
 import type { Language, VoicePreset } from "../contracts";
 import { PLAN_LIMITS } from "./component-catalog";
-import { CODE_OWNED_PLAN_FIELDS, NO_ICON } from "./planner-output";
+import { CODE_OWNED_PLAN_FIELDS, NO_HERO, NO_ICON } from "./planner-output";
 import { neutralizeMarkers, wordTarget } from "./prompts";
 
 /**
@@ -25,15 +25,25 @@ export interface RevisionRequest {
 
 /**
  * The current plan as the model writes it: without the code-owned fields (ids of owner, project and
- * version, language, voice, sources) and with an icon (or "none") on every object, like the
- * planner's own output.
+ * version, language, voice, sources), with an icon (or "none") on every object and a hero (or
+ * "none") on every narration block, like the planner's own output. A block with `hero: null` or
+ * none at all shows "none"; `blocksWithoutHero` tells assembly which of them had none at all.
  */
 export function planForRevision(plan: Record<string, unknown>): Record<string, unknown> {
   const view: Record<string, unknown> = structuredClone(plan);
   for (const field of CODE_OWNED_PLAN_FIELDS) delete view[field];
-  const scenes = Array.isArray(view.scenes) ? (view.scenes as { objects?: Record<string, unknown>[] }[]) : [];
-  for (const scene of scenes) for (const object of scene.objects ?? []) object.icon ??= NO_ICON;
+  const scenes = Array.isArray(view.scenes) ? (view.scenes as { objects?: Record<string, unknown>[]; narration?: Record<string, unknown>[] }[]) : [];
+  for (const scene of scenes) {
+    for (const object of scene.objects ?? []) object.icon ??= NO_ICON;
+    for (const block of scene.narration ?? []) block.hero ??= NO_HERO;
+  }
   return view;
+}
+
+/** Narration ids of a plan whose block has no `hero` key at all (plans written before heroes existed). */
+export function blocksWithoutHero(plan: Record<string, unknown>): string[] {
+  const scenes = Array.isArray(plan.scenes) ? (plan.scenes as { narration?: Record<string, unknown>[] }[]) : [];
+  return scenes.flatMap((scene) => (scene.narration ?? []).filter((block) => !Object.hasOwn(block, "hero")).map((block) => String(block.id)));
 }
 
 /** The first message of a revision request (the system instruction is the planner's own). */
@@ -56,7 +66,7 @@ Target length: ${PLAN_LIMITS.targetMinSeconds}-${PLAN_LIMITS.targetMaxSeconds} s
 How to revise:
 - Return the COMPLETE revised plan as one JSON object matching the schema: every scene, not only the changed ones.
 ${scope}
-- Keep every scene you don't need to change exactly as it is: the same id, wording, objects and events.
+- Keep every scene you don't need to change exactly as it is: the same id, wording, heroes, objects and events.
 - Keep the id of a scene you change. A new scene gets a new unique id; never reuse the id of a removed scene.
 - Keep the same topic. All the rules from the instructions still apply (first scene "title-hook", last scene "takeaway", anchor phrases copied verbatim from their narration block, the catalog limits, the length rule).
 

@@ -7,8 +7,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./brainstorm": "./src/brainstorm.ts",
+    "./caption-messages": "./src/caption-messages.ts",
     "./config": "./src/config.ts",
     "./idea-text": "./src/idea-text.ts",
+    "./languages": "./src/languages.ts",
     "./voices": "./src/voices.ts"
   },
   "dependencies": {

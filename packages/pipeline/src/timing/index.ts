@@ -7,3 +7,7 @@ export * from "./synthetic-alignment";
 export * from "./captions";
 export * from "./compile";
 export * from "./provider-alignment";
+export * from "./heroes";
+export * from "./key-terms";
+export * from "./caption-fit";
+export * from "./caption-overrides";

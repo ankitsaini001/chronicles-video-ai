@@ -2,6 +2,7 @@ import { type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS } from "./idea-text";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
+import { isLanguageEnabled, LANGUAGES, languageUnavailableMessage, type Language } from "./languages";
 import { canRetryPlanJob, JOBS_COLLECTION, newPlanJob, planInputHash, toJobResource, type JobDocument, type JobResource, type JobType } from "./jobs";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
@@ -16,10 +17,9 @@ import { USAGE_LIMITS } from "./usage";
 export const PROJECTS_COLLECTION = "projects";
 export const PROJECT_SCHEMA_VERSION = 1;
 
-export const LANGUAGES = ["en", "hi", "hinglish"] as const;
+export { LANGUAGES, type Language };
 export const VOICE_GENDERS = ["female", "male"] as const;
 export const INPUT_TYPES = ["topic", "notes", "brainstorm"] as const;
-export type Language = (typeof LANGUAGES)[number];
 export type VoiceGender = (typeof VOICE_GENDERS)[number];
 export type InputType = (typeof INPUT_TYPES)[number];
 
@@ -195,12 +195,16 @@ export function displayStateOf(doc: Pick<ProjectDocument, "state" | "stateBefore
   return doc.state === "archived" ? (doc.stateBeforeArchive ?? "draft") : doc.state;
 }
 
-/** API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. */
-export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "archive";
+/**
+ * API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. F23 adds `generate_video`
+ * (D8 on a version that is already approved but has no video job yet) and `cancel_job` (E3).
+ */
+export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "generate_video" | "edit_captions" | "cancel_job" | "archive";
 
 /**
- * What the creator may do now (API.md §11.1, "the server owns state"). Nothing while a job runs,
- * nothing on an archived project.
+ * What the creator may do now (API.md §11.1, "the server owns state"). While a job runs: only
+ * `cancel_job` for a video job (F23) that hasn't been asked to stop yet; nothing for the storyboard
+ * jobs. Nothing on an archived project.
  * - F21: `rename` (C4 title) first and `archive` (C5) last, in every state (archive not while
  *   `publishing`, ARCHITECTURE §7.2).
  * - F15, after a failed storyboard: `edit_idea` (C4), and `retry_job` (E2) while the last plan job
@@ -208,18 +212,62 @@ export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storybo
  * - F17, with a storyboard: `edit_storyboard` (D3 narration edit, D4 voice, D7 undo/restore).
  * - F18: `request_revision` (D5) while under the 20 AI requests; `retry_job` (E2) when the last
  *   change request failed with a retryable error and the storyboard is still the one it was made on.
- * - F20: `approve_storyboard` (D8) in storyboard_ready / generate_failed while the current version
- *   isn't the approved one (whether it passes the checks is on the version: `valid`).
+ * - F20/F23: `approve_storyboard` (D8 "Approve & generate video") in storyboard_ready /
+ *   generate_failed while the current version isn't the approved one (whether it passes the checks
+ *   is on the version: `valid`).
+ * - F23: `generate_video` (D8 "Generate video") in storyboard_ready when the current version IS
+ *   approved and has no video job running (an approval from F20, a cancelled job), unless its last
+ *   job said the storyboard must change (needs_input) or failed with an error that can't be retried
+ *   as it is (D8 refuses both, like E2). `retry_job` (E2) in generate_failed when the
+ *   newest video job failed with a retryable error and is still for the approved current version.
+ * - F25: `edit_captions` (F4 caption fixes) in video_ready when the project has a video. While a
+ *   caption job waits or runs: `cancel_job` (like a video job). `retry_job` (E2) in video_ready when
+ *   the newest caption job failed with a retryable error or was cancelled, and the video it was made
+ *   on is still the project's video.
+ * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
+ *   loses every action that costs AI or voice: `retry_job`, `request_revision`, `edit_idea` (only
+ *   useful for its Try again), and since F23 `approve_storyboard` / `generate_video` (approving now
+ *   starts the voice + video job), and since F25 `edit_captions` (the Hindi/Hinglish script rule for
+ *   caption text comes back with those languages). It stays viewable; the free actions stay.
  */
-export function allowedActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
-  if (doc.activeJobId || doc.state === "archived") return [];
-  const actions: AllowedAction[] = ["rename", ...stepActionsFor(doc, latestPlanJob, latestReviseJob)];
+export function allowedActionsFor(
+  doc: ProjectDocument,
+  latestPlanJob: JobDocument | null | undefined,
+  latestReviseJob?: JobDocument | null,
+  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null; latestCaptionJob?: JobDocument | null } = {},
+): AllowedAction[] {
+  if (doc.state === "archived") return [];
+  if (doc.activeJobId) {
+    const active = more.activeJob && more.activeJob._id.equals(doc.activeJobId) ? more.activeJob : null;
+    const videoJob = active?.type === "generate" || active?.type === "caption";
+    return active && videoJob && (active.state === "queued" || active.state === "running") && !active.cancelRequestedAt ? ["cancel_job"] : [];
+  }
+  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob, more.latestGenerateJob, more.latestCaptionJob);
+  const actions: AllowedAction[] = ["rename", ...(isLanguageEnabled(doc.language) ? stepActions : stepActions.filter((a) => !AI_ACTIONS.includes(a)))];
   if (doc.state !== "publishing") actions.push("archive");
   return actions;
 }
 
+/** Actions that start an AI or voice job (or lead only to one): refused for a switched-off language. */
+const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea", "approve_storyboard", "generate_video", "edit_captions"];
+
+/**
+ * Throws 422 LANGUAGE_UNAVAILABLE when the language is switched off (languages.ts). Every action
+ * that costs AI or voice calls this BEFORE counting anything or starting a job: C2, D5, D8, E2 (and
+ * the F23 video job's worker).
+ */
+export function assertLanguageEnabled(language: string): void {
+  if (!isLanguageEnabled(language)) throw new ProjectActionError("LANGUAGE_UNAVAILABLE", languageUnavailableMessage(), { language });
+}
+
 /** The actions of the step the project is on (F15–F20), without rename/archive. */
-function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null | undefined, latestReviseJob?: JobDocument | null): AllowedAction[] {
+function stepActionsFor(
+  doc: ProjectDocument,
+  latestPlanJob: JobDocument | null | undefined,
+  latestReviseJob?: JobDocument | null,
+  latestGenerateJob?: JobDocument | null,
+  latestCaptionJob?: JobDocument | null,
+): AllowedAction[] {
   const underLimit = doc.planRequestCount < USAGE_LIMITS.planRequestsPerProject;
   if (doc.state === "plan_failed") {
     const actions: AllowedAction[] = ["edit_idea"];
@@ -235,7 +283,20 @@ function stepActionsFor(doc: ProjectDocument, latestPlanJob: JobDocument | null 
     latestReviseJob.error?.retryable === true &&
     latestReviseJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true;
   if (reviseRetry && underLimit) actions.push("retry_job");
-  if ((doc.state === "storyboard_ready" || doc.state === "generate_failed") && !doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId)) actions.push("approve_storyboard");
+  const approved = doc.approvedPlanVersionId?.equals(doc.currentPlanVersionId) === true;
+  if ((doc.state === "storyboard_ready" || doc.state === "generate_failed") && !approved) actions.push("approve_storyboard");
+  // F23: the video job of the current (approved) version.
+  const videoJob = latestGenerateJob?.type === "generate" && latestGenerateJob.inputRef.planVersionId?.equals(doc.currentPlanVersionId) === true ? latestGenerateJob : null;
+  const videoNeedsChange = videoJob?.state === "needs_input" || (videoJob?.state === "failed" && videoJob.error?.retryable !== true);
+  if (doc.state === "storyboard_ready" && approved && !videoNeedsChange) actions.push("generate_video");
+  if (doc.state === "generate_failed" && approved && videoJob?.state === "failed" && videoJob.error?.retryable === true && !actions.includes("retry_job")) actions.push("retry_job");
+  // F25: caption fixes on the project's video, and Try again for the last caption job made on it.
+  if (doc.state === "video_ready" && doc.currentRenderId) {
+    actions.push("edit_captions");
+    const captionJob = latestCaptionJob?.type === "caption" && latestCaptionJob.inputRef.renderId?.equals(doc.currentRenderId) === true ? latestCaptionJob : null;
+    const captionRetry = captionJob !== null && ((captionJob.state === "failed" && captionJob.error?.retryable === true) || captionJob.state === "cancelled");
+    if (captionRetry && !actions.includes("retry_job")) actions.push("retry_job");
+  }
   return actions;
 }
 
@@ -248,11 +309,15 @@ export interface ProjectRelated {
   latestPlanJob?: JobDocument | null;
   /** The project's newest revise job (for `retry_job` on the storyboard, F18). */
   latestReviseJob?: JobDocument | null;
+  /** The project's newest generate job (F23: `generate_video`, `retry_job` on the video step). */
+  latestGenerateJob?: JobDocument | null;
+  /** The project's newest caption job (F25: `retry_job` after a failed or cancelled caption fix). */
+  latestCaptionJob?: JobDocument | null;
 }
 
 /**
- * Database document → API resource. Posts and thumbnails don't exist yet (F23, F30), so those
- * fields are null.
+ * Database document → API resource. Posts don't exist yet (F30); the thumbnail is only on the My
+ * videos cards (C1, F23), so here it is null.
  */
 export function toProjectResource(doc: ProjectDocument, related: ProjectRelated = {}): ProjectResource {
   const activeJob = related.activeJob && doc.activeJobId && related.activeJob._id.equals(doc.activeJobId) ? related.activeJob : null;
@@ -275,7 +340,7 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     activeJobId: hexOrNull(doc.activeJobId),
     activeJob: activeJob && related.embedActiveJob !== false ? toJobResource(activeJob) : null,
     lastError: doc.lastError ? { code: doc.lastError.code, message: doc.lastError.message, at: doc.lastError.at.toISOString() } : null,
-    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob),
+    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob, { activeJob, latestGenerateJob: related.latestGenerateJob ?? null, latestCaptionJob: related.latestCaptionJob ?? null }),
     archivedAt: doc.archivedAt ? doc.archivedAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -306,13 +371,15 @@ export class ProjectQuotaExceededError extends Error {
  * saved project whose click would run again on retry. The Inngest event is sent by the caller
  * AFTER this returns (never inside a transaction); if that send fails, the job stays `queued` and
  * the stuck-job rule sends it again (plan-jobs.ts).
- * Throws ProjectQuotaExceededError (nothing saved) when the limit is reached, and
+ * Throws ProjectActionError LANGUAGE_UNAVAILABLE first (nothing read, counted or saved) for a
+ * switched-off language, ProjectQuotaExceededError (nothing saved) when the limit is reached, and
  * IdempotencyLockLostError (nothing saved) when a repeat of the same click took the record over.
  */
 export async function createProject(
   db: Db,
   input: { ownerId: string; timezone: string; body: CreateProjectBody; idempotencyLock?: IdempotencyLock | null; now?: Date },
 ): Promise<{ response: CreateProjectResponse; job: JobDocument }> {
+  assertLanguageEnabled(input.body.language);
   const now = input.now ?? new Date();
   const projectId = new ObjectId();
   const ownerId = new ObjectId(input.ownerId);
@@ -384,7 +451,18 @@ export async function getOwnedProject(db: Db, ownerId: string, projectId: string
  */
 export class ProjectActionError extends Error {
   constructor(
-    readonly code: "NOT_FOUND" | "INVALID_STATE" | "STALE_VERSION" | "JOB_ALREADY_RUNNING" | "QUOTA_EXCEEDED" | "INVALID_INPUT" | "APPROVAL_STALE" | "PLAN_INVALID",
+    readonly code:
+      | "NOT_FOUND"
+      | "INVALID_STATE"
+      | "STALE_VERSION"
+      | "JOB_ALREADY_RUNNING"
+      | "QUOTA_EXCEEDED"
+      | "INVALID_INPUT"
+      | "APPROVAL_STALE"
+      | "PLAN_INVALID"
+      | "LANGUAGE_UNAVAILABLE"
+      | "APPROVAL_REQUIRED"
+      | "SPEND_CEILING",
     message: string,
     readonly details?: Record<string, unknown>,
   ) {
@@ -430,6 +508,8 @@ export async function editProjectIdea(
   if (!project) throw new ProjectActionError("NOT_FOUND", "We couldn't find this project.");
   const check = () => {
     if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This project is archived.", { state: project.state });
+    // Language switch: Edit idea only leads to a Try again, which is refused for this language.
+    assertLanguageEnabled(project.language);
     if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.");
     if (project.stateVersion !== input.body.expectedStateVersion) {
       throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", {

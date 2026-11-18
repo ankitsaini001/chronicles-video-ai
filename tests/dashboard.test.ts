@@ -83,7 +83,8 @@ describe("ProjectSummary (API.md §11.3, F21 additions)", () => {
   it("has exactly the documented fields, no ownerId or idea text", () => {
     const summary = toProjectSummary(projectDoc(), null);
     expect(Object.keys(summary).sort()).toEqual(
-      ["activeJobType", "createdAt", "currentStep", "id", "language", "latestPost", "state", "stateVersion", "storyboardApproved", "thumbnailUrl", "title", "updatedAt", "voiceGender"].sort(),
+      // F23 adds activeJobState ("Waiting to start…") and videoFromOlderVersion (the "older version" note).
+      ["activeJobState", "activeJobType", "createdAt", "currentStep", "id", "language", "latestPost", "state", "stateVersion", "storyboardApproved", "thumbnailUrl", "title", "updatedAt", "videoFromOlderVersion", "voiceGender"].sort(),
     );
     expect(summary).toMatchObject({ id: "67330d5e9f1e4b2a7c0d2a10", state: "storyboard_ready", currentStep: "storyboard", stateVersion: 4, storyboardApproved: false, thumbnailUrl: null, latestPost: null });
     expect(JSON.stringify(summary)).not.toContain("ownerId");

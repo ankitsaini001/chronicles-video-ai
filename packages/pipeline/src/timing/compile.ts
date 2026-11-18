@@ -1,5 +1,6 @@
 import {
   CaptionTrackSchema,
+  TIMELINE_SCHEMA_VERSION,
   TimelineSchema,
   VIDEO_FORMAT,
   type Caption,
@@ -15,7 +16,7 @@ import {
 } from "../contracts";
 import { CAPTION_STYLE, MOTION } from "../theme";
 import { localeFor, timeSceneBlocks, type TimedToken } from "./alignment";
-import { breakLines, groupPhrases, type CaptionLayout, type CaptionWord } from "./captions";
+import { breakLines, captionWordFit, groupPhrases, type CaptionLayout, type CaptionWord } from "./captions";
 import { AlignmentMappingError, CompileInputError, DurationOutOfRangeError } from "./errors";
 import {
   endFrameOf,
@@ -27,6 +28,8 @@ import {
   sceneFrames,
   startFrameOf,
 } from "./frames";
+import { heroTrack } from "./heroes";
+import { keyTermTest } from "./key-terms";
 import { tokenize } from "./text";
 import { WIDTH_METHOD } from "./text-width";
 
@@ -48,6 +51,8 @@ export const DEFAULT_HOLDS: HoldOptions = { sceneHoldMs: 400, takeawayHoldMs: 12
 export const DEFAULT_CAPTION_LAYOUT: CaptionLayout = {
   fontSizePx: CAPTION_STYLE.fontSizePx,
   maxLineWidthPx: CAPTION_STYLE.maxLineWidthPx,
+  minWords: CAPTION_STYLE.minWords,
+  maxWords: CAPTION_STYLE.maxWords,
 };
 
 /** Actions that bring an object on screen. Other actions (highlight, pulse, ...) act on a visible object. */
@@ -95,6 +100,7 @@ export function compileTimeline(input: CompileInput): CompileResult {
 
   const scenes: TimelineScene[] = [];
   const captions: Caption[] = [];
+  const isKeyTerm = keyTermTest(plan);
   plan.scenes.forEach((scene, index) => {
     const alignment = alignments[index]!;
     const startFrame = starts[index]!;
@@ -103,6 +109,21 @@ export function compileTimeline(input: CompileInput): CompileResult {
 
     const events = resolveEvents(scene, blocks, startFrame, durationFrames, plan.language);
     const speechFrames = Math.min(durationFrames, endFrameOf(alignment.audioDurationSeconds, fps));
+    const heroes = heroTrack({
+      sceneType: scene.type,
+      sceneStart: startFrame,
+      blocks: blocks.map((block) => {
+        const spoken = block.textTokens.filter((t) => t.spoken);
+        return {
+          narrationId: block.narrationId,
+          hero: scene.narration.find((n) => n.id === block.narrationId)?.hero,
+          startFrame: startFrame + startFrameOf((spoken[0] ?? block.textTokens[0])?.startSec ?? 0),
+          words: spoken.map((t) => ({ text: t.text, frame: startFrame + startFrameOf(t.startSec) })),
+        };
+      }),
+      objects: scene.objects,
+      events,
+    });
     scenes.push({
       sceneId: scene.id,
       type: scene.type,
@@ -113,14 +134,15 @@ export function compileTimeline(input: CompileInput): CompileResult {
       audioKey: alignment.audio ? `audio/${scene.id}.mp3` : null,
       objects: scheduleObjects(scene, events, startFrame, speechFrames),
       events,
+      heroes,
     });
 
     const words: CaptionWord[] = blocks.flatMap((block) => block.displayTokens.map(toCaptionWord));
-    captions.push(...sceneCaptions(scene.id, words, startFrame, durationFrames, layout));
+    captions.push(...sceneCaptions(scene.id, words, startFrame, durationFrames, layout, (text) => isKeyTerm(scene, text)));
   });
 
   const timeline = TimelineSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
     ...VIDEO_FORMAT,
     totalFrames,
     language: plan.language,
@@ -129,7 +151,7 @@ export function compileTimeline(input: CompileInput): CompileResult {
     scenes,
   });
   const track = CaptionTrackSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
     timingSource,
     language: plan.language,
     widthMethod: WIDTH_METHOD,
@@ -264,24 +286,35 @@ export function scheduleObjects(scene: Scene, events: readonly TimelineEvent[], 
 
 // ---------- captions ----------
 
-function sceneCaptions(sceneId: string, words: CaptionWord[], sceneStart: number, durationFrames: number, layout: CaptionLayout): Caption[] {
+function sceneCaptions(
+  sceneId: string,
+  words: CaptionWord[],
+  sceneStart: number,
+  durationFrames: number,
+  layout: CaptionLayout,
+  isKey: (text: string) => boolean,
+): Caption[] {
   const sceneEnd = sceneStart + durationFrames;
   const phrases = groupPhrases(words, layout);
   const starts = phrases.map((p) => sceneStart + startFrameOf(p[0]!.startSec));
   return phrases.map((phrase, index) => {
-    const lines = breakLines(phrase.map((w) => w.text), layout);
-    if (!lines) throw new Error(`internal: caption phrase does not fit in 2 lines in scene "${sceneId}"`);
     const naturalEnd = sceneStart + endFrameOf(phrase[phrase.length - 1]!.endSec) + CAPTION_LINGER_FRAMES;
     const nextStart = starts[index + 1] ?? sceneEnd;
     const startFrame = starts[index]!;
     const endFrame = Math.max(startFrame + 1, Math.min(naturalEnd, nextStart, sceneEnd));
-    return {
-      id: `${sceneId}-c${String(index + 1).padStart(2, "0")}`,
-      sceneId,
-      startFrame,
-      endFrame,
-      text: phrase.map((w) => w.text).join(" "),
-      lines: lines.map((line) => line.join(" ")),
+    const timed = (w: CaptionWord, text = w.text) => {
+      const wordStart = sceneStart + startFrameOf(w.startSec);
+      return { text, startFrame: wordStart, endFrame: Math.max(wordStart + 1, sceneStart + endFrameOf(w.endSec)), key: isKey(w.text) };
     };
+    const id = `${sceneId}-c${String(index + 1).padStart(2, "0")}`;
+    const lines = breakLines(phrase.map((w) => w.text), layout);
+    if (lines) {
+      return { id, sceneId, startFrame, endFrame, text: phrase.map((w) => w.text).join(" "), lines: lines.map((line) => line.join(" ")), words: phrase.map((w) => timed(w)) };
+    }
+    // one word too wide for a line at the normal size (groupPhrases put it alone): smaller, or broken in two
+    const fit = phrase.length === 1 ? captionWordFit(phrase[0]!.text, layout) : null;
+    if (!fit || fit.kind === "fits") throw new Error(`internal: caption phrase does not fit in 2 lines in scene "${sceneId}"`);
+    const pieces = fit.kind === "split" ? fit.pieces : [phrase[0]!.text];
+    return { id, sceneId, startFrame, endFrame, text: pieces.join(" "), lines: pieces, words: pieces.map((piece) => timed(phrase[0]!, piece)), fontSizePx: fit.fontSizePx };
   });
 }

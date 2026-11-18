@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { type ClientSession, type Db, ObjectId } from "mongodb";
+import { languageUnavailableMessage } from "./languages";
 
 // Background work (docs/DATABASE.md §4.9 `jobs`, docs/API.md §8 "Asynchronous Jobs and Polling").
 // F15 builds the first job type: `plan` (the AI writes the storyboard, Inngest function
@@ -19,7 +20,8 @@ export type JobType = "plan" | "revise" | "generate" | "caption" | "publish";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "needs_input" | "cancelled";
 export type StageStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 /** Error codes a plan or revise job can end with (API.md §4.2). */
-export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "QUOTA_EXCEEDED" | "INTERNAL";
+/** LANGUAGE_UNAVAILABLE: the project's language was switched off (languages.ts) before the job asked the AI. */
+export type PlanJobErrorCode = "PROVIDER_BUSY" | "PROVIDER_REJECTED" | "PLAN_INVALID" | "QUOTA_EXCEEDED" | "LANGUAGE_UNAVAILABLE" | "INTERNAL";
 
 /** Why a job stopped to ask the creator for something (API.md §8.2 `needsInput`). */
 export interface JobNeedsInput {
@@ -39,14 +41,16 @@ export const PLAN_STAGES = ["plan", "validate"] as const;
 export const JOB_MESSAGES = {
   QUEUED: "Writing your storyboard…",
   WRITING: "Writing your storyboard…",
-  RETRYING: "Our AI is busy, trying again…",
+  RETRYING: "Our AI is busy or slow, trying again…",
   REPAIRING: "Fixing a few details in your storyboard…",
   SAVING: "Checking your storyboard…",
   DONE: "Your storyboard is ready.",
-  PROVIDER_BUSY: "Our AI is very busy right now. Your idea is saved; please try again in a few minutes.",
+  // Also when Gemini doesn't answer within the time limit (F26 founder test): "busy or taking too long".
+  PROVIDER_BUSY: "Our AI is busy or taking too long right now. Your idea is saved; please try again in a few minutes.",
   PROVIDER_REJECTED: "We can't make a video about this topic.",
   PLAN_INVALID: "Couldn't build a good storyboard, try rephrasing.",
   QUOTA_EXCEEDED: "This project has reached 20 storyboard requests. Start a new project to keep going.",
+  LANGUAGE_UNAVAILABLE: languageUnavailableMessage(),
   INTERNAL: "Something went wrong on our side. Please try again.",
 } as const;
 
@@ -56,6 +60,7 @@ export const PLAN_ERROR_RETRYABLE: Record<PlanJobErrorCode, boolean> = {
   PROVIDER_REJECTED: false,
   PLAN_INVALID: true,
   QUOTA_EXCEEDED: false,
+  LANGUAGE_UNAVAILABLE: false,
   INTERNAL: true,
 };
 
@@ -105,8 +110,12 @@ export interface JobDocument {
   projectId: ObjectId;
   schemaVersion: number;
   type: JobType;
-  /** What the job works on. Revise jobs (F18): the base version and the revision. */
-  inputRef: { planVersionId?: ObjectId; revisionId?: ObjectId; postId?: ObjectId };
+  /**
+   * What the job works on. Revise jobs (F18): the base version and the revision. Caption jobs
+   * (F25): the video's storyboard version, the video the fixes were made on (`renderId`) and the
+   * saved fixes (`captionOverrideSetId`).
+   */
+  inputRef: { planVersionId?: ObjectId; revisionId?: ObjectId; postId?: ObjectId; renderId?: ObjectId; captionOverrideSetId?: ObjectId };
   /** Plan jobs: sha256 of the idea the job plans from (part of the key). Revise jobs: of the request. */
   inputHash: string;
   state: JobState;
@@ -115,15 +124,28 @@ export interface JobDocument {
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
   needsInput: JobNeedsInput | null;
-  /** Revise jobs carry `revisionId` from the start (API.md §8.2). */
-  result: { planVersionId?: ObjectId; revisionId?: ObjectId } | null;
-  /** `plan:{projectId}:{inputHash}` or `rev:{revisionId}` (unique). */
+  /** Revise jobs carry `revisionId` from the start (API.md §8.2). Generate jobs (F23): `renderId` on success. */
+  result: { planVersionId?: ObjectId; revisionId?: ObjectId; renderId?: ObjectId } | null;
+  /** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}` or `cap:{captionOverrideSetId}` (unique). */
   idempotencyKey: string;
   inngestRunId: string | null;
   cancelRequestedAt: Date | null;
   /** The Inngest event that starts this attempt: its id (dedupe) and when it was sent. */
   event: { id: string; sentAt: Date | null; lastTriedAt: Date | null };
   planner: PlanCheckpoint | null;
+  /**
+   * Generate jobs (F23): the voice characters this job counted. Every ElevenLabs request is counted
+   * BEFORE it is sent:
+   * - `cacheKeys`: recordings reserved up front (before the first call) and NOT sent yet: each covers
+   *   ONE request in `period`; it is removed when that request is sent;
+   * - `sentKeys`: recordings this job has sent at least once (any later request for them is counted again);
+   * - `characters`: everything this job counted (all attempts);
+   * - `period`: the months `cacheKeys` were counted in (the creator's month, the app's UTC month); in
+   *   another month they no longer cover anything and are reserved again.
+   */
+  voice?: { cacheKeys: string[]; characters: number; sentKeys?: string[]; period?: { user: string; app: string } | null } | null;
+  /** Generate and caption jobs (F23, F25): the render attempt in progress. Every attempt gets a NEW renderId (R2 folder). */
+  render?: { renderId: ObjectId; startedAt: Date } | null;
   /** When the job last became `queued` (C2 or E2), for the stuck-job rule. */
   queuedAt: Date;
   createdAt: Date;
@@ -143,7 +165,13 @@ export type JobResource = {
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
   needsInput: JobNeedsInput | null;
-  result: { planVersionId?: string; revisionId?: string } | null;
+  result: { planVersionId?: string; revisionId?: string; renderId?: string } | null;
+  /**
+   * Generate and caption jobs waiting for their turn (F23, F25; additive): how many video jobs are
+   * running or wait before this one (only one video is rendered at a time). Null when not waiting
+   * or not known.
+   */
+  queue: { ahead: number } | null;
   cancelRequestedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -158,7 +186,7 @@ export function isTerminal(state: JobState): boolean {
   return TERMINAL_JOB_STATES.includes(state);
 }
 
-export function toJobResource(doc: JobDocument): JobResource {
+export function toJobResource(doc: JobDocument, extras: { ahead?: number | null } = {}): JobResource {
   return {
     id: doc._id.toHexString(),
     projectId: doc.projectId.toHexString(),
@@ -173,8 +201,10 @@ export function toJobResource(doc: JobDocument): JobResource {
       ? {
           ...(doc.result.planVersionId ? { planVersionId: doc.result.planVersionId.toHexString() } : {}),
           ...(doc.result.revisionId ? { revisionId: doc.result.revisionId.toHexString() } : {}),
+          ...(doc.result.renderId ? { renderId: doc.result.renderId.toHexString() } : {}),
         }
       : null,
+    queue: doc.state === "queued" && typeof extras.ahead === "number" ? { ahead: extras.ahead } : null,
     cancelRequestedAt: iso(doc.cancelRequestedAt),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -267,6 +297,16 @@ export async function getJob(db: Db, jobId: ObjectId, session?: ClientSession): 
 /** The project's newest plan job (the one the Try again button retries), or null. */
 export async function getLatestPlanJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
   return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "plan" }, { sort: { createdAt: -1 } });
+}
+
+/** The project's newest generate job (F23: the video), or null. */
+export async function getLatestGenerateJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
+  return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "generate" }, { sort: { createdAt: -1 } });
+}
+
+/** The project's newest caption job (F25: the caption fixes, Try again after a failure), or null. */
+export async function getLatestCaptionJob(db: Db, projectId: ObjectId): Promise<JobDocument | null> {
+  return db.collection<JobDocument>(JOBS_COLLECTION).findOne({ projectId, type: "caption" }, { sort: { createdAt: -1 } });
 }
 
 /** The project's newest revise job (F18: Try again after a failed change request), or null. */

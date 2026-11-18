@@ -57,7 +57,7 @@ It creates 6 indexes: `projects` (2), `idempotencyKeys` (2, one deletes clicks a
 - [x] Project appears in Atlas `projects` with your user id (e2e on `bytereel_test`; please check it once in your own Atlas after creating a project)
 - [x] 5,000-character limit works (the counter turns red above 5,000 and the form won't send; the server refuses 5,001)
 - [x] Defaults are English + Female (and your own defaults when you change them later)
-- [x] 5 projects per day, then "You've created 5 projects today. Try again tomorrow." with the time it resets
+- [x] 5 projects per day, then "You've created 5 projects today. Try again tomorrow." with the time it resets (F27, founder 2026-11-18: now "You've created 5 projects today, the most for one day. You can create more after 12:00 am (midnight) your time.")
 - [x] Only the owner can open `/projects/[id]`
 - [x] Code review passed (code-reviewer agent; no must-fix, all suggestions applied)
 - [x] Founder tested it and said OK
