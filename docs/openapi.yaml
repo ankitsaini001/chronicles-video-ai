@@ -637,7 +637,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: { code: QUOTA_EXCEEDED, message: "You've created 5 projects today. Try again tomorrow.", details: { quota: projects_per_day, limit: 5, used: 5, resetsAt: '2026-11-12T18:30:00.000Z' }, requestId: req_01JCXM1D4E5F }
+                error: { code: QUOTA_EXCEEDED, message: "You've created 5 projects today, the most for one day. You can create more after 12:00 am (midnight) your time.", details: { quota: projects_per_day, limit: 5, used: 5, resetsAt: '2026-11-12T18:30:00.000Z' }, requestId: req_01JCXM1D4E5F }
         '500':
           $ref: '#/components/responses/Internal'
         '503':
@@ -5072,7 +5072,7 @@ components:
     ErrQuotaVideos:
       summary: Daily video quota reached
       value:
-        error: { code: QUOTA_EXCEEDED, message: "You've reached today's limit of 3 videos. Try again tomorrow.", details: { quota: videos_per_day, limit: 3, used: 3, resetsAt: '2026-11-12T18:30:00.000Z' }, requestId: req_01JCXM3A7B8C }
+        error: { code: QUOTA_EXCEEDED, message: "You've made 3 videos today, the most for one day. You can make more after 12:00 am (midnight) your time.", details: { quota: videos_per_day, limit: 3, used: 3, resetsAt: '2026-11-12T18:30:00.000Z' }, requestId: req_01JCXM3A7B8C }
     ErrRateLimited:
       summary: Rate limited
       value:
