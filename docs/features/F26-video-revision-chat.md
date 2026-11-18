@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🧪 Testing (built 2026-11-17; waiting for code review and the founder's test) |
+| **Status** | ✅ Done (founder OK 2026-11-18) |
 | **Phase** | A4 · Generate and review video |
 | **Depends on** | F25 |
 | **Design** | — (reuses the F18 "Ask for changes" panel) |
@@ -68,8 +68,8 @@ The 'Ask for changes' tab on the review screen.
 ## How we test it (done when all are ticked)
 - [x] Change appears in the new video (e2e: video 2's `captions.json` in R2 has the new words in scene 3, video 1's doesn't; every other scene's captions read the same)
 - [x] Unchanged scenes reuse their narration (no extra cost) (e2e: ONE voice request for the new video (`providerUsage` and the stand-in's call log +1), one new recording, for scene 3; voice characters +207 for the creator and the app = that recording = the storyboard note; the other 5 scenes use the same recordings as video 1: ids, cache keys, audio keys, SHA-256)
-- [ ] Code review passed (code-reviewer agent)
-- [ ] Founder tested it and said OK
+- [x] Code review passed (code-reviewer agent; no must-fix, all should-fix findings fixed 2026-11-17)
+- [x] Founder tested it and said OK (2026-11-18; the real run stopped before "Approve & make new video" on purpose, see the progress log)
 
 ## Progress log
 | Date | What happened |
@@ -81,3 +81,4 @@ The 'Ask for changes' tab on the review screen.
 | 2026-11-17 | **Founder test, first try (evening):** the "Ask for changes" tab, the request bubble, "Updating scene 2…", the video still playable, the failure message and Try again all showed as designed. Gemini did not answer: 6 real requests on the sunset "Why is the sky blue?" project (2 attempts × 3) timed out at 180 s or came back busy (`providerUsage` outcome `timeout`/`busy`), so no new version yet; to try again the next morning. Found during the test and fixed: (1) a send to a server that never answers left the arrow locked with no message: every `/api/v1` call from the browser (`components/storyboard/client.ts apiSend`) now gives up after 30 s with "No answer from the server. Please try again." (status 0, so the click keeps its Idempotency-Key; the caption-fix and video Try again buttons now keep theirs on status 0 too); (2) a Gemini time-out read "very busy": the storyboard and change jobs now say "Our AI is busy or taking too long right now…" and "Our AI is busy or slow, trying again…". Unit tests 1037 pass (6 new in `tests/api-send.test.ts`), typecheck clean. The real database was only read. |
 | 2026-11-17 | **Gemini time limit 180 s → 240 s** (founder OK): later that evening a new storyboard took 113 s on its third try (27–49 s on 2026-11-14), so a change request (the whole storyboard sent and returned) ran past 180 s every time. 240 s, not 300 s: one Inngest step must stay under the 300 s a Vercel function may run (F38), with time for the database writes around the request (`PLAN_REQUEST_TIMEOUT_MS`, storyboard and change jobs). |
 | 2026-11-17 | **Why a Gemini request failed is now saved** (founder OK): a failed storyboard or change request writes a short fixed `errorCode` on its `providerUsage` row (e.g. `transient 503 UNAVAILABLE`; `planErrorCode`, never Gemini's text). Found with the founder's terminal: the sunset project's retry at 23:36 got **503 UNAVAILABLE, "This model is currently experiencing high demand"** three times: Gemini overloaded, not our request (the new project's change had worked between spikes, 60 s). Unit tests 1047 pass (10 new in `tests/plan-error-code.test.ts`), typecheck clean. |
+| 2026-11-18 | **Founder test, real run (morning):** on the sunset "Why is the sky blue?" project, Try again on "Scene 02: make it more simple" → Gemini answered on the first try in 32.8 s → "Done. I changed scene 2. Now 6 scenes, about 69 seconds." → the app opened the storyboard by itself: Version 3, only Scene 02 tagged Changed, the note "Your earlier video (made from an older version) is kept until you make a new one." and the cost note "In your new video, scene 2 gets new narration (about 135 voice characters). The other 5 scenes reuse their recordings. It counts as 1 of your 3 videos today (3 left).", the button "Approve & make new video". Driven by Claude in the founder's incognito browser (the founder logged in; no password typed by the agent). **The founder chose not to approve the new video** (saves about 135 voice characters and a video of the day): that step is F23's video job, already proven with real ElevenLabs on 2026-11-17 21:43 (a narration edit on another project: 1 request, 189 characters, the other 5 scenes reused) and by the F26 e2e (the note's 207 = the 207 charged). To see a real "Approve & make new video" once in manual testing. ✅ Done. |

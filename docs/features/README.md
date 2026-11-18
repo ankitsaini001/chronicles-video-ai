@@ -75,7 +75,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F23 | [Generate the video (narration → timing → render)](F23-generate-video.md) | F22, F00 | ✅ Done |
 | F24 | [Step 3: watch and download the video](F24-review-video-download.md) | F23 | ✅ Done |
 | F25 | [Caption fixes](F25-caption-fixes.md) | F24 | ✅ Done |
-| F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | 🧪 Testing |
+| F26 | [Revision chat on the video](F26-video-revision-chat.md) | F25 | ✅ Done |
 | F27 | [Daily limits](F27-daily-limits.md) | F23 | ⬜ Not started |
 
 ### A5 · Instagram publishing
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F25 — Caption fixes** is ✅ Done (founder OK 2026-11-17: the Captions tab on the review screen; a fix re-renders the video with the same narration, zero voice characters, not counted as a video of the day). Next: **F26 — Revision chat on the video**. Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b, F23, F24 and F25 done (v4 hero style is the only video style).
+**Now:** **F26 — Revision chat on the video** is ✅ Done (founder OK 2026-11-18: "Ask for changes" on the video page; a change makes a new storyboard version with a cost note, and only the changed scenes get new narration). Next: **F27 — Daily limits**. Agreed small tasks first (each with the founder's OK): longer waits between Gemini retries (503 "high demand" on 2026-11-17), and the Next.js security upgrade 16.4.3 → 16.4.6 (verified in a temporary worktree first; never `npm audit fix --force`). Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A3 done; F00, F22, F22b, F23, F24, F25 and F26 done (v4 hero style is the only video style).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.
@@ -112,6 +112,8 @@ Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision
 - **Before F38 (go-live): where videos are rendered online** (Vercel Sandbox, a small render server, …). F23 renders on this computer (founder, 2026-11-15).
 
 ## Follow-ups to re-check in manual testing
+- **A real "Approve & make new video" after a video change (F26, founder 2026-11-18):** the real test stopped before approving (to save voice characters); check once that the new video shows the change and that the voice characters rise by about the number in the cost note.
+- **A real caption fix (F25):** no caption fix was saved in a real run yet (proven by the e2e only); save one once and check the new video (free: no voice characters).
 - **Narration and pictures in sync (founder, 2026-11-16, after the first real F23 video):** "the explanation and the picturization somewhere might not be in sync, or some visualization part is missing." Known part: the test storyboard (2026-11-14) predates the planner's hero picks (F22b), so heroes came from single spoken words (a map pin for "every single direction", a steam picture for "nitrogen and oxygen"). In the manual testing phase, make a new storyboard on the same topic and check scene by scene; fix then if it still shows. Video and frame sheet: `runs/f23-work/real-video/`.
 - **A failed second video hides the kept one (F26 code review, 2026-11-17):** after "Approve & make new video", if the new video fails (`generate_failed`), the video page shows only the failure screen; the older video is still the project's video but can't be played or downloaded from there. Decide in manual testing whether the failure screen should also show the kept video (not built).
 
