@@ -3,6 +3,7 @@
 import type { VoicePresetId } from "@bytereel/db/voices";
 import { ENABLED_LANGUAGES, enabledLanguageOr } from "@bytereel/db/languages";
 import { brainstormIdeaText, cleanIdeaText, fitsBrainstormText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS, ideaProblem } from "@bytereel/db/idea-text";
+import { resetClock } from "@bytereel/db/limit-messages";
 import { useRef, useState, type FormEvent } from "react";
 import { Button, ChoiceChips, cn, type ChoiceOption } from "@/components/ui";
 import type { Usage } from "@/lib/account/me";
@@ -74,13 +75,13 @@ function newIdempotencyKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** " You can create more from 12:00 am IST." (the shared reset-time wording, F27: limit-messages.ts). */
 function resetTimeText(resetsAt: string | undefined, timezone: string): string {
   if (!resetsAt) return "";
   const date = new Date(resetsAt);
   if (Number.isNaN(date.getTime())) return "";
   try {
-    const time = new Intl.DateTimeFormat("en-IN", { timeZone: timezone, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(date);
-    return ` You can create more from ${time}.`;
+    return ` You can create more from ${resetClock(date, timezone, { zoneName: true })}.`;
   } catch {
     return "";
   }

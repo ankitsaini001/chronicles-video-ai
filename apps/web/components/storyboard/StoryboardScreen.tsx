@@ -29,6 +29,10 @@ import { VoiceMenu } from "./VoiceMenu";
 // F26: when the project already has a video and this version isn't approved, the page notes what
 // the new video costs (`newVideoNote`, worked out on the server), the button reads "Approve & make
 // new video", and "Back to video" shows the current (older) video.
+// F27: when a limit would refuse the video right now (no videos left today, not enough voice
+// characters, the app's monthly voice used up), a note says why and when it resets, and Approve /
+// Generate video is greyed out with a short reason next to it (worked out on the server with the
+// same functions D8 uses; D8 still checks everything).
 
 export type StoryboardScreenProps = {
   project: ProjectResource;
@@ -43,6 +47,8 @@ export type StoryboardScreenProps = {
   samplePresets: VoicePresetId[];
   /** F26: what a new video of this version would record (null when there is no video yet or nothing to approve). */
   newVideoNote?: string | null;
+  /** F27: the limit that would refuse approving now (the full sentence, and the short reason by the button), or null. */
+  approveLimit?: { message: string; short: string } | null;
 };
 
 const LANGUAGE_NAMES: Record<VoiceLanguage, { text: string; lang?: string; english?: string }> = {
@@ -91,7 +97,7 @@ function focusMarked(target: string): void {
   (find(target) ?? find("version"))?.focus();
 }
 
-function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, newVideoNote, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
+function Body({ project, version, revisions, failedChange, requestsUsedUp, samplePresets, newVideoNote, approveLimit, announce, problem, setProblem, focusTarget, setFocusTarget }: BodyProps) {
   const router = useRouter();
   const language = project.language as VoiceLanguage;
   const lang = VOICE_TEXT_LANG[language];
@@ -198,8 +204,11 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
   const locked = busy || !canEdit;
   const approved = project.approvedPlanVersionId === version.id;
   const changeRunning = project.activeJob !== null;
-  const canApprove = project.allowedActions.includes("approve_storyboard") && version.valid && !busy && editing === null;
-  const canGenerate = approved && project.allowedActions.includes("generate_video") && version.valid && !busy && editing === null;
+  const limited = Boolean(approveLimit);
+  const canApprove = project.allowedActions.includes("approve_storyboard") && version.valid && !busy && editing === null && !limited;
+  const canGenerate = approved && project.allowedActions.includes("generate_video") && version.valid && !busy && editing === null && !limited;
+  // F27: the button points screen readers to the full reason (the note above the scenes).
+  const limitReason = approveLimit ? <p className="text-xs text-danger">{approveLimit.short}</p> : null;
   // F23: the video job stopped because the storyboard must change (too long/short, unclear wording).
   const needsChange = project.lastError?.code === "NEEDS_INPUT" ? project.lastError.message : null;
   // F23 (founder decision 5): an older video stays the project's video until a new one is made.
@@ -261,7 +270,7 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
         </div>
       )}
 
-      {(needsChange || hasOlderVideo || newVideoNote) && (
+      {(needsChange || hasOlderVideo || newVideoNote || approveLimit) && (
         <div className="mt-4 flex flex-col gap-2">
           {needsChange && (
             <Note tone="problem">
@@ -270,6 +279,11 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
           )}
           {hasOlderVideo && <Note tone="warning">Your earlier video (made from an older version) is kept until you make a new one.</Note>}
           {newVideoNote && <Note tone="warning">{newVideoNote}</Note>}
+          {approveLimit && (
+            <Note tone="problem" id="approve-limit" label="Can't approve now: ">
+              {approveLimit.message}
+            </Note>
+          )}
         </div>
       )}
 
@@ -361,8 +375,9 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
               <p className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-bg px-4 py-2 text-sm font-bold text-success">
                 <span aria-hidden="true">✓</span> Approved · Version {version.versionNumber}
               </p>
+              {project.allowedActions.includes("generate_video") && limitReason}
               {project.allowedActions.includes("generate_video") && (
-                <Button type="button" onClick={() => void approve()} disabled={!canGenerate} className="whitespace-nowrap">
+                <Button type="button" onClick={() => void approve()} disabled={!canGenerate} aria-describedby={limited ? "approve-limit" : undefined} className="whitespace-nowrap">
                   {approving ? "Starting…" : "Generate video"}
                 </Button>
               )}
@@ -377,13 +392,14 @@ function Body({ project, version, revisions, failedChange, requestsUsedUp, sampl
             <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:flex-none">
               {!version.valid && <p className="text-xs text-danger">Fix the scenes marked in red first.</p>}
               {version.valid && changeRunning && <p className="text-xs text-muted">Wait for your change to finish.</p>}
+              {version.valid && !changeRunning && limitReason}
               {/* F26: the video the project already has (an older version) stays one click away. */}
               {hasVideo && (
                 <Button href={`/projects/${project.id}/video`} variant="secondary" className="whitespace-nowrap">
                   Back to video
                 </Button>
               )}
-              <Button type="button" onClick={() => void approve()} disabled={!canApprove} className="whitespace-nowrap">
+              <Button type="button" onClick={() => void approve()} disabled={!canApprove} aria-describedby={limited ? "approve-limit" : undefined} className="whitespace-nowrap">
                 {approving ? "Starting…" : approveLabel(hasVideo)}
               </Button>
             </div>

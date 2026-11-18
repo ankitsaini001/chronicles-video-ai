@@ -3,10 +3,12 @@ import { cn } from "@/components/ui";
 
 // A short note on the storyboard (Stitch "Step 2 Storyboard": the amber warning strip).
 // "warning": something to check (the AI's warnings); "problem": must be fixed before approving.
+// `label`: what a screen reader says first (default "Note: " / "Needs fixing: "; F27's limit note: "Can't approve now: ").
 
-export function Note({ tone, children, className }: { tone: "warning" | "problem"; children: ReactNode; className?: string }) {
+export function Note({ tone, children, className, label, id }: { tone: "warning" | "problem"; children: ReactNode; className?: string; label?: string; id?: string }) {
   return (
     <div
+      id={id}
       className={cn(
         "flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed",
         tone === "warning" ? "border-warning/25 bg-warning-bg text-warning" : "border-danger/40 bg-danger-bg text-text",
@@ -21,7 +23,7 @@ export function Note({ tone, children, className }: { tone: "warning" | "problem
         />
       </svg>
       <span className="min-w-0 break-words">
-        <span className="sr-only">{tone === "warning" ? "Note: " : "Needs fixing: "}</span>
+        <span className="sr-only">{label ?? (tone === "warning" ? "Note: " : "Needs fixing: ")}</span>
         {children}
       </span>
     </div>

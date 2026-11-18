@@ -7,7 +7,7 @@ import { StoryboardScreen } from "@/components/storyboard/StoryboardScreen";
 import { requireUser } from "@/lib/auth/session";
 import { toProjectResourceOf } from "@/lib/plan/api";
 import { loadProjectWithJobs } from "@/lib/plan/jobs";
-import { newVideoCost } from "@/lib/video/narration-cost";
+import { approveLimitFor, newVideoCost } from "@/lib/video/narration-cost";
 import { newVideoNote } from "@/lib/video/new-video";
 import { availableSamples } from "@/lib/voices";
 
@@ -24,6 +24,11 @@ import { availableSamples } from "@/lib/voices";
 // approved, the page works out what the new video would record (lib/video/narration-cost.ts: the
 // same rule D8 checks the voice limits with; database only, no voice call) for the note above the
 // scenes, and the stepper's "3 Video" opens that video.
+// F27: whenever this version can be sent to D8 ("Approve & …" or "Generate video"), the page asks
+// approveLimitFor (the same functions and order as D8, read-only) whether a limit would refuse it
+// now; the screen then says why and greys out the button. Approving a version that already has its
+// video (`reuse`) costs nothing: no cost note, never refused. The "counts as 1 of your 3 videos
+// today" line only when approving starts a new job (`new`) and today still has one left.
 
 export const metadata: Metadata = { title: "Storyboard" };
 
@@ -49,8 +54,11 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
   // Try again (by the revise job's own rule, not the shared retry_job flag).
   const failedChange = failedChangeFor(project, loaded.latestReviseJob, history.items[0]);
   const resource = toProjectResourceOf(loaded);
-  const approvable = project.currentRenderId !== null && resource.allowedActions.includes("approve_storyboard") && version.valid;
+  const startable = version.valid && (resource.allowedActions.includes("approve_storyboard") || resource.allowedActions.includes("generate_video"));
+  const limit = startable ? await approveLimitFor(db, { project, version: current, timezone: user.timezone }) : null;
+  const approvable = project.currentRenderId !== null && resource.allowedActions.includes("approve_storyboard") && version.valid && limit?.path !== "reuse";
   const [cost, videosToday] = approvable ? await Promise.all([newVideoCost(db, project, current.plan), readUsageCount(db, user.id, "videos", user.timezone)]) : [null, 0];
+  const today = limit?.path === "new" && videosToday < USAGE_LIMITS.videosPerDay ? { used: videosToday, limit: USAGE_LIMITS.videosPerDay } : null;
 
   return (
     <div className="mx-auto flex w-full flex-col pb-28">
@@ -67,7 +75,8 @@ export default async function StoryboardPage({ params }: { params: Promise<{ id:
         failedChange={failedChange}
         requestsUsedUp={project.planRequestCount >= USAGE_LIMITS.planRequestsPerProject}
         samplePresets={[...availableSamples()]}
-        newVideoNote={cost ? newVideoNote(cost, { used: videosToday, limit: USAGE_LIMITS.videosPerDay }) : null}
+        newVideoNote={cost ? newVideoNote(cost, today) : null}
+        approveLimit={limit?.refusal ?? null}
       />
     </div>
   );
