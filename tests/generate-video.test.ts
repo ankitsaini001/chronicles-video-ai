@@ -172,17 +172,17 @@ describe("D8 limits, in order: language → videos/day → voice characters (cre
     expect(names()).not.toContain("speechArtifacts.find");
   });
 
-  it("the creator's 3,000 characters a month → 429 'Voice limit reached this month.'", async () => {
+  it("the creator's 3,000 characters a month → 429 with needed vs left and the reset date (F27)", async () => {
     const { db } = base({ user: 2500 });
     const error = await refusal(approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone: "Asia/Kolkata", body, voice, respond: () => ({ status: 202, body: {} }), now: NOW }));
-    expect(error).toMatchObject({ code: "QUOTA_EXCEEDED", message: "Voice limit reached this month." });
+    expect(error).toMatchObject({ code: "QUOTA_EXCEEDED", message: "This video needs about 600 voice characters, but you have 500 left this month. The limit resets on 1 December." });
     expect(error.details).toMatchObject({ quota: "voice_characters_per_month", limit: 3000, used: 2500, needed: 600 });
   });
 
-  it("the app-wide 9,000 a month → 503 SPEND_CEILING with the same plain message", async () => {
+  it("the app-wide 9,000 a month → 503 SPEND_CEILING: paused for everyone (F27)", async () => {
     const { db } = base({ app: 8500 });
     const error = await refusal(approveAndGenerate(db, { ownerId: OWNER.toHexString(), projectId: PROJECT.toHexString(), timezone: "Asia/Kolkata", body, voice, respond: () => ({ status: 202, body: {} }), now: NOW }));
-    expect(error).toMatchObject({ code: "SPEND_CEILING", message: "Voice limit reached this month." });
+    expect(error).toMatchObject({ code: "SPEND_CEILING", message: "Video making is paused for everyone until 1 December (the app's monthly voice limit is used up). Your videos and downloads still work." });
   });
 
   it("recordings the owner already has are free: the same counts pass when most scenes are recorded", async () => {
@@ -300,9 +300,9 @@ describe("the voice limits (pure)", () => {
     expect(voiceLimitProblem({ needed: 1001, userUsed: 0, appUsed: 8000 })).toBe("app");
   });
 
-  it("the refusals say 'Voice limit reached this month.' with when it resets", () => {
+  it("the refusals say why and when they reset (F27); the job's short fallback stays", () => {
     const user = voiceLimitError("user", { used: 2900, needed: 300, timezone: "Asia/Kolkata", now: NOW });
-    expect(user).toMatchObject({ code: "QUOTA_EXCEEDED", message: "Voice limit reached this month.", details: { quota: "voice_characters_per_month", resetsAt: "2026-11-30T18:30:00.000Z" } });
+    expect(user).toMatchObject({ code: "QUOTA_EXCEEDED", message: "This video needs about 300 voice characters, but you have 100 left this month. The limit resets on 1 December.", details: { quota: "voice_characters_per_month", resetsAt: "2026-11-30T18:30:00.000Z" } });
     expect(voiceLimitError("app", { used: 9000, needed: 1, timezone: "Asia/Kolkata", now: NOW })).toMatchObject({ code: "SPEND_CEILING", details: { resetsAt: "2026-12-01T00:00:00.000Z" } });
     expect(GENERATE_ERRORS.QUOTA_EXCEEDED.message).toBe("Voice limit reached this month.");
     expect(GENERATE_ERRORS.SPEND_CEILING.message).toBe("Voice limit reached this month.");
@@ -646,7 +646,7 @@ type Events = string[];
  * voice counting (planVoiceReservation / planVoiceSend, in the creator's month), and a job's end
  * releasing its pending claims. One job; run it again with a higher attempt for "Try again".
  */
-function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; reserve?: "ok" | "quota" | "ceiling" | "cancelled"; ready?: Map<string, SpeechArtifactDocument>; busyClaims?: number } = {}) {
+function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; reserve?: "ok" | "quota" | "ceiling" | "cancelled"; send?: "quota" | "ceiling"; ready?: Map<string, SpeechArtifactDocument>; busyClaims?: number } = {}) {
   const job = generateJob({ state: "running" });
   const project = projectDoc({ state: "generating", activeJobId: job._id, approvedPlanVersionId: V1 });
   const speech = options.ready ?? new Map<string, SpeechArtifactDocument>();
@@ -680,6 +680,7 @@ function fakeStore(events: Events, options: { cancelAt?: "render" | "progress"; 
     },
     reserveVoiceSend: async (input) => {
       if (cancelRequested) return "cancelled"; // the real check: nothing is sent after Cancel
+      if (options.send) return options.send; // F27: a request refused by a monthly limit (not sent)
       const planned = planVoiceSend(state.voice, input.item, period());
       state.sends.push(input.item.cacheKey);
       state.counted += planned.count;
@@ -916,10 +917,28 @@ describe("the worker (start → reserve-voice → speech per scene → render)",
       for (const [reserve, code] of [["quota", "QUOTA_EXCEEDED"], ["ceiling", "SPEND_CEILING"]] as const) {
         const events: Events = [];
         const provider = { calls: 0 };
-        const outcome = await run(fakeStore(events, { reserve }), { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root });
+        const bundle = fakeStore(events, { reserve });
+        const outcome = await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root });
         expect(outcome).toBe("failed");
         expect(provider.calls).toBe(0);
         expect(events.at(-1)).toBe(`end:failed:${code}`);
+        // F27: the characters the refused reservation asked for go with the failure (its message names them).
+        expect(bundle.state.ends.at(-1)?.needed).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  it("F27: a request refused by a monthly limit while recording is not sent; the failure carries its characters", async () => {
+    await withTempDir(async (root) => {
+      for (const [send, code] of [["quota", "QUOTA_EXCEEDED"], ["ceiling", "SPEND_CEILING"]] as const) {
+        const events: Events = [];
+        const provider = { calls: 0 };
+        const bundle = fakeStore(events, { send });
+        const outcome = await run(bundle, { files: sameFiles(fakeFiles()), voice: voiceWith(provider), render: fakeRenderer(events, readyResult) as never, root });
+        expect(outcome).toBe("failed");
+        expect(provider.calls).toBe(0);
+        expect(bundle.state.ends.at(-1)).toMatchObject({ outcome: "failed", code, stage: "speech" });
+        expect(bundle.state.ends.at(-1)?.needed).toBeGreaterThan(0);
       }
     });
   });

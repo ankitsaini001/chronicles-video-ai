@@ -51,6 +51,15 @@ export async function readUsageCount(db: Db, ownerId: string, kind: UsageKind, t
 export type UsageAddResult = { ok: true; used: number } | { ok: false; used: number; limit: number; resetsAt: Date };
 
 /**
+ * THE limit rule (F27): adding `amount` to `used` goes over `limit`. Reaching the limit exactly is
+ * allowed. addUsageWithinLimit counts with it; the storyboard's pre-check (approveLimitCheck) reads
+ * with it, so the warning before Approve and the refusal at D8 can't disagree.
+ */
+export function wouldExceed(used: number, amount: number, limit: number): boolean {
+  return used + amount > limit;
+}
+
+/**
  * Add `amount` to the counter, only if the total stays within `limit`. MUST run inside the
  * transaction of the action it counts (DATABASE.md §7.2 #1): when the limit is reached, the caller
  * throws, the transaction rolls back, and the +1 never happened. Two requests at the same moment
@@ -74,6 +83,6 @@ export async function addUsageWithinLimit(
       { upsert: true, returnDocument: "after", session },
     );
   const used = doc?.count ?? amount;
-  if (used > input.limit) return { ok: false, used: used - amount, limit: input.limit, resetsAt };
+  if (wouldExceed(used - amount, amount, input.limit)) return { ok: false, used: used - amount, limit: input.limit, resetsAt };
   return { ok: true, used };
 }

@@ -8,7 +8,8 @@ import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, type Pr
 import { RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, latestReadyRenderOf, type RenderDocument } from "./renders";
 import { paidSpeechKeys, releaseSpeechClaims } from "./speech-artifacts";
 import { APPROVABLE_STATES, findOrCreateApproval, STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalBody, type StoryboardApprovalDocument } from "./storyboard-approvals";
-import { addUsageWithinLimit, APP_USAGE_OWNER_ID, APP_USAGE_TIMEZONE, readUsageCount, usageCounterPeriod } from "./usage-counters";
+import { videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage } from "./limit-messages";
+import { addUsageWithinLimit, APP_USAGE_OWNER_ID, APP_USAGE_TIMEZONE, readUsageCount, usageCounterPeriod, wouldExceed } from "./usage-counters";
 import { APP_VOICE_CHARACTERS_PER_MONTH, DEFAULT_TIMEZONE, USAGE_LIMITS } from "./usage";
 
 // The `generate` job: making the video (F23; docs/API.md D8, E2, E3, §8; DATABASE.md §4.9, §7.2).
@@ -16,6 +17,9 @@ import { APP_VOICE_CHARACTERS_PER_MONTH, DEFAULT_TIMEZONE, USAGE_LIMITS } from "
 //   transaction, after the limits in this order: language → videos/day → voice characters (the
 //   creator's 3,000 a month, then the app-wide 9,000 a month). Only the narration that is not
 //   recorded yet counts: recordings this owner already has are free.
+// - F27: the refusals say why and when the limit resets, in the creator's timezone
+//   (limit-messages.ts); the storyboard checks the same limits read-only before Approve
+//   (approveLimitCheck), and a job stopped by a voice limit fails with the same words.
 // - The Inngest worker (apps/web/lib/video/run-generate-job.ts) calls the start/load/progress/
 //   finish functions here. Every write is conditional on "this job is still running this attempt".
 // - The worker reserves the voice characters of ALL the narration it still has to record in one
@@ -56,7 +60,8 @@ export const GENERATE_ERRORS: Record<GenerateErrorCode, { message: string; retry
   PROVIDER_BUSY: { message: "Voice service busy. Please try again in a few minutes.", retryable: true },
   PROVIDER_UNAVAILABLE: { message: "Voice service unavailable right now. We've been notified.", retryable: false },
   RENDER_FAILED: { message: "Rendering failed. Your narration is saved, so retrying is quick.", retryable: true },
-  // The monthly limits: Try again works again next month (E2 checks the limit first).
+  // The monthly limits: Try again works again next month (E2 checks the limit first). F27: a job
+  // that hits one fails with the full sentence (limitFailureMessage); this short line is the fallback.
   QUOTA_EXCEEDED: { message: GENERATE_MESSAGES.VOICE_LIMIT, retryable: true },
   SPEND_CEILING: { message: GENERATE_MESSAGES.VOICE_LIMIT, retryable: true },
   LANGUAGE_UNAVAILABLE: { message: languageUnavailableMessage(), retryable: false },
@@ -192,20 +197,39 @@ export function voiceLimitProblem(input: { needed: number; userUsed: number; app
   return null;
 }
 
-/** The refusal for a voice limit (API.md §10.1, §10.2): "Voice limit reached this month." */
+/**
+ * The refusal for a voice limit (API.md §10.1, §10.2). F27: the message is the full sentence for the
+ * creator, with the reset date in `timezone` (the creator's): "This video needs about 1,050 voice
+ * characters, but you have 794 left this month. The limit resets on 1 December." / "Video making is
+ * paused for everyone until 1 December (…)". The numbers stay in `details`.
+ */
 export function voiceLimitError(which: "user" | "app", input: { used: number; needed: number; timezone: string; now: Date }): ProjectActionError {
   if (which === "user") {
     const { resetsAt } = usageCounterPeriod("voiceChars", input.timezone, input.now);
-    return new ProjectActionError("QUOTA_EXCEEDED", GENERATE_MESSAGES.VOICE_LIMIT, {
+    const limit = USAGE_LIMITS.voiceCharactersPerMonth;
+    return new ProjectActionError("QUOTA_EXCEEDED", voiceQuotaMessage({ needed: input.needed, used: input.used, limit, resetsAt, timezone: input.timezone }), {
       quota: "voice_characters_per_month",
-      limit: USAGE_LIMITS.voiceCharactersPerMonth,
+      limit,
       used: input.used,
       needed: input.needed,
       resetsAt: resetsAt.toISOString(),
     });
   }
   const { resetsAt } = usageCounterPeriod("appVoiceChars", APP_USAGE_TIMEZONE, input.now);
-  return new ProjectActionError("SPEND_CEILING", GENERATE_MESSAGES.VOICE_LIMIT, { ceiling: "voice_characters_per_month", resetsAt: resetsAt.toISOString() });
+  return new ProjectActionError("SPEND_CEILING", voiceCeilingMessage({ resetsAt, timezone: input.timezone }), { ceiling: "voice_characters_per_month", resetsAt: resetsAt.toISOString() });
+}
+
+/**
+ * F27: the refusal for videos per day (API.md §10.1): "You've made 3 videos today, the most for one
+ * day. You can make more after 12:00 am (midnight) your time." The numbers stay in `details`.
+ */
+export function videosPerDayError(input: { used: number; limit: number; resetsAt: Date; timezone: string }): ProjectActionError {
+  return new ProjectActionError("QUOTA_EXCEEDED", videosPerDayMessage({ limit: input.limit, resetsAt: input.resetsAt, timezone: input.timezone }), {
+    quota: "videos_per_day",
+    limit: input.limit,
+    used: input.used,
+    resetsAt: input.resetsAt.toISOString(),
+  });
 }
 
 /** The months voice characters are counted in: the creator's (their timezone) and the app's (UTC). */
@@ -249,15 +273,63 @@ export function planVoiceSend(voice: JobDocument["voice"], item: VoiceScene, per
   return { count: item.characters, next: { cacheKeys: credits, characters: (voice?.characters ?? 0) + item.characters, sentKeys, period } };
 }
 
-/** Check (without counting) that the narration still to record fits both monthly limits. Throws the refusal. */
-async function assertVoiceFits(db: Db, session: ClientSession, input: { ownerId: ObjectId; timezone: string; scenes: VoiceScene[]; job: JobDocument | null; now: Date }): Promise<void> {
+type VoiceFitInput = { ownerId: ObjectId; timezone: string; scenes: readonly VoiceScene[]; job: JobDocument | null; now: Date };
+
+/**
+ * Check (without counting) that the narration still to record fits both monthly limits: the refusal,
+ * or null. Read-only. D8/E2 call it in their transaction (assertVoiceFits); the storyboard's pre-check
+ * (approveLimitCheck, F27) without one, so both use the very same rule.
+ */
+export async function voiceRefusal(db: Db, input: VoiceFitInput, session?: ClientSession): Promise<ProjectActionError | null> {
   const reserved = voiceCredits(input.job?.voice, voicePeriodOf(input.timezone, input.now));
   const needed = await voiceStillNeeded(db, { ownerId: input.ownerId, scenes: input.scenes, reserved }, session);
-  if (needed.characters === 0) return;
+  if (needed.characters === 0) return null;
   const userUsed = await readUsageCount(db, input.ownerId.toHexString(), "voiceChars", input.timezone, input.now, session);
   const appUsed = await readUsageCount(db, APP_USAGE_OWNER_ID, "appVoiceChars", APP_USAGE_TIMEZONE, input.now, session);
   const problem = voiceLimitProblem({ needed: needed.characters, userUsed, appUsed });
-  if (problem) throw voiceLimitError(problem, { used: problem === "user" ? userUsed : appUsed, needed: needed.characters, timezone: input.timezone, now: input.now });
+  return problem ? voiceLimitError(problem, { used: problem === "user" ? userUsed : appUsed, needed: needed.characters, timezone: input.timezone, now: input.now }) : null;
+}
+
+/** voiceRefusal inside a transaction: throws the refusal. */
+async function assertVoiceFits(db: Db, session: ClientSession, input: VoiceFitInput): Promise<void> {
+  const refusal = await voiceRefusal(db, input, session);
+  if (refusal) throw refusal;
+}
+
+// ---------- F27: the limits, checked before Approve ----------
+
+/** What approving this exact version would do (D8): show its existing video, queue its job again, or start a new one. */
+export type ApprovePath = "reuse" | "requeue" | "new";
+
+/**
+ * F27 (decision 2): would D8 refuse this exact version because of a LIMIT right now? Read-only
+ * (nothing counted, no provider call), with the SAME functions and order as D8:
+ * - its `gen:` job succeeded and its video is ready → `reuse`: approving costs nothing, never refused;
+ * - it has a job (failed, cancelled: D8 queues the same job again) → `requeue`: no videos/day count;
+ * - no job yet → `new`: videos/day first (wouldExceed, the rule addUsageWithinLimit counts with);
+ * then, for both queue paths, the voice characters still needed (voiceRefusal, as assertVoiceFits).
+ * `scenes` null (the voice isn't set up here): the voice part is skipped (D8 then answers 500).
+ * D8 still checks everything in its transaction; this only warns earlier.
+ */
+export async function approveLimitCheck(
+  db: Db,
+  input: { ownerId: ObjectId; projectId: ObjectId; planVersionId: ObjectId; timezone: string; scenes: readonly VoiceScene[] | null; now?: Date },
+): Promise<{ path: ApprovePath; refusal: ProjectActionError | null }> {
+  const now = input.now ?? new Date();
+  const existing = await db.collection<JobDocument>(JOBS_COLLECTION).findOne({ idempotencyKey: generateJobKey(input.planVersionId), ownerId: input.ownerId });
+  if (existing?.state === "succeeded" && (await latestReadyRenderOf(db, { ownerId: input.ownerId, projectId: input.projectId, planVersionId: input.planVersionId }))) {
+    return { path: "reuse", refusal: null };
+  }
+  const path: ApprovePath = existing ? "requeue" : "new";
+  if (path === "new") {
+    const used = await readUsageCount(db, input.ownerId.toHexString(), "videos", input.timezone, now);
+    if (wouldExceed(used, 1, USAGE_LIMITS.videosPerDay)) {
+      const { resetsAt } = usageCounterPeriod("videos", input.timezone, now);
+      return { path, refusal: videosPerDayError({ used, limit: USAGE_LIMITS.videosPerDay, resetsAt, timezone: input.timezone }) };
+    }
+  }
+  if (!input.scenes) return { path, refusal: null };
+  return { path, refusal: await voiceRefusal(db, { ownerId: input.ownerId, timezone: input.timezone, scenes: input.scenes, job: existing, now }) };
 }
 
 // ---------- D8: approve & generate ----------
@@ -364,14 +436,7 @@ export async function approveAndGenerate(
       // Limits, in order: (language: above) → videos/day (new job only) → voice characters.
       if (!existing) {
         const counted = await addUsageWithinLimit(db, session, { ownerId: input.ownerId, kind: "videos", timezone: input.timezone, limit: USAGE_LIMITS.videosPerDay, now });
-        if (!counted.ok) {
-          throw new ProjectActionError("QUOTA_EXCEEDED", `You've reached today's limit of ${counted.limit} videos. Try again tomorrow.`, {
-            quota: "videos_per_day",
-            limit: counted.limit,
-            used: counted.used,
-            resetsAt: counted.resetsAt.toISOString(),
-          });
-        }
+        if (!counted.ok) throw videosPerDayError({ used: counted.used, limit: counted.limit, resetsAt: counted.resetsAt, timezone: input.timezone });
       }
       await assertVoiceFits(db, session, { ownerId: project.ownerId, timezone: input.timezone, scenes: input.voice(version.plan), job: existing, now });
 
@@ -557,9 +622,23 @@ export async function loadGenerateAttempt(db: Db, input: { jobId: string; attemp
 }
 
 /** The creator's timezone (their monthly voice limit is counted in it). */
-export async function ownerTimezone(db: Db, ownerId: ObjectId): Promise<string> {
-  const user = await db.collection<{ _id: ObjectId; timezone?: string }>("user").findOne({ _id: ownerId }, { projection: { timezone: 1 } });
+export async function ownerTimezone(db: Db, ownerId: ObjectId, session?: ClientSession): Promise<string> {
+  const user = await db.collection<{ _id: ObjectId; timezone?: string }>("user").findOne({ _id: ownerId }, { projection: { timezone: 1 }, ...(session ? { session } : {}) });
   return typeof user?.timezone === "string" && user.timezone ? user.timezone : DEFAULT_TIMEZONE;
+}
+
+/**
+ * F27 (decision 3): a video job stopped by a monthly voice limit fails with the SAME sentence D8/E2
+ * would answer (voiceLimitError), in the creator's timezone. `needed`: the characters the refused
+ * count asked for. Without it (e.g. ElevenLabs refused on its own: SPEND_CEILING from the provider)
+ * the app's sentence still works; the creator's falls back to "Voice limit reached this month.".
+ */
+async function limitFailureMessage(db: Db, session: ClientSession, input: { ownerId: ObjectId; code: "QUOTA_EXCEEDED" | "SPEND_CEILING"; needed?: number; now: Date }): Promise<string> {
+  const timezone = await ownerTimezone(db, input.ownerId, session);
+  if (input.code === "SPEND_CEILING") return voiceLimitError("app", { used: 0, needed: input.needed ?? 0, timezone, now: input.now }).message;
+  if (input.needed === undefined) return GENERATE_ERRORS.QUOTA_EXCEEDED.message;
+  const used = await readUsageCount(db, input.ownerId.toHexString(), "voiceChars", timezone, input.now, session);
+  return voiceLimitError("user", { used, needed: input.needed, timezone, now: input.now }).message;
 }
 
 class VoiceLimitReached extends Error {
@@ -797,6 +876,8 @@ export async function completeGenerateJob(db: Db, input: { jobId: ObjectId; atte
  * `staleBefore` / queued since `queuedBefore`). False = nothing changed.
  * `detail` is shown in the job's stage error (E1/C6): ONLY a fixed plain line written by our code,
  * never a provider's text, a stack trace or a link (those go to the server log).
+ * F27: a QUOTA_EXCEEDED / SPEND_CEILING failure says why and when it resets (limitFailureMessage;
+ * `needed` = the characters the refused count asked for).
  */
 export async function endGenerateJob(
   db: Db,
@@ -807,6 +888,7 @@ export async function endGenerateJob(
     code?: GenerateErrorCode;
     stage?: GenerateStage;
     detail?: string;
+    needed?: number;
     needsInput?: JobNeedsInput;
     staleBefore?: Date;
     queuedBefore?: Date;
@@ -837,7 +919,11 @@ export async function endGenerateJob(
       let projectSet: Partial<ProjectDocument>;
       if (input.outcome === "failed") {
         const code = input.code ?? "INTERNAL";
-        const { message, retryable } = GENERATE_ERRORS[code];
+        const { retryable } = GENERATE_ERRORS[code];
+        const message =
+          code === "QUOTA_EXCEEDED" || code === "SPEND_CEILING"
+            ? await limitFailureMessage(db, session, { ownerId: job.ownerId, code, ...(input.needed !== undefined ? { needed: input.needed } : {}), now })
+            : GENERATE_ERRORS[code].message;
         const stageError = { code, message: (input.detail ?? message).slice(0, 300) };
         set = {
           state: "failed",

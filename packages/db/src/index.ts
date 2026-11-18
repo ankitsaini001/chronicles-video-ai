@@ -57,6 +57,7 @@ export {
   readUsageCount,
   USAGE_COUNTERS_COLLECTION,
   usageCounterPeriod,
+  wouldExceed,
   type UsageAddResult,
   type UsageCounterDocument,
   type UsageKind,
@@ -275,8 +276,13 @@ export {
   type SaveCaptionFixesResult,
 } from "./caption-fixes";
 export { checkStuckJob, checkStuckPlanJob, GENERATE_CANCEL_GRACE_MS, GENERATE_IDLE_LIMIT_MS, isGenerateJobStuck, type StuckCheck } from "./stuck-jobs";
+export { limitShortReason, resetClock, resetDate, videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage } from "./limit-messages";
 export {
   approveAndGenerate,
+  approveLimitCheck,
+  videosPerDayError,
+  voiceRefusal,
+  type ApprovePath,
   beginRender,
   canRetryGenerateJob,
   cancelGenerateJob,
