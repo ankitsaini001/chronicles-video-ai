@@ -143,9 +143,10 @@ describe("request ids", () => {
 describe("B1 getMe", () => {
   const now = new Date("2026-11-13T10:00:00.000Z");
   const none = async () => 0;
+  const noInstagram = async () => null;
 
   it("matches the API.md Me shape with zero usage and documented limits", async () => {
-    expect(await getMe(user, now, none)).toEqual({
+    expect(await getMe(user, now, none, noInstagram)).toEqual({
       id: user.id,
       name: "Ananya Iyer",
       email: "ananya.iyer@example.in",
@@ -167,14 +168,14 @@ describe("B1 getMe", () => {
 
   it("never carries login-protection fields, even if the input object had them", async () => {
     const leaky = { ...user, failedLoginCount: 4, lockedUntil: new Date(), lastLoginAt: new Date(), status: "active" } as SessionUser;
-    const me = await getMe(leaky, now, none);
+    const me = await getMe(leaky, now, none, noInstagram);
     const json = JSON.stringify(me);
     for (const field of ["failedLoginCount", "lockedUntil", "lastLoginAt"]) expect(json).not.toContain(field);
     expect(Object.keys(me)).not.toContain("status");
   });
 
   it("the shell pill and B1 use the same numbers", async () => {
-    const me = await getMe(user, now, none);
+    const me = await getMe(user, now, none, noInstagram);
     expect((await getUsage(user, now, none)).videosToday).toEqual(me.usage.videosToday);
   });
 
@@ -183,14 +184,14 @@ describe("B1 getMe", () => {
     const me = await getMe(user, now, async (u, at, kind) => {
       seen.push({ id: u.id, timezone: u.timezone, now: at, kind });
       return kind === "projects" ? 2 : 0;
-    });
+    }, noInstagram);
     expect(me.usage.projectsToday).toEqual({ used: 2, limit: 5, resetsAt: "2026-11-13T18:30:00.000Z" });
     expect(seen).toContainEqual({ id: user.id, timezone: "Asia/Kolkata", now, kind: "projects" });
   });
 
   it("videos today and voice characters this month are the real counts (F23: the header pill no longer stays at 0)", async () => {
     const counts: Record<string, number> = { videos: 1, projects: 2, voiceChars: 965 };
-    const me = await getMe(user, now, async (_u, _at, kind) => counts[kind] ?? 0);
+    const me = await getMe(user, now, async (_u, _at, kind) => counts[kind] ?? 0, noInstagram);
     expect(me.usage.videosToday).toEqual({ used: 1, limit: 3, resetsAt: "2026-11-13T18:30:00.000Z" });
     expect(me.usage.voiceCharactersThisMonth).toEqual({ used: 965, limit: 3000, resetsAt: "2026-11-30T18:30:00.000Z" });
   });

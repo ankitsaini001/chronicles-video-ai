@@ -1,0 +1,77 @@
+import { createHash, randomBytes } from "node:crypto";
+import { authorizeUrlFor, InstagramApiError, type InstagramApi, type InstagramProfile, type LongLivedToken, type ShortLivedToken } from "./meta-client";
+
+// A stand-in for Instagram, ONLY for automated tests and the local e2e check (E2E_FAKE_INSTAGRAM=1,
+// switched on by provider.ts on a local test server only): ZERO calls to Meta. "Instagram's login
+// page" is our own /api/v1/instagram/e2e-authorize page, and the "code" it hands back says what kind
+// of account to pretend:
+//   e2e.<kind>.<account>   kind: creator (Media_Creator) | business (Business) | personal | broken
+//                          (the code exchange fails) ; account: 1–24 of a-z 0-9 _ (the same account
+//                          name gives the same Instagram id, so two test users can try ONE account)
+// The tokens it makes start with "e2e-" and are never valid anywhere.
+
+export const FAKE_AUTHORIZE_PATH = "/api/v1/instagram/e2e-authorize";
+export const FAKE_KINDS = ["creator", "business", "personal", "broken"] as const;
+export type FakeKind = (typeof FAKE_KINDS)[number];
+
+const CODE = /^e2e\.(creator|business|personal|broken)\.([a-z0-9_]{1,24})$/;
+const TOKEN = /^e2e-(?:short|long)\.(creator|business|personal|broken)\.([a-z0-9_]{1,24})(?:\.[A-Za-z0-9_-]+)?$/;
+
+export function fakeCode(kind: FakeKind, account: string): string {
+  return `e2e.${kind}.${account}`;
+}
+
+/** The pretend Instagram id of an account name (17841 + 12 digits, like real professional ids). */
+export function fakeIgUserId(account: string): string {
+  const digits = BigInt(`0x${createHash("sha256").update(account).digest("hex").slice(0, 15)}`).toString().padStart(12, "0").slice(-12);
+  return `17841${digits}`;
+}
+
+const ACCOUNT_TYPE: Record<FakeKind, string> = { creator: "Media_Creator", business: "Business", personal: "Personal", broken: "Business" };
+
+export class FakeInstagramApi implements InstagramApi {
+  constructor(private readonly appOrigin: string) {}
+
+  authorizeUrl(state: string): string {
+    return authorizeUrlFor(`${this.appOrigin}${FAKE_AUTHORIZE_PATH}`, { appId: "1000000000000001", redirectUri: `${this.appOrigin}/api/v1/instagram/callback` }, state);
+  }
+
+  async exchangeCode(code: string): Promise<ShortLivedToken> {
+    const match = CODE.exec(code);
+    if (!match || match[1] === "broken") throw new InstagramApiError("code_exchange", "rejected", 400);
+    return { accessToken: `e2e-short.${match[1]}.${match[2]}`, userId: fakeIgUserId(match[2]!), permissions: ["instagram_business_basic", "instagram_business_content_publish"] };
+  }
+
+  async longLivedToken(shortLivedToken: string): Promise<LongLivedToken> {
+    const match = TOKEN.exec(shortLivedToken);
+    if (!match) throw new InstagramApiError("long_lived_token", "rejected", 400);
+    return { accessToken: `e2e-long.${match[1]}.${match[2]}.${randomBytes(6).toString("base64url")}`, expiresInSeconds: 60 * 24 * 60 * 60 };
+  }
+
+  async profile(accessToken: string): Promise<InstagramProfile> {
+    const match = TOKEN.exec(accessToken);
+    if (!match) throw new InstagramApiError("profile", "rejected", 400);
+    const kind = match[1] as FakeKind;
+    const account = match[2]!;
+    return { userId: fakeIgUserId(account), username: `e2e_${account}`, accountType: ACCOUNT_TYPE[kind], profilePictureUrl: null };
+  }
+}
+
+/** The stand-in "Instagram login page": choose what kind of account to pretend, or cancel. */
+export function fakeAuthorizePage(callbackUrl: string, state: string): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const link = (params: Record<string, string>) => esc(`${callbackUrl}?${new URLSearchParams({ ...params, state }).toString()}`);
+  const kinds = FAKE_KINDS.map((kind) => `<li><a data-kind="${kind}" href="${link({ code: fakeCode(kind, "tester") })}">Log in as a ${kind} account (e2e_tester)</a></li>`).join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Instagram stand-in</title></head>
+<body style="font-family:system-ui;background:#111;color:#eee;padding:24px;max-width:560px;margin:auto">
+<h1>Instagram stand-in (tests only)</h1>
+<p>This is NOT Instagram. It only exists on a local test server (E2E_FAKE_INSTAGRAM=1).</p>
+<form method="get" action="${esc(callbackUrl)}"><input type="hidden" name="state" value="${esc(state)}">
+<label>Kind <select name="kind" id="kind">${FAKE_KINDS.map((k) => `<option>${k}</option>`).join("")}</select></label>
+<label>Account <input id="account" value="tester" pattern="[a-z0-9_]{1,24}"></label>
+<input type="hidden" name="code" id="code">
+<button type="submit" onclick="document.getElementById('code').value='e2e.'+document.getElementById('kind').value+'.'+document.getElementById('account').value;document.getElementById('kind').disabled=true">Allow</button></form>
+<ul>${kinds}</ul>
+<p><a data-kind="cancel" href="${link({ error: "access_denied", error_reason: "user_denied", error_description: "The user denied your request." })}">Cancel</a></p>
+</body></html>`;
+}

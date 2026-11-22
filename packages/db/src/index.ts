@@ -403,3 +403,31 @@ export {
   type NarrationEditBody,
   type RestoreBody,
 } from "./storyboard-edits";
+export {
+  disconnectInstagram,
+  eligibleAccountType,
+  getInstagramConnection,
+  INSTAGRAM_ACCOUNT_TYPES,
+  INSTAGRAM_CONNECTION_SCHEMA_VERSION,
+  INSTAGRAM_CONNECTIONS_COLLECTION,
+  INSTAGRAM_SCOPES,
+  InstagramAccountInUseError,
+  saveInstagramConnection,
+  toInstagramConnectionResource,
+  type InstagramAccountType,
+  type InstagramConnectionDocument,
+  type InstagramConnectionResource,
+  type InstagramConnectionStatus,
+  type InstagramConnectionToSave,
+} from "./instagram-connections";
+export {
+  decryptToken,
+  encryptToken,
+  readTokenKeys,
+  TOKEN_ACTIVE_VERSION_ENV,
+  TOKEN_KEYS_ENV,
+  TokenDecryptError,
+  type EncryptedToken,
+  type TokenKeys,
+  type TokenKeysResult,
+} from "./token-crypto";

@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20" | "F21" | "F23";
+  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20" | "F21" | "F23" | "F28";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -56,6 +56,18 @@ export const INDEXES: readonly IndexDefinition[] = [
   { collection: "speechArtifacts", name: "ownerId_cacheKey_unique", keys: { ownerId: 1, cacheKey: 1 }, options: { unique: true }, feature: "F23", why: "One recording per exact setup per owner (the speech lock; enables reuse)" },
   { collection: "renders", name: "projectId_renderNumber_unique", keys: { projectId: 1, renderNumber: 1 }, options: { unique: true }, feature: "F23", why: "No duplicate video numbers in a project" },
   { collection: "renders", name: "ownerId_projectId", keys: { ownerId: 1, projectId: 1 }, options: {}, feature: "F23", why: "Owner-scoped list of a project's videos" },
+  // F28. Both unique indexes are part of the rule "one Instagram account per user, both ways"
+  // (PRD #24d): apply them before the first real connect.
+  { collection: "instagramConnections", name: "ownerId_unique", keys: { ownerId: 1 }, options: { unique: true }, feature: "F28", why: "One Instagram connection per user" },
+  {
+    collection: "instagramConnections",
+    name: "igUserId_active_unique",
+    keys: { igUserId: 1 },
+    options: { unique: true, partialFilterExpression: { status: "active" } },
+    feature: "F28",
+    why: "An Instagram account is actively connected to one user only (also catches two users finishing at once)",
+  },
+  { collection: "instagramConnections", name: "status_tokenExpiresAt", keys: { status: 1, tokenExpiresAt: 1 }, options: {}, feature: "F28", why: "Find tokens about to expire (daily refresh, F32)" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */

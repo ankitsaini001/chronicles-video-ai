@@ -52,6 +52,10 @@ export const API_RATE_LIMITS = {
   captionFixesPerUser: { name: "caption-fixes", limit: 10, windowSeconds: 60 * 60 },
   /** E2 retry (later E3 cancel): 30 per hour, one shared counter (F15). */
   jobActionsPerUser: { name: "job-actions", limit: 30, windowSeconds: 60 * 60 },
+  /** G2 start connecting Instagram: 10 per hour (F28). */
+  instagramConnectPerUser: { name: "instagram-connect", limit: 10, windowSeconds: 60 * 60 },
+  /** G4 disconnect Instagram: 30 per hour (F28; API.md §10.3 "other writes"). */
+  instagramDisconnectPerUser: { name: "instagram-disconnect", limit: 30, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {
