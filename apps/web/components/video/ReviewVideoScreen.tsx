@@ -13,8 +13,8 @@ import { VideoVersionMenu } from "./VideoVersionMenu";
 
 // ③ Video when it is ready (F24; Stitch "ByteReel — Step 3 Review video"): the real MP4 in the phone
 // frame (HTML5 player, the thumbnail as its poster), and on the right the title, "Video ready", the
-// "Video version N ▾" picker (F1), Download MP4, Back to My videos and Edit storyboard. Publishing
-// comes later (F28+), so it shows "coming soon". Below it, the Captions tab (F25, CaptionsPanel): fix
+// "Video version N ▾" picker (F1), Download MP4, Publish → (F28: opens ④ Publish, only while the
+// video is ready and up to date), Back to My videos and Edit storyboard. Below it, the Captions tab (F25, CaptionsPanel): fix
 // caption text without changing the narration; clicking a phrase's time plays the latest version from
 // there.
 // F26: next to Captions, the "Ask for changes" tab (the F18 panel with `stage: video`): a change
@@ -55,6 +55,8 @@ export type ReviewVideoScreenProps = {
   storyboardChanged: boolean;
   /** F26: why caption fixes can't be made now (a change runs, or the storyboard changed). */
   captionsNote: string | null;
+  /** F28: "Publish →" to ④ Publish (video_ready, not archived, the storyboard unchanged). */
+  canPublish: boolean;
 };
 
 /** F26: what the "Ask for changes" tab needs (the props of ChangesPanel on the video page). */
@@ -233,9 +235,11 @@ export function ReviewVideoScreen(props: ReviewVideoScreenProps) {
             <span aria-hidden="true">⬇</span>
             {downloading ? "Getting your file…" : "Download MP4"}
           </a>
-          <Button type="button" variant="secondary" disabled>
-            Publish — coming soon
-          </Button>
+          {props.canPublish && (
+            <Button href={`/projects/${props.projectId}/publish`} variant="secondary" data-testid="publish-link">
+              Publish →
+            </Button>
+          )}
         </div>
 
         <div className="mt-8 flex flex-wrap items-center gap-5 border-t border-line pt-6">

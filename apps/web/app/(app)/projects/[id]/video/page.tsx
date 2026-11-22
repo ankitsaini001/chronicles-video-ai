@@ -43,6 +43,7 @@ import { captionFailureOf, storyboardChangedSince } from "@/lib/video/review-sta
 // page still shows that video ("Back to video" from the storyboard), read-only, with a note to
 // approve the new storyboard there. "Changed" means the video was made from another storyboard
 // version than the current one (lib/video/review-state.ts), not just the state.
+// F28: a ready, up-to-date video has "Publish →" and the stepper's "4 Publish" (/projects/[id]/publish).
 
 export const metadata: Metadata = { title: "Your video" };
 
@@ -60,13 +61,16 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
   const resource = toProjectResourceOf(loaded);
   const archived = project.state === "archived";
 
-  const frame = (screen: ReactNode) => (
+  const frame = (screen: ReactNode, canPublish = false) => (
     <div className="mx-auto flex w-full flex-col">
       <div className="relative mb-8 flex flex-col items-center gap-4 sm:mb-12 sm:flex-row sm:justify-center">
         <Link href="/dashboard" className="self-start text-xs font-medium text-muted transition-colors hover:text-text sm:absolute sm:left-0 sm:self-center">
           ← My videos
         </Link>
-        <ProjectStepper current="video" hrefs={state === "generating" ? {} : { storyboard: `/projects/${projectId}/storyboard` }} />
+        <ProjectStepper
+          current="video"
+          hrefs={state === "generating" ? {} : { storyboard: `/projects/${projectId}/storyboard`, ...(canPublish ? { publish: `/projects/${projectId}/publish` } : {}) }}
+        />
       </div>
       {screen}
     </div>
@@ -94,6 +98,8 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
     const languageOn = isLanguageEnabled(project.language);
     // The last caption fix made on THIS video, when it FAILED (a fix the creator cancelled shows no note).
     const lastCaptionJob = captionFailureOf({ state, job: loaded.latestCaptionJob, renderId: render._id, retryAllowed: resource.allowedActions.includes("retry_job"), archived });
+    // F28: ④ Publish opens only for a ready, up-to-date video of a project that isn't archived.
+    const canPublish = state === "video_ready" && !archived && !storyboardChanged;
     return frame(
       <ReviewVideoScreen
         projectId={projectId}
@@ -106,6 +112,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
         canEditCaptions={resource.allowedActions.includes("edit_captions") && !archived && !storyboardChanged}
         lastCaptionJob={lastCaptionJob}
         storyboardChanged={storyboardChanged}
+        canPublish={canPublish}
         captionsNote={
           changeRunning
             ? "Caption fixes wait until your change request is finished."
@@ -129,6 +136,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
               : null,
         }}
       />,
+      canPublish,
     );
   }
 

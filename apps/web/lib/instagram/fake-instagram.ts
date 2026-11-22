@@ -5,17 +5,19 @@ import { authorizeUrlFor, InstagramApiError, type InstagramApi, type InstagramPr
 // switched on by provider.ts on a local test server only): ZERO calls to Meta. "Instagram's login
 // page" is our own /api/v1/instagram/e2e-authorize page, and the "code" it hands back says what kind
 // of account to pretend:
-//   e2e.<kind>.<account>   kind: creator (Media_Creator) | business (Business) | personal | broken
+//   e2e.<kind>.<account>   kind: creator (Media_Creator) | business (Business) | personal | broken |
 //                          (the code exchange fails) ; account: 1–24 of a-z 0-9 _ (the same account
-//                          name gives the same Instagram id, so two test users can try ONE account)
-// The tokens it makes start with "e2e-" and are never valid anywhere.
+//                          name gives the same Instagram id, so two test users can try ONE account);
+//                          nopublish (a Creator who un-ticked "posting": no content_publish permission)
+// The tokens it makes start with "e2e-" and are never valid anywhere. It works at the InstagramApi
+// level (no HTTP), so how the real client sends the token (in the address for /me) doesn't matter here.
 
 export const FAKE_AUTHORIZE_PATH = "/api/v1/instagram/e2e-authorize";
-export const FAKE_KINDS = ["creator", "business", "personal", "broken"] as const;
+export const FAKE_KINDS = ["creator", "business", "personal", "broken", "nopublish"] as const;
 export type FakeKind = (typeof FAKE_KINDS)[number];
 
-const CODE = /^e2e\.(creator|business|personal|broken)\.([a-z0-9_]{1,24})$/;
-const TOKEN = /^e2e-(?:short|long)\.(creator|business|personal|broken)\.([a-z0-9_]{1,24})(?:\.[A-Za-z0-9_-]+)?$/;
+const CODE = /^e2e\.(creator|business|personal|broken|nopublish)\.([a-z0-9_]{1,24})$/;
+const TOKEN = /^e2e-(?:short|long)\.(creator|business|personal|broken|nopublish)\.([a-z0-9_]{1,24})(?:\.[A-Za-z0-9_-]+)?$/;
 
 export function fakeCode(kind: FakeKind, account: string): string {
   return `e2e.${kind}.${account}`;
@@ -27,7 +29,7 @@ export function fakeIgUserId(account: string): string {
   return `17841${digits}`;
 }
 
-const ACCOUNT_TYPE: Record<FakeKind, string> = { creator: "Media_Creator", business: "Business", personal: "Personal", broken: "Business" };
+const ACCOUNT_TYPE: Record<FakeKind, string> = { creator: "Media_Creator", business: "Business", personal: "Personal", broken: "Business", nopublish: "Media_Creator" };
 
 export class FakeInstagramApi implements InstagramApi {
   constructor(private readonly appOrigin: string) {}
@@ -39,7 +41,7 @@ export class FakeInstagramApi implements InstagramApi {
   async exchangeCode(code: string): Promise<ShortLivedToken> {
     const match = CODE.exec(code);
     if (!match || match[1] === "broken") throw new InstagramApiError("code_exchange", "rejected", 400);
-    return { accessToken: `e2e-short.${match[1]}.${match[2]}`, userId: fakeIgUserId(match[2]!), permissions: ["instagram_business_basic", "instagram_business_content_publish"] };
+    return { accessToken: `e2e-short.${match[1]}.${match[2]}`, permissions: match[1] === "nopublish" ? ["instagram_business_basic"] : ["instagram_business_basic", "instagram_business_content_publish"] };
   }
 
   async longLivedToken(shortLivedToken: string): Promise<LongLivedToken> {

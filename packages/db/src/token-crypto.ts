@@ -8,6 +8,9 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 //   TOKEN_ENCRYPTION_ACTIVE_VERSION  the version used for NEW encryptions (e.g. "1")
 // Old versions stay in the map so tokens saved with them can still be read (key rotation: decrypt
 // with the old key, encrypt again with the active one). Problems name the setting, never a value.
+// Each token is BOUND to its record (F28 review): the "additional authenticated data" is
+// `${ownerId}:${igUserId}` (tokenAad), so a ciphertext copied into another user's document, or
+// onto another Instagram account, can't be decrypted there.
 
 export type EncryptedToken = { ciphertext: string; iv: string; tag: string; keyVersion: string };
 
@@ -25,6 +28,11 @@ const VERSION = /^[A-Za-z0-9_-]{1,16}$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 const MAKE_KEY = "Make a key with: openssl rand -base64 32";
+
+/** The record a token belongs to: `${ownerId}:${igUserId}` (owner as the 24-character hex id). */
+export function tokenAad(ownerId: string | { toHexString(): string }, igUserId: string): string {
+  return `${typeof ownerId === "string" ? ownerId : ownerId.toHexString()}:${igUserId}`;
+}
 
 /** Read and check the encryption keys. Never returns or prints a key in a problem. */
 export function readTokenKeys(env: NodeJS.ProcessEnv = process.env): TokenKeysResult {
@@ -71,23 +79,24 @@ export function readTokenKeys(env: NodeJS.ProcessEnv = process.env): TokenKeysRe
   return problems.length > 0 ? { ok: false, problems } : { ok: true, keys: { activeVersion: active, keys } };
 }
 
-/** Thrown when a token can't be decrypted (unknown key version, wrong key, or changed data). */
+/** Thrown when a token can't be decrypted (unknown key version, wrong key, another record, or changed data). */
 export class TokenDecryptError extends Error {
   override name = "TokenDecryptError";
 }
 
-/** Encrypt with the ACTIVE key and a new random IV. */
-export function encryptToken(plain: string, keys: TokenKeys): EncryptedToken {
+/** Encrypt with the ACTIVE key and a new random IV, bound to `aad` (use tokenAad). */
+export function encryptToken(plain: string, keys: TokenKeys, aad: string): EncryptedToken {
   const key = keys.keys.get(keys.activeVersion);
   if (!key) throw new Error(`${TOKEN_ACTIVE_VERSION_ENV} names a version that ${TOKEN_KEYS_ENV} doesn't have.`);
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
+  cipher.setAAD(Buffer.from(aad, "utf8"));
   const ciphertext = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   return { ciphertext: ciphertext.toString("base64"), iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), keyVersion: keys.activeVersion };
 }
 
-/** Decrypt with the key of the record's own version. A wrong key or any changed byte fails. */
-export function decryptToken(token: EncryptedToken, keys: TokenKeys): string {
+/** Decrypt with the key of the record's own version and the same `aad`. A wrong key, another record or any changed byte fails. */
+export function decryptToken(token: EncryptedToken, keys: TokenKeys, aad: string): string {
   const key = keys.keys.get(token.keyVersion);
   if (!key) throw new TokenDecryptError(`No key for version "${token.keyVersion}" in ${TOKEN_KEYS_ENV}.`);
   try {
@@ -95,9 +104,10 @@ export function decryptToken(token: EncryptedToken, keys: TokenKeys): string {
     const tag = Buffer.from(token.tag, "base64");
     if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) throw new Error("bad sizes");
     const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
+    decipher.setAAD(Buffer.from(aad, "utf8"));
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(Buffer.from(token.ciphertext, "base64")), decipher.final()]).toString("utf8");
   } catch {
-    throw new TokenDecryptError("The token could not be decrypted (wrong key or changed data).");
+    throw new TokenDecryptError("The token could not be decrypted (wrong key, another record, or changed data).");
   }
 }

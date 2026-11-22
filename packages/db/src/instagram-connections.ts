@@ -124,7 +124,10 @@ export async function saveInstagramConnection(db: Db, ownerId: string | ObjectId
       return await saveOnce(db, owner, input, now);
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
-      if (error.keyPattern && "ownerId" in error.keyPattern && attempt === 1) continue;
+      const onOwner = !!error.keyPattern && "ownerId" in error.keyPattern;
+      if (onOwner && attempt === 1) continue;
+      // A second duplicate on ownerId is not "another user's account": keep the real error.
+      if (onOwner) throw error;
       throw new InstagramAccountInUseError();
     }
   }

@@ -789,7 +789,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `at` | date | When | Yes |
 
 **Rules:** append-only. No automatic expiry in V1. On account deletion the entries are **anonymized**, not deleted (§6.7).
-**As built (F20):** the first entry type is `storyboard.approved` (`subject: { type: "planVersion", id }`, `data: { projectId, approvalId }`), written in the D8 transaction. Created in F20.
+**As built (F28):** also `instagram.connected` and `instagram.disconnected` (`subject: { type: "instagramConnection", id }`, no token). **As built (F20):** the first entry type is `storyboard.approved` (`subject: { type: "planVersion", id }`, `data: { projectId, approvalId }`), written in the D8 transaction. Created in F20.
 
 **Indexes:** none in V1 (Q8). Nothing on screen searches it yet; add one when the admin page needs it.
 
@@ -1003,6 +1003,8 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 - unique `ownerId`: **one connection per user**.
 - unique partial `igUserId` where `status = "active"`: **one ByteReel user per Instagram account**. A second user trying to connect the same account gets `INSTAGRAM_ACCOUNT_IN_USE` (PRD decision #24d). The index also catches two people finishing at the same moment.
 - `{ status: 1, tokenExpiresAt: 1 }`: the daily refresh job finds tokens about to expire.
+
+**As built (F28, 2026-11-22):** code `packages/db/src/instagram-connections.ts` (owner-scoped: every filter has `ownerId`) and `token-crypto.ts`. Connect (G3) is ONE transaction: check that no OTHER user has this `igUserId` `active` → insert, or replace the user's own document (same `_id`, `connectedAt`/`lastRefreshedAt` = now, `revokedAt: null`, `status: active`) → audit `instagram.connected` (`subject: { type: "instagramConnection", id }`, `data: { igUserId, username, accountType, reconnected, sameAccount }`, never the token). A duplicate key on `igUserId` (two users at the same moment) → `INSTAGRAM_ACCOUNT_IN_USE`; a duplicate on `ownerId` (the same user twice at once) is tried once more. Disconnect (G4) is ONE transaction: `$unset accessToken`, `status: revoked`, `revokedAt`, audit `instagram.disconnected`; already revoked → nothing written. `accessToken`: AES-256-GCM, a new 12-byte IV each time, 16-byte tag, base64 fields, `keyVersion` = `TOKEN_ENCRYPTION_ACTIVE_VERSION`, and **bound to its record** with the additional authenticated data `${ownerId}:${igUserId}` (code review 2026-11-22: a ciphertext copied into another document can't be decrypted; the refresh job (F32) and publishing (F30) must pass the same value). `scopes` = what Instagram granted (a token without `instagram_business_content_publish` is never saved); `[]` when Instagram sent no list. `accountType` is stored upper case. **Not yet:** post invalidation (no posts before F30; `TODO(F30)` in the code). Indexes (names `ownerId_unique`, `igUserId_active_unique` with `partialFilterExpression: { status: "active" }`, `status_tokenExpiresAt`): `npm run db -- indexes --feature F28 --apply`, **before the first real connect** (the "one account per user, both ways" rule relies on both unique ones).
 
 #### 4.22 `posts`
 **Purpose:** one document per **publish or schedule request**. It contains **approval #2**: a snapshot of exactly what the creator approved (which video, its fingerprint, which Instagram account, which caption). The publish job checks this snapshot right before posting; if anything changed, it does not publish.
@@ -1502,7 +1504,7 @@ A collection appears in Atlas the first time something is written to it (or when
 | F23 | `speechArtifacts` (with the paid `audio` bytes until uploaded), `providerUsage` rows with `provider: "elevenlabs"`, `renders` (files in R2: `users/{ownerId}/speech/…`, `users/{ownerId}/projects/{projectId}/renders/{renderId}/…`); `jobs` of type `generate`; `usageCounters` kinds `videos`, `voiceChars` and the one app-wide `appVoiceChars` counter. Indexes: `npm run db -- indexes --feature F23 --apply` (before making the first video: the speech lock needs the unique one) |
 | F25 | `captionOverrides` |
 | F27 | `settings`; the remaining limits in `usageCounters` (videos, voice characters) start being enforced (projects/day is enforced since F12, `projects.planRequestCount` since F15) |
-| F28 | `instagramConnections` |
+| F28 | `instagramConnections`; `auditLogs` entries `instagram.connected` / `instagram.disconnected`. Indexes: `npm run db -- indexes --feature F28 --apply` (before the first connect) |
 | F30, F31 | `posts`, `publishAttempts` |
 | F32 | `notifications` |
 | F33 | `deletionRequests` (account deletion), `deletionLog` (anonymous record written after the 30 days) |

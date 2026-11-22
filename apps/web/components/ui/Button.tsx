@@ -60,6 +60,20 @@ function Inner({ hasArrow, fullWidth, children }: { hasArrow: boolean; fullWidth
   );
 }
 
+/**
+ * The same look on a plain <a> (F28): for links that must be a real page load, never a Next.js
+ * client navigation or prefetch (e.g. "Connect Instagram", which leaves the app for Instagram).
+ */
+export function PlainLinkButton({ href, variant = "primary", fullWidth = false, className, children, ...rest }: CommonProps & Omit<ComponentPropsWithoutRef<"a">, keyof CommonProps> & { href: string }) {
+  const hasArrow = rest.arrow ?? (variant === "primary");
+  const { arrow: _arrow, size: _size, ...anchorProps } = rest;
+  return (
+    <a href={href} {...anchorProps} className={cn(classesFor(variant, "md", hasArrow, fullWidth), className)}>
+      <Inner hasArrow={hasArrow} fullWidth={fullWidth}>{children}</Inner>
+    </a>
+  );
+}
+
 export function Button(props: ButtonOrLinkProps) {
   const { variant = "primary", size = "md", arrow, fullWidth = false, className, children, ...rest } = props;
   const hasArrow = arrow ?? (variant === "primary" && size === "md");

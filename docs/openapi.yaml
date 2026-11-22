@@ -1691,7 +1691,7 @@ paths:
     delete:
       operationId: disconnectInstagram
       summary: Disconnect Instagram
-      description: G4. Removes the encrypted token, marks the connection revoked and invalidates scheduled and publish_failed posts. 409 INVALID_STATE while a post is publishing.
+      description: G4. Removes the encrypted token, marks the connection revoked and invalidates scheduled and publish_failed posts. 409 INVALID_STATE while a post is publishing. As built (F28) - no posts exist yet, so the invalidation and the 409 arrive with F30; rate 30/hour; already disconnected → 404.
       tags: [Instagram]
       security:
         - sessionCookie: []
@@ -1730,7 +1730,7 @@ paths:
     get:
       operationId: startInstagramConnect
       summary: Start Instagram OAuth (browser navigation)
-      description: G2. Builds a signed, session-bound `state` (10 min) and redirects to Instagram's authorize URL with scopes instagram_business_basic and instagram_business_content_publish. Rate limit 10/hour.
+      description: G2. Builds a signed, session-bound `state` (10 min) and redirects to Instagram's authorize URL with scopes instagram_business_basic and instagram_business_content_publish. Rate limit 10/hour. As built (F28) - over the limit or settings missing → 302 back with ?instagram_error=RATE_LIMITED or ?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=not_set_up; returnTo=settings goes back to /dashboard until F33.
       tags: [Instagram]
       security:
         - sessionCookie: []
@@ -1770,6 +1770,9 @@ paths:
         or one error format `?instagram_error=<CODE>[&reason=<reason>]`:
         `?instagram_error=INSTAGRAM_ACCOUNT_INELIGIBLE` / `?instagram_error=INSTAGRAM_ACCOUNT_IN_USE` /
         `?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=access_denied|invalid_state|exchange_failed`.
+        As built (F28 + code review): also `reason=not_set_up` and `reason=missing_permission` (no
+        instagram_business_content_publish granted; nothing saved), and `?instagram_error=RATE_LIMITED` (20/hour,
+        counted after a valid state). Post invalidation arrives with F30.
       tags: [Instagram]
       security:
         - sessionCookie: []

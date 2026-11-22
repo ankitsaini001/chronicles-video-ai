@@ -82,7 +82,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 
 | # | Feature | Depends on | Status |
 |---|---|---|---|
-| F28 | [Connect / disconnect Instagram](F28-instagram-connect.md) | F24 | 🔨 Building |
+| F28 | [Connect / disconnect Instagram](F28-instagram-connect.md) | F24 | 🧪 Testing |
 | F29 | [AI caption + hashtags](F29-ai-caption.md) | F28 | ⬜ Not started |
 | F30 | [Publish now (approval #2) + Published screen](F30-publish-now.md) | F29 | ⬜ Not started |
 | F31 | [Schedule a post](F31-schedule-post.md) | F30 | ⬜ Not started |
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F27 — Daily limits** is ✅ Done (founder OK 2026-11-18: limit messages that say why and when they reset, in the creator's timezone; the storyboard warns and greys out Approve when a new video won't fit). **Phase A4 (generate and review video) is complete: F22–F27 done.** Next: merge `dev` → `main` for the phase (temporary worktree), then **F28 — Connect / disconnect Instagram**. Hindi/Hinglish hidden behind one switch (see "Language switch" below). Phases A1–A4 done; F00, F22, F22b and F23–F27 done (v4 hero style is the only video style).
+**Now:** **F28 — Connect / disconnect Instagram** is 🧪 Testing (built 2026-11-22: Step 4 page, connect through Instagram's own login, token encrypted, Disconnect; e2e 41/41 with a stand-in Instagram). Next: code review, then the founder's real connect (Meta app setup, `.env`, `npm run db -- indexes --feature F28 --apply`; see the F28 file). Phases A1–A4 done (F22–F27). Hindi/Hinglish hidden behind one switch (see "Language switch" below).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.

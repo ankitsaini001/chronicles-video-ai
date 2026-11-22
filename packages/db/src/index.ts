@@ -426,6 +426,7 @@ export {
   readTokenKeys,
   TOKEN_ACTIVE_VERSION_ENV,
   TOKEN_KEYS_ENV,
+  tokenAad,
   TokenDecryptError,
   type EncryptedToken,
   type TokenKeys,

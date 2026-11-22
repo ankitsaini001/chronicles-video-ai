@@ -7,6 +7,7 @@ import {
   InstagramAccountInUseError,
   readTokenKeys,
   saveInstagramConnection,
+  tokenAad,
   TokenDecryptError,
   toInstagramConnectionResource,
   type InstagramConnectionDocument,
@@ -19,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { ApiProblem } from "../apps/web/lib/api/v1";
 import type { SessionUser } from "../apps/web/lib/auth/session";
 import { readInstagramConfig } from "../apps/web/lib/instagram/config";
-import { finishConnect, startConnect, type InstagramFlowDeps } from "../apps/web/lib/instagram/connect";
+import { finishConnect, setupFailed, startConnect, type InstagramFlowDeps } from "../apps/web/lib/instagram/connect";
 import { connectionStatus, disconnectConnection, meInstagram } from "../apps/web/lib/instagram/connection";
 import { FakeInstagramApi, fakeCode, fakeIgUserId } from "../apps/web/lib/instagram/fake-instagram";
 import { instagramNotice, INSTAGRAM_MESSAGES } from "../apps/web/lib/instagram/messages";
@@ -44,6 +45,8 @@ const KEY_1 = Buffer.alloc(32, 7).toString("base64");
 const KEY_2 = Buffer.alloc(32, 9).toString("base64");
 const AUTH_SECRET = "a-test-only-auth-secret-that-is-long-enough-123";
 const APP_SECRET = "appsecret-test-0123456789abcdef";
+/** The record a test token belongs to (F28 review: AAD `${ownerId}:${igUserId}`). */
+const AAD = `${OWNER.toHexString()}:17841400000000001`;
 
 const user: SessionUser = {
   id: OWNER.toHexString(),
@@ -64,42 +67,49 @@ function keys(env: Record<string, string> = {}): TokenKeys {
 
 describe("token encryption (AES-256-GCM, DATABASE.md §6.2)", () => {
   it("round-trips, records the key version, and never stores the plain token", () => {
-    const enc = encryptToken("IGQVJ-secret-token", keys());
+    const enc = encryptToken("IGQVJ-secret-token", keys(), AAD);
     expect(enc.keyVersion).toBe("1");
     expect(JSON.stringify(enc)).not.toContain("IGQVJ-secret-token");
     expect(Buffer.from(enc.iv, "base64")).toHaveLength(12);
     expect(Buffer.from(enc.tag, "base64")).toHaveLength(16);
-    expect(decryptToken(enc, keys())).toBe("IGQVJ-secret-token");
+    expect(decryptToken(enc, keys(), AAD)).toBe("IGQVJ-secret-token");
   });
 
   it("a NEW random IV every time: the same token encrypts differently", () => {
-    const a = encryptToken("same", keys());
-    const b = encryptToken("same", keys());
+    const a = encryptToken("same", keys(), AAD);
+    const b = encryptToken("same", keys(), AAD);
     expect(a.iv).not.toBe(b.iv);
     expect(a.ciphertext).not.toBe(b.ciphertext);
   });
 
   it("a wrong key, a changed tag, changed data or an unknown version all fail", () => {
-    const enc = encryptToken("token", keys());
+    const enc = encryptToken("token", keys(), AAD);
     const wrong = keys({ TOKEN_ENCRYPTION_KEYS: JSON.stringify({ "1": KEY_2 }) });
-    expect(() => decryptToken(enc, wrong)).toThrow(TokenDecryptError);
+    expect(() => decryptToken(enc, wrong, AAD)).toThrow(TokenDecryptError);
     const flip = (b64: string) => {
       const buf = Buffer.from(b64, "base64");
       buf[0] = buf[0]! ^ 1;
       return buf.toString("base64");
     };
-    expect(() => decryptToken({ ...enc, tag: flip(enc.tag) }, keys())).toThrow(TokenDecryptError);
-    expect(() => decryptToken({ ...enc, ciphertext: flip(enc.ciphertext) }, keys())).toThrow(TokenDecryptError);
-    expect(() => decryptToken({ ...enc, keyVersion: "7" }, keys())).toThrow(TokenDecryptError);
+    expect(() => decryptToken({ ...enc, tag: flip(enc.tag) }, keys(), AAD)).toThrow(TokenDecryptError);
+    expect(() => decryptToken({ ...enc, ciphertext: flip(enc.ciphertext) }, keys(), AAD)).toThrow(TokenDecryptError);
+    expect(() => decryptToken({ ...enc, keyVersion: "7" }, keys(), AAD)).toThrow(TokenDecryptError);
+  });
+
+  it("bound to its record: another owner's or another Instagram account's AAD can't decrypt it", () => {
+    const enc = encryptToken("token", keys(), tokenAad(OWNER, "17841400000000001"));
+    expect(decryptToken(enc, keys(), tokenAad(OWNER.toHexString(), "17841400000000001"))).toBe("token");
+    expect(() => decryptToken(enc, keys(), tokenAad(OTHER, "17841400000000001"))).toThrow(TokenDecryptError);
+    expect(() => decryptToken(enc, keys(), tokenAad(OWNER, "17841400000000002"))).toThrow(TokenDecryptError);
   });
 
   it("rotation: version 2 encrypts new tokens, version 1 still reads old ones", () => {
-    const old = encryptToken("old", keys());
+    const old = encryptToken("old", keys(), AAD);
     const both = keys({ TOKEN_ENCRYPTION_KEYS: JSON.stringify({ "1": KEY_1, "2": KEY_2 }), TOKEN_ENCRYPTION_ACTIVE_VERSION: "2" });
-    const fresh = encryptToken("new", both);
+    const fresh = encryptToken("new", both, AAD);
     expect(fresh.keyVersion).toBe("2");
-    expect(decryptToken(old, both)).toBe("old");
-    expect(decryptToken(fresh, both)).toBe("new");
+    expect(decryptToken(old, both, AAD)).toBe("old");
+    expect(decryptToken(fresh, both, AAD)).toBe("new");
   });
 
   it("settings problems name the setting, never the value", () => {
@@ -238,7 +248,7 @@ describe("the Meta client (Instagram API with Instagram Login)", () => {
       json({ data: [{ user_id: "17841400000000001", username: "physics.with.ananya", account_type: "Media_Creator", profile_picture_url: "https://scontent.cdninstagram.com/p.jpg" }] }),
     ]);
     const short = await api.exchangeCode("AQB");
-    expect(short).toEqual({ accessToken: "SHORT-TOKEN", userId: "17841400000000001", permissions: ["instagram_business_basic", "instagram_business_content_publish"] });
+    expect(short).toEqual({ accessToken: "SHORT-TOKEN", permissions: ["instagram_business_basic", "instagram_business_content_publish"] });
     expect(calls[0]!.url).toBe("https://api.instagram.com/oauth/access_token");
     expect(calls[0]!.init?.method).toBe("POST");
     expect(Object.fromEntries(new URLSearchParams(String(calls[0]!.init?.body)))).toEqual({
@@ -255,11 +265,28 @@ describe("the Meta client (Instagram API with Instagram Login)", () => {
     const me = new URL(calls[2]!.url);
     expect(me.pathname).toBe("/v27.0/me");
     expect(me.searchParams.get("fields")).toBe("user_id,username,account_type,profile_picture_url");
+    // The token goes in the address, as Meta's "Get started" page shows.
+    expect(me.searchParams.get("access_token")).toBe("LONG-TOKEN");
   });
 
-  it("a flat code answer works too; a numeric user id becomes text", async () => {
-    const { api } = metaWith([json({ access_token: "T", user_id: 17841400000000, permissions: ["instagram_business_basic"] })]);
-    expect(await api.exchangeCode("c")).toEqual({ accessToken: "T", userId: "17841400000000", permissions: ["instagram_business_basic"] });
+  it("the code exchange doesn't need user_id: a real 17-digit NUMBER (rounded by JSON) still works; a flat answer too", async () => {
+    // As Instagram may send it: a JSON number larger than 2^53 (JavaScript can't hold it exactly).
+    const raw = '{"access_token":"T","user_id":17841400000000001,"permissions":"instagram_business_basic,instagram_business_content_publish"}';
+    const { api } = metaWith([() => new Response(raw, { headers: { "content-type": "application/json" } })]);
+    expect(await api.exchangeCode("c")).toEqual({ accessToken: "T", permissions: ["instagram_business_basic", "instagram_business_content_publish"] });
+    const flat = metaWith([json({ access_token: "T2" })]);
+    expect(await flat.api.exchangeCode("c")).toEqual({ accessToken: "T2", permissions: null });
+  });
+
+  it("/me's user_id: text as is; an exact number is accepted; a rounded 17-digit number is REFUSED (never stored rounded)", async () => {
+    const text = metaWith([json({ user_id: "17841400000000001", username: "a", account_type: "Business" })]);
+    expect((await text.api.profile("t")).userId).toBe("17841400000000001");
+    const exact = metaWith([json({ user_id: 1234567, username: "a", account_type: "Business" })]);
+    expect((await exact.api.profile("t")).userId).toBe("1234567");
+    const rounded = metaWith([() => new Response('{"user_id":17841400000000001,"username":"a","account_type":"Business"}', { headers: { "content-type": "application/json" } })]);
+    const error = await rounded.api.profile("t").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InstagramApiError);
+    expect((error as InstagramApiError).kind).toBe("bad_answer");
   });
 
   it("errors say only the step and status: never a token, the secret or Instagram's text", async () => {
@@ -382,8 +409,9 @@ describe("G3 the callback", () => {
     expect(f.saved).toHaveLength(1);
     const s = f.saved[0]!;
     expect(s).toMatchObject({ igUserId: fakeIgUserId("ananya"), username: "e2e_ananya", accountType: "MEDIA_CREATOR", scopes: ["instagram_business_basic", "instagram_business_content_publish"] });
+    expect(f.rules).toEqual([API_RATE_LIMITS.instagramCallbackPerUser.name]);
     expect(s.tokenExpiresAt.toISOString()).toBe(new Date(NOW.getTime() + 60 * 86400 * 1000).toISOString());
-    const plain = decryptToken(s.accessToken, keys());
+    const plain = decryptToken(s.accessToken, keys(), tokenAad(OWNER, fakeIgUserId("ananya")));
     expect(plain).toMatch(/^e2e-long\.creator\.ananya\./);
     expect(JSON.stringify(s)).not.toContain(plain);
     expect(`${location(r)} ${[...r.headers.values()].join(" ")} ${await r.text()} ${f.logs.join(" ")}`).not.toContain("e2e-long");
@@ -425,6 +453,41 @@ describe("G3 the callback", () => {
     const f = flow();
     const r = await finishConnect(callback({ code: fakeCode("creator", "a"), state: stateFor({ kind: "publish", projectId: FOREIGN_PROJECT }) }), f.deps);
     expect(location(r)).toBe("/dashboard?instagram=connected");
+  });
+
+  it("posting not allowed on Instagram's page → missing_permission, NOTHING saved; no permission list → scopes [] (unknown)", async () => {
+    const f = flow();
+    const r = await finishConnect(callback({ code: fakeCode("nopublish", "a"), state: stateFor({ kind: "publish", projectId: PROJECT }) }), f.deps);
+    expect(location(r)).toBe(`${publishBack}?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=missing_permission`);
+    expect(f.saved).toHaveLength(0);
+    expect(instagramNotice({ instagram_error: "INSTAGRAM_OAUTH_FAILED", reason: "missing_permission" })?.text).toBe("Please allow posting when Instagram asks, then connect again.");
+    const noList = new FakeInstagramApi("http://localhost:3233");
+    const api: InstagramApi = { authorizeUrl: (s) => noList.authorizeUrl(s), exchangeCode: async (c) => ({ ...(await noList.exchangeCode(c)), permissions: null }), longLivedToken: (t) => noList.longLivedToken(t), profile: (t) => noList.profile(t) };
+    const g = flow({ api });
+    expect(location(await finishConnect(callback({ code: fakeCode("creator", "a"), state: stateFor({ kind: "settings" }) }), g.deps))).toBe("/dashboard?instagram=connected");
+    expect(g.saved[0]!.scopes).toEqual([]);
+  });
+
+  it("G3's own counter (20/hour): over it → RATE_LIMITED before any call to Instagram; a bad state isn't counted", async () => {
+    const calls: string[] = [];
+    const spy: InstagramApi = { authorizeUrl: () => "", exchangeCode: async () => (calls.push("x"), Promise.reject(new Error("no"))), longLivedToken: async () => Promise.reject(new Error("no")), profile: async () => Promise.reject(new Error("no")) };
+    const f = flow({ api: spy, rate: { ...allowed, allowed: false } });
+    const r = await finishConnect(callback({ code: fakeCode("creator", "a"), state: stateFor({ kind: "publish", projectId: PROJECT }) }), f.deps);
+    expect(location(r)).toBe(`${publishBack}?instagram_error=RATE_LIMITED`);
+    expect(calls).toEqual([]);
+    expect(f.rules).toEqual([API_RATE_LIMITS.instagramCallbackPerUser.name]);
+    expect(API_RATE_LIMITS.instagramCallbackPerUser).toMatchObject({ limit: 20, windowSeconds: 3600 });
+    const g = flow();
+    await finishConnect(callback({ code: fakeCode("creator", "a"), state: "forged.state" }), g.deps);
+    expect(g.rules).toEqual([]);
+  });
+
+  it("the routes' setup failing (e.g. no database settings) → My videos with reason=not_set_up, the error's name in the log", () => {
+    const logs: string[] = [];
+    const r = setupFailed(callback({ code: "x", state: "y" }), new Error("The database is not set up (MONGODB_URI)."), (m) => logs.push(m));
+    expect(r.status).toBe(302);
+    expect(location(r)).toBe("/dashboard?instagram_error=INSTAGRAM_OAUTH_FAILED&reason=not_set_up");
+    expect(logs.join(" ")).toMatch(/not set up.*Error/);
   });
 
   it("already active for another user → INSTAGRAM_ACCOUNT_IN_USE (the new token is dropped)", async () => {
@@ -477,7 +540,7 @@ const toSave = (): InstagramConnectionToSave => ({
   username: "physics.with.ananya",
   accountType: "MEDIA_CREATOR",
   profilePictureUrl: null,
-  accessToken: encryptToken("PLAIN-TOKEN", keys()),
+  accessToken: encryptToken("PLAIN-TOKEN", keys(), AAD),
   tokenExpiresAt: new Date("2027-01-21T06:00:00.000Z"),
   scopes: ["instagram_business_basic", "instagram_business_content_publish"],
 });
@@ -544,6 +607,16 @@ describe("saveInstagramConnection: one transaction, one account per user both wa
     });
     const doc = await saveInstagramConnection(fake.db, OWNER, toSave(), NOW);
     expect(doc.status).toBe("active");
+    expect(fake.transactions()).toBe(2);
+  });
+});
+
+describe("saveInstagramConnection: a second duplicate on ownerId", () => {
+  it("is rethrown as it is (not 'already connected to another account')", async () => {
+    const dup = Object.assign(new Error("E11000 duplicate key"), { code: 11000, keyPattern: { ownerId: 1 } });
+    const fake = fakeDb({ "instagramConnections.findOne": () => null, "instagramConnections.insertOne": () => { throw dup; } });
+    const error = await saveInstagramConnection(fake.db, OWNER, toSave(), NOW).catch((e: unknown) => e);
+    expect(error).toBe(dup);
     expect(fake.transactions()).toBe(2);
   });
 });

@@ -4,12 +4,17 @@ import type { InstagramConfig } from "./config";
 // against Meta's docs on 2026-11-22 ("Business Login for Instagram" and "Get started"):
 //   1. browser → https://www.instagram.com/oauth/authorize?client_id&redirect_uri&response_type=code&scope&state
 //   2. POST https://api.instagram.com/oauth/access_token (form: client_id, client_secret,
-//      grant_type=authorization_code, redirect_uri, code) → short-lived token + user_id
-//      (the docs show the answer inside `data: [ … ]`; older answers were flat: both are read)
+//      grant_type=authorization_code, redirect_uri, code) → short-lived token + granted permissions
+//      (the docs show the answer inside `data: [ … ]`; older answers were flat: both are read). Its
+//      user_id is NOT used (F28 review): it can be a 17-digit JSON number that JavaScript rounds.
 //   3. GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret&access_token
 //      → long-lived token, expires_in (≈ 60 days)
 //   4. GET https://graph.instagram.com/v27.0/me?fields=user_id,username,account_type,profile_picture_url
-//      account_type is "Business" or "Media_Creator" in the docs (compared in any case).
+//      &access_token=… (as Meta's "Get started" page shows; the token exchange in step 3 puts it in
+//      the address too, and nothing logs fetch addresses). account_type is
+//      "Business" or "Media_Creator" in the docs (compared in any case). The id we store is /me's
+//      user_id: a string is used as is; a JSON number only if it is exact (≤ 2^53), otherwise the
+//      answer is refused (bad_answer) rather than storing a rounded id.
 // Every call has a time limit. Tokens, the app secret and Instagram's own error text never go
 // into an error message or a log: an error says only which step failed and the HTTP status.
 
@@ -35,7 +40,8 @@ export class InstagramApiError extends Error {
   }
 }
 
-export type ShortLivedToken = { accessToken: string; userId: string; permissions: string[] };
+/** `permissions`: what the creator allowed, or null when Instagram sent no list (unknown). */
+export type ShortLivedToken = { accessToken: string; permissions: string[] | null };
 export type LongLivedToken = { accessToken: string; expiresInSeconds: number };
 export type InstagramProfile = { userId: string; username: string; accountType: string | null; profilePictureUrl: string | null };
 
@@ -67,7 +73,9 @@ function firstRecord(json: unknown): Record<string, unknown> | null {
   return json as Record<string, unknown>;
 }
 
-const idText = (value: unknown): string | null => (typeof value === "string" && /^\d{1,40}$/.test(value) ? value : typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : null);
+/** An Instagram id: digits as text, or a JSON number only when it is exact (a 17-digit number has been rounded already). */
+const idText = (value: unknown): string | null =>
+  typeof value === "string" && /^\d{1,40}$/.test(value) ? value : typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : null;
 const nonEmpty = (value: unknown): string | null => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
 
 export class MetaInstagramApi implements InstagramApi {
@@ -111,10 +119,14 @@ export class MetaInstagramApi implements InstagramApi {
     });
     const record = await this.call("code_exchange", INSTAGRAM_TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form.toString() });
     const accessToken = nonEmpty(record.access_token);
-    const userId = idText(record.user_id);
-    if (!accessToken || !userId) throw new InstagramApiError("code_exchange", "bad_answer");
-    const permissions = typeof record.permissions === "string" ? record.permissions.split(",").map((p) => p.trim()).filter(Boolean) : Array.isArray(record.permissions) ? record.permissions.filter((p): p is string => typeof p === "string") : [];
-    return { accessToken, userId, permissions };
+    if (!accessToken) throw new InstagramApiError("code_exchange", "bad_answer");
+    const permissions =
+      typeof record.permissions === "string"
+        ? record.permissions.split(",").map((p) => p.trim()).filter(Boolean)
+        : Array.isArray(record.permissions)
+          ? record.permissions.filter((p): p is string => typeof p === "string")
+          : null;
+    return { accessToken, permissions: permissions && permissions.length > 0 ? permissions : null };
   }
 
   async longLivedToken(shortLivedToken: string): Promise<LongLivedToken> {

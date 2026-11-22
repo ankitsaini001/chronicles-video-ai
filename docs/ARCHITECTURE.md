@@ -650,6 +650,8 @@ Meta → /api/v1/instagram/callback?code&state
 ```
 *(Exact endpoints and versions are verified against Meta's current docs during implementation.)*
 
+**As built (F28, checked against Meta's "Business Login for Instagram" and "Get started" pages on 2026-11-22):** the endpoints above are as documented; `/me` is called as `graph.instagram.com/v27.0/me` (the version Meta's page shows); the code exchange answer is read whether it is flat or inside `data[]` (its `user_id` is not used: `/me`'s, as text); `/me` gets the token as `access_token=` in the address, as Meta documents; `account_type` is `Business` / `Media_Creator` in Meta's docs and is compared in any case. The state also carries `returnTo` (API.md G2). The redirect URI is `INSTAGRAM_REDIRECT_URI`, or when empty `BETTER_AUTH_URL` + `/api/v1/instagram/callback` (`http://localhost:3000/api/v1/instagram/callback` locally); it must match the Meta app's setting exactly. Until Settings exists (F33) connecting happens on Step 4 and `returnTo=settings` lands on `/dashboard`. Code: `apps/web/lib/instagram/`. Tests use a stand-in Instagram (`E2E_FAKE_INSTAGRAM=1`, test database and test ports only).
+
 ### 17.3 Publishing flow (`publish-post`)
 1. **Approval re-check** (§18): the post is still `scheduled` (or the expected state), the project is not archived, the owner is `active`, the project's current render and current/approved plan are still the approved ones, and the connection is the approved one, `active`, with an unexpired token and the same `igUserId`.
 2. **Limit check:** `GET /{ig-user-id}/content_publishing_limit`. If exhausted → `PUBLISH_LIMIT_REACHED`, post delayed with a notice (never dropped).
@@ -864,7 +866,7 @@ GEMINI_API_KEY, GEMINI_MODEL, ELEVENLABS_API_KEY, ELEVENLABS_MODEL,
 ELEVENLABS_VOICE_ID_INDIAN_MALE, ELEVENLABS_VOICE_ID_INDIAN_FEMALE,
 ELEVENLABS_VOICE_ID_HINDI_MALE, ELEVENLABS_VOICE_ID_HINDI_FEMALE
 # Instagram
-META_APP_ID, META_APP_SECRET, INSTAGRAM_REDIRECT_URI,
+INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_REDIRECT_URI (optional; F28 names),
 TOKEN_ENCRYPTION_KEYS, TOKEN_ENCRYPTION_ACTIVE_VERSION
 # Observability
 SENTRY_DSN

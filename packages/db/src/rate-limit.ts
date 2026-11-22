@@ -54,6 +54,8 @@ export const API_RATE_LIMITS = {
   jobActionsPerUser: { name: "job-actions", limit: 30, windowSeconds: 60 * 60 },
   /** G2 start connecting Instagram: 10 per hour (F28). */
   instagramConnectPerUser: { name: "instagram-connect", limit: 10, windowSeconds: 60 * 60 },
+  /** G3 the Instagram callback: 20 per hour, counted after the state check, before any call to Instagram (F28 review). */
+  instagramCallbackPerUser: { name: "instagram-callback", limit: 20, windowSeconds: 60 * 60 },
   /** G4 disconnect Instagram: 30 per hour (F28; API.md §10.3 "other writes"). */
   instagramDisconnectPerUser: { name: "instagram-disconnect", limit: 30, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;

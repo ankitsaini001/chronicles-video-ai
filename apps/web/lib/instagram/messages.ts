@@ -16,7 +16,8 @@ export const INSTAGRAM_MESSAGES = {
   exchangeFailed: "Instagram didn't finish connecting. Please try again in a few minutes.",
   notSetUp: "Connecting Instagram isn't set up yet. You can still download your video.",
   rateLimited: "You're going a bit fast. Please wait a minute, then connect again.",
-  disconnected: "Instagram disconnected. Your token was deleted.",
+  missingPermission: "Please allow posting when Instagram asks, then connect again.",
+  disconnected: "Instagram disconnected. We no longer have access to your account.",
   needsReconnect: "Instagram needs reconnecting. Please connect again.",
 } as const;
 
@@ -39,6 +40,7 @@ export function instagramNotice(query: Query): InstagramNotice | null {
       if (reason === "access_denied") return { tone: "problem", text: INSTAGRAM_MESSAGES.denied };
       if (reason === "invalid_state") return { tone: "problem", text: INSTAGRAM_MESSAGES.invalidState };
       if (reason === "not_set_up") return { tone: "problem", text: INSTAGRAM_MESSAGES.notSetUp };
+      if (reason === "missing_permission") return { tone: "problem", text: INSTAGRAM_MESSAGES.missingPermission };
       return { tone: "problem", text: INSTAGRAM_MESSAGES.exchangeFailed };
     default:
       return { tone: "problem", text: INSTAGRAM_MESSAGES.exchangeFailed };

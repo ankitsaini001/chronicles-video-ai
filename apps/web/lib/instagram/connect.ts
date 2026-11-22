@@ -2,8 +2,8 @@ import {
   API_RATE_LIMITS,
   eligibleAccountType,
   encryptToken,
-  INSTAGRAM_SCOPES,
   InstagramAccountInUseError,
+  tokenAad,
   type InstagramConnectionDocument,
   type InstagramConnectionToSave,
   type RateLimitResult,
@@ -12,7 +12,7 @@ import {
 } from "@bytereel/db";
 import { API_MESSAGES, apiError, newRequestId, requestIdFor } from "../api/v1";
 import type { SessionUser } from "../auth/session";
-import { InstagramApiError } from "./meta-client";
+import { InstagramApiError, type InstagramProfile, type LongLivedToken } from "./meta-client";
 import type { InstagramApiResult } from "./provider";
 import { parseReturnTo, signState, verifyState, type ReturnTo } from "./state";
 
@@ -25,13 +25,18 @@ import { parseReturnTo, signState, verifyState, type ReturnTo } from "./state";
 //
 // Where "back" is: `publish:<projectId>` → /projects/<id>/publish (the user's own project only);
 // `settings` (the default) → /dashboard until the Settings page exists (F33), then /settings.
+// F28 review: G3 has its own counter (20/hour) after the state check and before any call to
+// Instagram; a token without the publishing permission is not saved (`reason=missing_permission`);
+// the token is encrypted bound to `${ownerId}:${igUserId}`.
 
 export type InstagramErrorCode = "INSTAGRAM_ACCOUNT_INELIGIBLE" | "INSTAGRAM_ACCOUNT_IN_USE" | "INSTAGRAM_OAUTH_FAILED" | "RATE_LIMITED";
-export type OAuthFailReason = "access_denied" | "invalid_state" | "exchange_failed" | "not_set_up";
+export type OAuthFailReason = "access_denied" | "invalid_state" | "exchange_failed" | "not_set_up" | "missing_permission";
 
 /** Where `settings` goes until F33 builds the Settings page. */
 export const SETTINGS_RETURN_PATH = "/dashboard";
 export const LOGIN_PATH = "/login";
+/** The permission publishing needs (the creator can un-tick it on Instagram's page). */
+export const PUBLISH_PERMISSION = "instagram_business_content_publish";
 
 export interface InstagramFlowDeps {
   /** The signed-in, active user and the id of their login session, or null. */
@@ -74,6 +79,16 @@ function errorQuery(code: InstagramErrorCode, reason?: OAuthFailReason): Record<
 async function safeReturn(deps: InstagramFlowDeps, userId: string, returnTo: ReturnTo | null): Promise<ReturnTo | null> {
   if (returnTo?.kind === "publish" && !(await deps.ownsProject(userId, returnTo.projectId))) return null;
   return returnTo;
+}
+
+/**
+ * The routes' answer when their dependencies can't even be built (e.g. the database settings are
+ * missing): back to My videos with `reason=not_set_up`, never a raw 500 page.
+ */
+export function setupFailed(request: Request, error: unknown, log: (message: string) => void = (m) => console.error(m)): Response {
+  const requestId = requestIdFor(request.headers, newRequestId);
+  log(`Instagram connect is not set up (request ${requestId}): ${errorLabel(error)}`);
+  return redirect(withQuery(SETTINGS_RETURN_PATH, errorQuery("INSTAGRAM_OAUTH_FAILED", "not_set_up")), requestId);
 }
 
 /** G2 GET /api/v1/instagram/connect?returnTo=settings|publish:<projectId> */
@@ -143,6 +158,9 @@ export async function finishConnect(request: Request, deps: InstagramFlowDeps): 
       return redirect(withQuery(back, errorQuery("INSTAGRAM_OAUTH_FAILED", "invalid_state")), requestId);
     }
     back = returnPath(await safeReturn(deps, userId, check.returnTo));
+    // Counted only for a valid state of this session, before any call to Instagram.
+    const limit = await deps.hitRateLimit(API_RATE_LIMITS.instagramCallbackPerUser, userId);
+    if (!limit.allowed) return redirect(withQuery(back, errorQuery("RATE_LIMITED")), requestId);
     if (oauthError) {
       return redirect(withQuery(back, errorQuery("INSTAGRAM_OAUTH_FAILED", oauthError === "access_denied" ? "access_denied" : "exchange_failed")), requestId);
     }
@@ -155,12 +173,16 @@ export async function finishConnect(request: Request, deps: InstagramFlowDeps): 
     }
 
     // The calls to Instagram happen first, outside any transaction (DATABASE.md §7.2 row 13).
-    let profile;
-    let longLived;
-    let granted: string[];
+    let profile: InstagramProfile;
+    let longLived: LongLivedToken;
+    let granted: string[] | null;
     try {
       const short = await instagram.api.exchangeCode(code!);
       granted = short.permissions;
+      // The creator un-ticked posting on Instagram's page: this token can't publish, so it isn't kept.
+      if (granted !== null && !granted.includes(PUBLISH_PERMISSION)) {
+        return redirect(withQuery(back, errorQuery("INSTAGRAM_OAUTH_FAILED", "missing_permission")), requestId);
+      }
       longLived = await instagram.api.longLivedToken(short.accessToken);
       profile = await instagram.api.profile(longLived.accessToken);
     } catch (error) {
@@ -179,9 +201,10 @@ export async function finishConnect(request: Request, deps: InstagramFlowDeps): 
         username: profile.username,
         accountType,
         profilePictureUrl: profile.profilePictureUrl,
-        accessToken: encryptToken(longLived.accessToken, keys.keys),
+        accessToken: encryptToken(longLived.accessToken, keys.keys, tokenAad(userId, profile.userId)),
         tokenExpiresAt: new Date(now.getTime() + longLived.expiresInSeconds * 1000),
-        scopes: granted.length > 0 ? granted : [...INSTAGRAM_SCOPES],
+        // [] = Instagram sent no list (unknown); never claimed.
+        scopes: granted ?? [],
       });
     } catch (error) {
       if (!(error instanceof InstagramAccountInUseError)) throw error;
