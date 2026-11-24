@@ -84,7 +84,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 |---|---|---|---|
 | F28 | [Connect / disconnect Instagram](F28-instagram-connect.md) | F24 | 🧪 Testing |
 | F29 | [AI caption + hashtags](F29-ai-caption.md) | F28 | 🔨 Building |
-| F30 | [Publish now (approval #2) + Published screen](F30-publish-now.md) | F29 | ⬜ Not started |
+| F30 | [Publish now (approval #2) + Published screen](F30-publish-now.md) | F29 | 🔨 Building |
 | F31 | [Schedule a post](F31-schedule-post.md) | F30 | ⬜ Not started |
 | F32 | [Instagram token refresh + notifications bell](F32-token-refresh-notifications.md) | F31 | ⬜ Not started |
 
