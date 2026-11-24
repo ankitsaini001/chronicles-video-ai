@@ -70,7 +70,8 @@ export async function runCaptionSuggestion(context: { body: CaptionSuggestionBod
   if (!renderId) throw notReady("video_not_ready");
   if (body.renderId !== "current" && body.renderId !== renderId) throw notReady("render_not_current");
   if (!target.instagramActive) throw new ApiProblem(409, "INSTAGRAM_NOT_CONNECTED", POST_CAPTION_MESSAGES.NOT_CONNECTED);
-  if (body.onlyIfEmpty === true && target.draft) throw new ApiProblem(409, "INVALID_STATE", POST_CAPTION_MESSAGES.DRAFT_EXISTS, { reason: "draft_exists", draft: target.draft });
+  // An empty saved box counts as "no caption" (the creator cleared it): the first suggestion may fill it.
+  if (body.onlyIfEmpty === true && target.draft && target.draft.text.trim() !== "") throw new ApiProblem(409, "INVALID_STATE", POST_CAPTION_MESSAGES.DRAFT_EXISTS, { reason: "draft_exists", draft: target.draft });
 
   const ai = deps.provider();
   if (!ai.ok) throw new Error(`Caption suggestions are not set up: ${ai.problem}`);

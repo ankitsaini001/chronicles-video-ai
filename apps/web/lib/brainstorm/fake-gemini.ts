@@ -94,7 +94,7 @@ function captionAnswer(script: string, isRepair: boolean): Response {
   return answer(
     JSON.stringify({
       suitable: true,
-      caption: `Ever wondered how ${title.replace(/ \/ .*$/, "").toLowerCase()} really works? 🌧️\n\nWatch this ${scenes}-scene explainer and learn it the easy way. Save it for your exams!`,
+      caption: `Ever wondered about ${title.replace(/ \/ .*$/, "").toLowerCase()}? 🌧️\n\nWatch this ${scenes}-scene explainer and learn it the easy way. Save it for your exams!`,
       hashtags: ["#Science", "#LearnWithReels", "#Education", "#StudyTips"],
     }),
   );

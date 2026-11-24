@@ -38,7 +38,8 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
   const [confirming, setConfirming] = useState(false);
   /** The text on screen and the text the server has, readable from timers and the page-leave handler. */
   const latest = useRef(initialDraft?.text ?? "");
-  const saved = useRef<string | null>(initialDraft?.text ?? null);
+  // No saved caption = an empty box: nothing to save until the creator types (or the AI writes).
+  const saved = useRef<string>(initialDraft?.text ?? "");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Saves run one after another, so an older text never lands after a newer one. */
   const queue = useRef<Promise<void>>(Promise.resolve());
