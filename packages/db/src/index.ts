@@ -276,11 +276,17 @@ export {
   type SaveCaptionFixesResult,
 } from "./caption-fixes";
 export {
+  CAPTION_SUGGESTION_LEASE_MS,
   CaptionDraftBodySchema,
   CaptionSuggestionBodySchema,
   countCaptionRequest,
+  hasCaptionText,
+  releaseCaptionSuggestion,
+  saveAiCaptionDraft,
   saveCaptionDraft,
   toCaptionDraftResource,
+  type AiCaptionSave,
+  type CaptionDraftSave,
   type CaptionDraftBody,
   type CaptionDraftDocument,
   type CaptionDraftResource,

@@ -18,7 +18,9 @@ import { ObjectId } from "mongodb";
  * another user's project; Suggest again replaces it; busy (3 logged requests with errorCode, counted
  * once, draft kept), refused, repaired; the 20-request limit; a video that isn't ready, a changed
  * storyboard and another video id → 409; another user's project → 404; 10 an hour; Disconnect hides the
- * box and H1 refuses again.
+ * box and H1 refuses again. F29 review: two automatic suggestions at the same moment count and call
+ * Gemini ONCE (the 60 s lease), the lease is cleared afterwards, and an older H7 save (clientSeq) that
+ * arrives late is skipped.
  *
  * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
  *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
@@ -187,7 +189,8 @@ const projects = () => db.collection<ProjectDocument>("projects");
 const projectDoc = (id: string) => projects().findOne({ _id: new ObjectId(id) });
 const usageRows = (id: string) => db.collection("providerUsage").find({ projectId: new ObjectId(id), operation: "caption" }).sort({ at: 1 }).toArray();
 const h1 = (t: Tester, projectId: string, body: unknown = { renderId: "current" }) => send(t.cookie, "POST", `/api/v1/projects/${projectId}/caption-suggestions`, body);
-const h7 = (t: Tester, projectId: string, text: unknown, headers?: Record<string, string>) => send(t.cookie, "PUT", `/api/v1/projects/${projectId}/caption-draft`, { text }, headers);
+const h7 = (t: Tester, projectId: string, text: unknown, headers?: Record<string, string>, clientSeq?: number) =>
+  send(t.cookie, "PUT", `/api/v1/projects/${projectId}/caption-draft`, clientSeq === undefined ? { text } : { text, clientSeq }, headers);
 /** The caption box's text on the server-rendered page (the <textarea> content). */
 const textareaOf = (html: string) => /<textarea[^>]*data-testid="caption-text"[^>]*>([\s\S]*?)<\/textarea>/.exec(html)?.[1] ?? null;
 
@@ -231,12 +234,19 @@ async function main(): Promise<void> {
       first.json.hashtags.length <= 5 &&
       first.json.language === "en" &&
       first.json.draft?.source === "ai" &&
+      first.json.applied === true &&
       first.json.draft.text === `${first.json.caption}\n\n${first.json.hashtags.join(" ")}`,
     `${first.status} ${JSON.stringify(first.json).slice(0, 160)}`,
   );
   check(
-    "database: captionDraft saved; 1 of the 20 AI requests counted; stateVersion and updatedAt unchanged",
-    afterFirst?.captionDraft?.text === first.json.draft?.text && afterFirst?.captionDraft?.source === "ai" && afterFirst.planRequestCount === 2 && afterFirst.stateVersion === 5 && afterFirst.updatedAt.getTime() === updatedBefore.getTime(),
+    "database: captionDraft saved; 1 of the 20 AI requests counted; the suggestion lease cleared; stateVersion and updatedAt unchanged",
+    afterFirst?.captionDraft?.text === first.json.draft?.text &&
+      afterFirst?.captionDraft?.source === "ai" &&
+      afterFirst.planRequestCount === 2 &&
+      afterFirst.captionSuggestingUntil === undefined &&
+      afterFirst.captionSuggestingId === undefined &&
+      afterFirst.stateVersion === 5 &&
+      afterFirst.updatedAt.getTime() === updatedBefore.getTime(),
     `count ${afterFirst?.planRequestCount} v${afterFirst?.stateVersion}`,
   );
   check(
@@ -275,6 +285,13 @@ async function main(): Promise<void> {
   const noOrigin = await h7(a, pa.projectId, "x", {});
   const foreign7 = await h7(a, pb.projectId, "hijack");
   check("H7 without the app's Origin → 403; on another user's project → 404 (nothing saved there)", noOrigin.status === 403 && foreign7.status === 404 && !(await projectDoc(pb.projectId))?.captionDraft, `${noOrigin.status} ${foreign7.status}`);
+  const seqNew = await h7(a, pa.projectId, "Newer text", undefined, 2_000_000_000_002);
+  const seqLate = await h7(a, pa.projectId, "Older text arriving late", undefined, 2_000_000_000_001);
+  check(
+    "H7 clientSeq: an older save arriving late is skipped (applied false, the newer caption returned and kept)",
+    seqNew.json.applied === true && seqLate.status === 200 && seqLate.json.applied === false && seqLate.json.draft?.text === "Newer text" && (await projectDoc(pa.projectId))?.captionDraft?.text === "Newer text",
+    `${seqLate.status} ${JSON.stringify(seqLate.json).slice(0, 100)}`,
+  );
   const emptied = await h7(a, pa.projectId, "");
   check("H7: an empty box is saved too (the creator can start from nothing)", emptied.status === 200 && (await projectDoc(pa.projectId))?.captionDraft?.text === "", String(emptied.status));
 
@@ -336,6 +353,23 @@ async function main(): Promise<void> {
     "a broken first answer is repaired once → 200; 2 logged requests, counted once",
     repairAnswer.status === 200 && repairAnswer.json.hashtags?.length === 4 && repairRows.length === 2 && repairRows[0]!.outcome === "invalid_output" && (await projectDoc(repair.projectId))?.planRequestCount === 2,
     `${repairAnswer.status} rows ${repairRows.length}`,
+  );
+
+  // ---------- a reload during the first suggestion: two requests at the same moment (user B) ----------
+  const race = await seedReadyProject(b.id, "Why leaves change colour / F29");
+  const [r1, r2] = await Promise.all([h1(b, race.projectId, { renderId: "current", onlyIfEmpty: true }), h1(b, race.projectId, { renderId: "current", onlyIfEmpty: true })]);
+  const raceDoc = await projectDoc(race.projectId);
+  const raceRows = await usageRows(race.projectId);
+  const loser = r1.status === 200 ? r2 : r1;
+  check(
+    "two automatic suggestions at once: ONE 200, the other 409 (in progress or caption exists); counted ONCE; ONE Gemini request; lease cleared",
+    [r1.status, r2.status].filter((x) => x === 200).length === 1 &&
+      loser.status === 409 &&
+      ["suggestion_in_progress", "draft_exists"].includes(loser.json.error?.details?.reason) &&
+      raceDoc?.planRequestCount === 2 &&
+      raceRows.length === 1 &&
+      raceDoc.captionSuggestingId === undefined,
+    `${r1.status}/${r2.status} ${loser.json.error?.details?.reason} count ${raceDoc?.planRequestCount} rows ${raceRows.length}`,
   );
 
   // ---------- 10 an hour (user C: no Instagram, no project; the limit is counted first) ----------

@@ -10,20 +10,34 @@ import { Button, cn } from "@/components/ui";
 // is connected (decision 5). One text box with the caption and its hashtags at the end, a counter
 // "128 / 2,200" (red over Instagram's limit) and ✨ Suggest again (H1).
 // - No caption saved yet: the AI suggests one automatically, ONCE (decision 1). `autoAsked` (this tab)
-//   stops React's strict mode and remounts from asking twice, and H1's `onlyIfEmpty` stops a second
-//   tab or a quick reload from spending another AI request when a caption was saved meanwhile.
+//   stops React's strict mode and remounts from asking twice; on the server H1's `onlyIfEmpty` and its
+//   60 s lease stop a reload or a second tab from spending another request. While another request is
+//   still writing (409 suggestion_in_progress) the box waits, checks ONCE more after ~10 s, then offers
+//   Suggest again.
 // - Typing saves by itself (H7): ~1.5 s after the last key, when the box loses focus and when the page
-//   is left; a quiet "Saved" note. Over 2,200 characters nothing is saved until it is shortened.
-// - Suggest again replaces the text; after the creator's own edits it asks first.
-// - Busy, refused and limit answers show as one plain line; typing your own caption always works.
+//   is left; a quiet "Saved" note. Every save carries a growing `clientSeq`, so a late, older save never
+//   overwrites a newer one; text counts as saved only after the server said so. Coming back to the page
+//   from the browser's back/forward cache saves anything still unsaved. Over 2,200 characters nothing
+//   is saved until it is shortened.
+// - Suggest again replaces the text; after the creator's own edits it asks first (Escape = keep mine).
+// - Busy, refused and limit answers show the server's plain line; typing your own caption always works.
 
 const SAVE_DELAY_MS = 1500;
 /** H1 has 30 s for the AI; this leaves room for the request itself. */
 const SUGGEST_TIMEOUT_MS = 45_000;
+/** After 409 suggestion_in_progress: check once more after this long. */
+const RECHECK_MS = 10_000;
 const MAX = POST_CAPTION_LIMITS.textMax;
 
 /** Projects whose automatic first suggestion was already asked for in this browser tab. */
 const autoAsked = new Set<string>();
+
+/** H7 `clientSeq`: milliseconds, and always higher than the last one this tab sent. */
+let lastSeq = 0;
+function nextSeq(): number {
+  lastSeq = Math.max(Date.now(), lastSeq + 1);
+  return lastSeq;
+}
 
 export type CaptionDraftView = { text: string; source: "ai" | "edited" };
 type SaveState = "idle" | "saving" | "saved" | "failed";
@@ -41,8 +55,11 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
   // No saved caption = an empty box: nothing to save until the creator types (or the AI writes).
   const saved = useRef<string>(initialDraft?.text ?? "");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recheck = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Saves run one after another, so an older text never lands after a newer one. */
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const suggestButton = useRef<HTMLButtonElement>(null);
+  const confirmRow = useRef<HTMLDivElement>(null);
 
   const length = postCaptionLength(text);
   const tooLong = length > MAX;
@@ -56,14 +73,17 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
       const value = latest.current;
       if (value === saved.current || postCaptionLength(value) > MAX) return;
       setSaveState("saving");
-      const answer = await apiSend("PUT", draftUrl, { text: value });
+      const answer = await apiSend("PUT", draftUrl, { text: value, clientSeq: nextSeq() });
       if (answer.ok) {
         saved.current = value;
         setSaveState("saved");
-      } else {
+      } else if (answer.status === 0) {
+        // No answer at all: the connection. The next change or leaving the box tries again.
         setSaveState("failed");
-        // A plain reason from the server (e.g. the video changed); a lost connection says NOT_SAVED.
-        if (answer.status === 409 || answer.status === 404) setProblem(answer.message);
+      } else {
+        // The server's own plain line (e.g. "You're going a bit fast…", the video changed).
+        setSaveState("idle");
+        setProblem(answer.message);
       }
     };
     queue.current = queue.current.then(run, run);
@@ -80,7 +100,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
   }, []);
 
   const suggest = useCallback(
-    async (onlyIfEmpty: boolean) => {
+    async (onlyIfEmpty: boolean, isRecheck = false) => {
       setConfirming(false);
       setProblem(null);
       setSuggesting(true);
@@ -92,10 +112,22 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
         {},
         SUGGEST_TIMEOUT_MS,
       );
+      if (answer.ok) {
+        setSuggesting(false);
+        return show(answer.json.draft);
+      }
+      const reason = answer.code === "INVALID_STATE" ? answer.details?.reason : undefined;
+      const existing = reason === "draft_exists" ? (answer.details?.draft as CaptionDraftView | undefined) : undefined;
+      if (existing) {
+        setSuggesting(false);
+        return show(existing);
+      }
+      if (reason === "suggestion_in_progress" && !isRecheck) {
+        // Another request (a reload, another tab) is writing it: keep "Writing…" and look once more.
+        recheck.current = setTimeout(() => void suggest(true, true), RECHECK_MS);
+        return;
+      }
       setSuggesting(false);
-      if (answer.ok) return show(answer.json.draft);
-      const existing = answer.code === "INVALID_STATE" && answer.details?.reason === "draft_exists" ? (answer.details.draft as CaptionDraftView | undefined) : undefined;
-      if (existing) return show(existing);
       setProblem(answer.message);
     },
     [flush, projectId, renderId, show],
@@ -109,21 +141,42 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
     // Runs once on mount by design (the guard above also makes a second run do nothing).
   }, []);
 
-  // Leaving the page (closing the tab, or a link to another screen) saves what was typed.
+  // Leaving the page (closing the tab, or a link to another screen) saves what was typed; coming back
+  // from the browser's back/forward cache saves whatever didn't make it.
   useEffect(() => {
     const saveOnLeave = () => {
       const value = latest.current;
       if (value === saved.current || postCaptionLength(value) > MAX) return;
-      saved.current = value;
-      void fetch(draftUrl, { method: "PUT", keepalive: true, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: value }) }).catch(() => undefined);
+      void fetch(draftUrl, {
+        method: "PUT",
+        keepalive: true,
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: value, clientSeq: nextSeq() }),
+      })
+        .then((response) => {
+          if (response.ok && latest.current === value) saved.current = value;
+        })
+        .catch(() => undefined);
+    };
+    const onShow = (event: PageTransitionEvent) => {
+      if (event.persisted) void flush();
     };
     window.addEventListener("pagehide", saveOnLeave);
+    window.addEventListener("pageshow", onShow);
     return () => {
       window.removeEventListener("pagehide", saveOnLeave);
+      window.removeEventListener("pageshow", onShow);
       if (timer.current) clearTimeout(timer.current);
+      if (recheck.current) clearTimeout(recheck.current);
       saveOnLeave();
     };
-  }, [draftUrl]);
+  }, [draftUrl, flush]);
+
+  // The confirm row takes the focus (its first button) when it opens.
+  useEffect(() => {
+    if (confirming) confirmRow.current?.querySelector("button")?.focus();
+  }, [confirming]);
 
   function change(value: string) {
     latest.current = value;
@@ -143,6 +196,11 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
     void suggest(false);
   }
 
+  function keepMine() {
+    setConfirming(false);
+    suggestButton.current?.focus();
+  }
+
   const status = suggesting
     ? POST_CAPTION_MESSAGES.SUGGESTING
     : tooLong
@@ -151,7 +209,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
         ? POST_CAPTION_MESSAGES.SAVING
         : saveState === "saved"
           ? POST_CAPTION_MESSAGES.SAVED
-          : saveState === "failed" && !problem
+          : saveState === "failed"
             ? POST_CAPTION_MESSAGES.NOT_SAVED
             : "";
 
@@ -162,6 +220,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
           Caption
         </label>
         <button
+          ref={suggestButton}
           type="button"
           onClick={pressSuggest}
           disabled={suggesting}
@@ -176,7 +235,19 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
       </div>
 
       {confirming && (
-        <div role="alertdialog" aria-labelledby="caption-confirm" data-testid="caption-confirm" className="flex flex-col gap-3 rounded-xl border border-warning/25 bg-warning-bg px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          ref={confirmRow}
+          role="alertdialog"
+          aria-labelledby="caption-confirm"
+          data-testid="caption-confirm"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              keepMine();
+            }
+          }}
+          className="flex flex-col gap-3 rounded-xl border border-warning/25 bg-warning-bg px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
           <p id="caption-confirm" className="text-xs leading-relaxed text-warning">
             {POST_CAPTION_MESSAGES.CONFIRM_REPLACE} Your own changes will be lost.
           </p>
@@ -184,7 +255,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
             <Button type="button" variant="secondary" size="sm" onClick={() => void suggest(false)} data-testid="caption-confirm-replace">
               Replace
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setConfirming(false)}>
+            <Button type="button" variant="secondary" size="sm" onClick={keepMine} data-testid="caption-confirm-keep">
               Keep mine
             </Button>
           </div>

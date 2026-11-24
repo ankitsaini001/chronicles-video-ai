@@ -2,16 +2,18 @@ import {
   API_RATE_LIMITS,
   CaptionDraftBodySchema,
   CaptionSuggestionBodySchema,
+  CAPTION_SUGGESTION_LEASE_MS,
   cleanPostCaptionText,
   countCaptionRequest,
   joinPostCaption,
   POST_CAPTION_LIMITS,
   POST_CAPTION_MESSAGES,
   postCaptionLength,
+  releaseCaptionSuggestion,
+  saveAiCaptionDraft,
   saveCaptionDraft,
   USAGE_LIMITS,
   type CaptionDraftResource,
-  type CaptionRequestCount,
   type RateLimitResult,
 } from "@bytereel/db";
 import {
@@ -25,9 +27,9 @@ import {
 } from "@bytereel/pipeline/post-caption";
 import { type Db, ObjectId } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
-import { handleApiRequest, type ApiDeps } from "../apps/web/lib/api/v1";
+import { ApiProblem, handleApiRequest, type ApiDeps } from "../apps/web/lib/api/v1";
 import type { SessionUser } from "../apps/web/lib/auth/session";
-import { runCaptionDraftSave, runCaptionSuggestion, type CaptionSuggestionDeps, type CaptionTarget, type CaptionUsageFinish } from "../apps/web/lib/post-caption/handler";
+import { runCaptionDraftSave, runCaptionSuggestion, type CaptionRequestCountResult, type CaptionSuggestionDeps, type CaptionTarget, type CaptionUsageFinish } from "../apps/web/lib/post-caption/handler";
 import { postCaptionProviderFromEnv } from "../apps/web/lib/post-caption/provider";
 import { ProviderError } from "../packages/pipeline/src/providers";
 
@@ -82,7 +84,7 @@ function target(overrides: Partial<CaptionTarget> = {}): CaptionTarget {
   };
 }
 
-function setup(options: { target?: CaptionTarget | null; script?: Array<string | Error>; count?: CaptionRequestCount; hourlyAllowed?: boolean; providerOk?: boolean; saveFails?: boolean } = {}) {
+function setup(options: { target?: CaptionTarget | null; script?: Array<string | Error>; count?: CaptionRequestCountResult; hourlyAllowed?: boolean; providerOk?: boolean; saveFails?: boolean } = {}) {
   const gemini = new FakeGemini(options.script);
   const finished: CaptionUsageFinish[] = [];
   const saved: string[] = [];
@@ -90,12 +92,13 @@ function setup(options: { target?: CaptionTarget | null; script?: Array<string |
   const deps: CaptionSuggestionDeps = {
     load: vi.fn(async () => (options.target === undefined ? target() : options.target)),
     provider: vi.fn(() => (options.providerOk === false ? { ok: false as const, problem: "GEMINI_API_KEY is missing." } : { ok: true as const, provider: gemini, fake: false })),
-    countRequest: vi.fn(async () => options.count ?? { ok: true as const, used: 3 }),
-    saveDraft: vi.fn(async (text: string): Promise<CaptionDraftResource | null> => {
+    countRequest: vi.fn(async (): Promise<CaptionRequestCountResult> => options.count ?? { ok: true as const, used: 3, leaseId: "lease-1" }),
+    saveDraft: vi.fn(async (text: string): Promise<{ applied: boolean; draft: CaptionDraftResource } | null> => {
       if (options.saveFails) return null;
       saved.push(text);
-      return { text, updatedAt: "2026-11-24T06:00:00.000Z", source: "ai" };
+      return { applied: true, draft: { text, updatedAt: "2026-11-24T06:00:00.000Z", source: "ai" } };
     }),
+    releaseLease: vi.fn(async () => undefined),
     reserveUsage: vi.fn(async () => `usage-${finished.length + 1}`),
     finishUsage: vi.fn(async (_handle, input) => void finished.push(input)),
     log: (level, message) => void logs.push(`${level}: ${message}`),
@@ -169,17 +172,26 @@ describe("the model's answer check", () => {
     ["a caption over 2,000 characters", { caption: "a ".repeat(1001) + "b", hashtags: ["#a", "#b", "#c"] }, "at most 2000"],
     ["an empty caption", { caption: "   ", hashtags: ["#a", "#b", "#c"] }, "empty"],
     ["a hashtag inside the caption", { caption: "Learn rain #now", hashtags: ["#a", "#b", "#c"] }, "contains hashtags"],
-    ["a hashtag with a space", { caption: "Rain", hashtags: ["#water cycle", "#b", "#c", "#d"] }, "not allowed"],
-    ["a hashtag with punctuation", { caption: "Rain", hashtags: ["#rain!", "#b", "#c", "#d"] }, "not allowed"],
-    ["a hashtag of 101 characters", { caption: "Rain", hashtags: [`#${"a".repeat(101)}`, "#b", "#c", "#d"] }, "not allowed"],
-    ["6 hashtags", { caption: "Rain", hashtags: ["#a", "#b", "#c", "#d", "#e", "#f"] }, "3 to 5"],
+    ["only 2 good hashtags left after dropping bad ones", { caption: "Rain", hashtags: ["#water cycle", "#rain!", "#b", "#c"] }, 'not allowed: "#water cycle", "#rain!"'],
+    ["a 101-character hashtag leaving 2", { caption: "Rain", hashtags: [`#${"a".repeat(101)}`, "#b", "#c"] }, "2 different valid"],
     ["2 hashtags", { caption: "Rain", hashtags: ["#a", "#b"] }, "3 to 5"],
+    ["an @mention in the caption", { caption: "Thanks @physics.guru for the idea", hashtags: ["#a", "#b", "#c"] }, "@mention"],
+    ["a link in the caption", { caption: "More at https://example.com/rain", hashtags: ["#a", "#b", "#c"] }, "link"],
+    ["a web address in the caption", { caption: "Notes on physicsbyananya.in", hashtags: ["#a", "#b", "#c"] }, "link"],
     ["a caption not in English", { caption: "बारिश कैसे होती है?", hashtags: ["#a", "#b", "#c"] }, "not in English"],
     ["caption + hashtags over 2,200 together", { caption: "a ".repeat(999) + "b", hashtags: [1, 2, 3, 4, 5].map((n) => `#${String(n).repeat(100)}`) }, "together"],
   ])("refuses %s (sent to the repair)", (_label, answer, problem) => {
     const result = evaluatePostCaptionOutput(JSON.stringify({ suitable: true, ...answer }), "en");
     expect(result.kind).toBe("invalid");
     if (result.kind === "invalid") expect(result.problems.join(" ")).toContain(problem);
+  });
+
+  it("drops bad hashtags, repeats and extras beyond 5 when at least 3 good ones remain (no repair)", () => {
+    const result = evaluatePostCaptionOutput(
+      JSON.stringify({ suitable: true, caption: "Rain? 2.5 litres a day!", hashtags: ["#water cycle", "#rain!", `#${"a".repeat(101)}`, "#a", "#A", "#b", "#c", "#d", "#e", "#f"] }),
+      "en",
+    );
+    expect(result).toEqual({ kind: "ok", suggestion: { caption: "Rain? 2.5 litres a day!", hashtags: ["#a", "#b", "#c", "#d", "#e"] } });
   });
 
   it("accepts a hashtag of exactly 100 characters and Devanagari hashtags for Hindi", () => {
@@ -243,7 +255,9 @@ describe("H1 caption suggestions", () => {
     expect(body.draft).toEqual({ text: `${body.caption}\n\n#WaterCycle #Science #LearnWithReels #Education`, updatedAt: "2026-11-24T06:00:00.000Z", source: "ai" });
     expect(t.saved).toHaveLength(1);
     expect(t.deps.countRequest).toHaveBeenCalledTimes(1);
-    expect(t.deps.countRequest).toHaveBeenCalledWith(RENDER);
+    expect(t.deps.countRequest).toHaveBeenCalledWith(RENDER, false);
+    expect(body.applied).toBe(true);
+    expect(t.deps.releaseLease).toHaveBeenCalledWith("lease-1");
     expect(t.finished).toEqual([{ status: "final", outcome: "ok", model: "gemini-3.6-flash-001", units: { promptTokens: 700, outputTokens: 200 }, estCostInr: 0, latencyMs: expect.any(Number) }]);
     // The storyboard reached Gemini as data, with the language rule.
     const request = t.gemini.generate.mock.calls[0]![0];
@@ -346,6 +360,8 @@ describe("H1 caption suggestions", () => {
     expect(t.finished).toHaveLength(3);
     expect(t.finished.every((f) => f.status === "failed" && f.outcome === "busy" && f.errorCode === "transient 503 UNAVAILABLE")).toBe(true);
     expect(t.saved).toHaveLength(0);
+    // The lease is released when the request fails.
+    expect(t.deps.releaseLease).toHaveBeenCalledWith("lease-1");
   });
 
   it("a busy answer then a good one → 200 (still one count)", async () => {
@@ -414,11 +430,16 @@ describe("H7 caption draft save", () => {
     );
 
   it("saves the cleaned text as the creator's edit", async () => {
-    const save = vi.fn(async (text: string) => ({ text, updatedAt: "2026-11-24T06:00:00.000Z", source: "edited" as const }));
-    const r = await call({ load: async () => ({ videoReady: true }), save }, { text: "My caption\r\n\n#rain" });
+    const save = vi.fn(async (text: string) => ({ applied: true, draft: { text, updatedAt: "2026-11-24T06:00:00.000Z", source: "edited" as const } }));
+    const r = await call({ load: async () => ({ videoReady: true }), save }, { text: "My caption\r\n\n#rain", clientSeq: 1732428000000 });
     expect(r.status).toBe(200);
-    expect(save).toHaveBeenCalledWith("My caption\n\n#rain");
-    expect((await json(r)).draft.source).toBe("edited");
+    expect(save).toHaveBeenCalledWith("My caption\n\n#rain", 1732428000000);
+    const body = await json(r);
+    expect(body.draft.source).toBe("edited");
+    expect(body.applied).toBe(true);
+    // clientSeq must be a whole number ≥ 0.
+    expect((await call({ load: async () => ({ videoReady: true }), save }, { text: "x", clientSeq: -1 })).status).toBe(400);
+    expect((await call({ load: async () => ({ videoReady: true }), save }, { text: "x", clientSeq: 1.5 })).status).toBe(400);
   });
 
   it("another user's project → 404; a video that isn't ready → 409; nothing saved", async () => {
@@ -444,57 +465,227 @@ describe("H7 caption draft save", () => {
   });
 });
 
-// ---------- the database filters (fake database) ----------
+// ---------- the database functions on an in-memory projects collection ----------
+// A tiny stand-in for MongoDB that evaluates the REAL filters these functions send ($and, $or, $lt,
+// $gt, $not, $regex, null = missing, ObjectId equality, dotted paths) and applies $inc/$set/$unset.
+// Each call runs without awaiting in between, so it is atomic like one MongoDB update.
 
-function fakeProjects(handlers: { findOneAndUpdate?: (...a: any[]) => unknown; findOne?: (...a: any[]) => unknown; updateOne?: (...a: any[]) => unknown }) {
-  const calls: { method: string; args: any[] }[] = [];
-  const collection = () =>
-    new Proxy(
-      {},
-      {
-        get:
-          (_t, method: string) =>
-          async (...args: any[]) => {
-            calls.push({ method, args });
-            const handler = handlers[method as keyof typeof handlers];
-            if (!handler) throw new Error(`unexpected ${method}`);
-            return handler(...args);
-          },
-      },
-    );
-  return { db: { collection } as unknown as Db, calls };
+type Doc = Record<string, any>;
+const getPath = (doc: Doc, path: string) => path.split(".").reduce<any>((v, k) => (v === null || v === undefined ? undefined : v[k]), doc);
+const comparable = (v: any) => (v instanceof Date ? v.getTime() : v);
+function matchValue(value: any, cond: any): boolean {
+  if (cond === null) return value === null || value === undefined;
+  if (cond instanceof ObjectId) return value instanceof ObjectId && value.equals(cond);
+  if (cond instanceof RegExp) return typeof value === "string" && cond.test(value);
+  if (typeof cond === "object" && !(cond instanceof Date) && Object.keys(cond).some((k) => k.startsWith("$"))) {
+    return Object.entries(cond).every(([op, arg]) => {
+      if (op === "$lt") return value !== undefined && value !== null && comparable(value) < comparable(arg);
+      if (op === "$gt") return value !== undefined && value !== null && comparable(value) > comparable(arg);
+      if (op === "$not") return !matchValue(value, arg);
+      if (op === "$regex") return typeof value === "string" && (arg as RegExp).test(value);
+      throw new Error(`fake: unsupported ${op}`);
+    });
+  }
+  return comparable(value) === comparable(cond);
+}
+function matches(doc: Doc, filter: Doc): boolean {
+  return Object.entries(filter).every(([key, cond]) => {
+    if (key === "$and") return (cond as Doc[]).every((f) => matches(doc, f));
+    if (key === "$or") return (cond as Doc[]).some((f) => matches(doc, f));
+    return matchValue(getPath(doc, key), cond);
+  });
+}
+function applyUpdate(doc: Doc, update: Doc): void {
+  for (const [k, v] of Object.entries(update.$inc ?? {})) doc[k] = (doc[k] ?? 0) + (v as number);
+  for (const [k, v] of Object.entries(update.$set ?? {})) doc[k] = v;
+  for (const k of Object.keys(update.$unset ?? {})) delete doc[k];
+}
+/** A deep copy that keeps ObjectIds and Dates (what the driver returns). */
+const clone = (v: any): any =>
+  v instanceof ObjectId ? v : v instanceof Date ? new Date(v) : Array.isArray(v) ? v.map(clone) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clone(x)])) : v;
+function memoryDb(docs: Doc[]) {
+  const counts = { updates: 0 };
+  const collection = {
+    findOne: async (filter: Doc) => {
+      const doc = docs.find((d) => matches(d, filter));
+      return doc ? clone(doc) : null;
+    },
+    findOneAndUpdate: async (filter: Doc, update: Doc) => {
+      const doc = docs.find((d) => matches(d, filter));
+      if (!doc) return null;
+      applyUpdate(doc, update);
+      counts.updates++;
+      return clone(doc);
+    },
+    updateOne: async (filter: Doc, update: Doc) => {
+      const doc = docs.find((d) => matches(d, filter));
+      if (doc) applyUpdate(doc, update);
+      return { matchedCount: doc ? 1 : 0 };
+    },
+  };
+  return { db: { collection: () => collection } as unknown as Db, docs, counts };
 }
 
-describe("countCaptionRequest / saveCaptionDraft", () => {
-  const ids = { ownerId: user.id, projectId: new ObjectId(PROJECT), renderId: new ObjectId(RENDER) };
+const OWNER_ID = new ObjectId(user.id);
+const PROJECT_ID = new ObjectId(PROJECT);
+const RENDER_ID = new ObjectId(RENDER);
+function readyProject(extra: Doc = {}): Doc {
+  return { _id: PROJECT_ID, ownerId: OWNER_ID, state: "video_ready", currentRenderId: RENDER_ID, planRequestCount: 3, ...extra };
+}
 
-  it("counts +1 only for the owner's video_ready project with THIS video and under 20; nothing else changes", async () => {
-    const fake = fakeProjects({ findOneAndUpdate: () => ({ planRequestCount: 4 }) });
-    expect(await countCaptionRequest(fake.db, ids)).toEqual({ ok: true, used: 4 });
-    const [filter, update] = fake.calls[0]!.args;
-    expect(filter).toEqual({ _id: ids.projectId, ownerId: new ObjectId(user.id), state: "video_ready", currentRenderId: ids.renderId, planRequestCount: { $lt: 20 } });
-    expect(update).toEqual({ $inc: { planRequestCount: 1 } });
+/** H1 wired to the REAL count / lease / save functions over the in-memory store; Gemini can be held. */
+function liveSetup(project: Doc, script: Array<string | Error> = []) {
+  const store = memoryDb([project]);
+  let release: () => void = () => undefined;
+  const gate = { held: false, wait: Promise.resolve() };
+  const hold = () => {
+    gate.held = true;
+    gate.wait = new Promise<void>((resolve) => (release = resolve));
+  };
+  const gemini = new FakeGemini(script);
+  const generate = gemini.generate.getMockImplementation()!;
+  gemini.generate.mockImplementation(async (request) => {
+    if (gate.held) await gate.wait;
+    return generate(request);
+  });
+  const deps: CaptionSuggestionDeps = {
+    load: async () => {
+      const doc = store.docs[0]!;
+      return { ...target(), draft: doc.captionDraft ? { text: doc.captionDraft.text, updatedAt: doc.captionDraft.updatedAt.toISOString(), source: doc.captionDraft.source } : null };
+    },
+    provider: () => ({ ok: true as const, provider: gemini, fake: false }),
+    countRequest: async (renderId, onlyIfEmpty) => {
+      const counted = await countCaptionRequest(store.db, { ownerId: user.id, projectId: PROJECT_ID, renderId: new ObjectId(renderId), onlyIfEmpty });
+      return "draft" in counted ? { ok: false, reason: "draft_exists", draft: { text: counted.draft.text, updatedAt: counted.draft.updatedAt.toISOString(), source: counted.draft.source } } : counted;
+    },
+    saveDraft: async (text, onlyIfEmpty) => {
+      const saved = await saveAiCaptionDraft(store.db, { ownerId: user.id, projectId: PROJECT_ID, text, onlyIfEmpty });
+      return saved ? { applied: saved.applied, draft: { text: saved.draft.text, updatedAt: saved.draft.updatedAt.toISOString(), source: saved.draft.source } } : null;
+    },
+    releaseLease: (leaseId) => releaseCaptionSuggestion(store.db, { ownerId: user.id, projectId: PROJECT_ID, leaseId }),
+    reserveUsage: async () => "usage",
+    finishUsage: async () => undefined,
+    log: () => undefined,
+    run: { sleep: async () => undefined },
+  };
+  const run = (onlyIfEmpty: boolean) => runCaptionSuggestion({ body: { renderId: "current", ...(onlyIfEmpty ? { onlyIfEmpty: true } : {}) }, requestId: "req_TEST" }, deps);
+  /** Waits until the held request has counted and is inside Gemini. */
+  const inGemini = async () => {
+    for (let i = 0; i < 50 && gemini.generate.mock.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 1));
+  };
+  return { store, gemini, run, hold, release: () => release(), inGemini };
+}
+
+const reasonOf = async (promise: Promise<unknown>) => {
+  try {
+    await promise;
+    return "ok";
+  } catch (error) {
+    return error instanceof ApiProblem ? String(error.details?.reason ?? error.code) : String(error);
+  }
+};
+
+describe("the suggestion lease and the conditional save (F29 review)", () => {
+  it("a reload during the first suggestion: two onlyIfEmpty calls → ONE count and ONE Gemini call", async () => {
+    const t = liveSetup(readyProject());
+    t.hold();
+    const first = t.run(true);
+    await t.inGemini();
+    expect(t.store.docs[0]!.planRequestCount).toBe(4);
+    expect(t.store.docs[0]!.captionSuggestingUntil).toBeInstanceOf(Date);
+    // The reload: the box is still empty, but the lease is taken.
+    expect(await reasonOf(t.run(true))).toBe("suggestion_in_progress");
+    // Suggest again (another tab) respects the lease too.
+    expect(await reasonOf(t.run(false))).toBe("suggestion_in_progress");
+    t.release();
+    const result = await first;
+    expect(result.applied).toBe(true);
+    expect(t.gemini.generate).toHaveBeenCalledTimes(1);
+    expect(t.store.docs[0]!.planRequestCount).toBe(4);
+    expect(t.store.docs[0]!.captionDraft.source).toBe("ai");
+    // The lease ended with the save.
+    expect(t.store.docs[0]!.captionSuggestingUntil).toBeUndefined();
+    expect(t.store.docs[0]!.captionSuggestingId).toBeUndefined();
+    // After it: the automatic suggestion finds the caption; nothing more is counted.
+    expect(await reasonOf(t.run(true))).toBe("draft_exists");
+    expect(t.store.docs[0]!.planRequestCount).toBe(4);
   });
 
-  it("at 20 → quota; another state or video → state", async () => {
-    const full = fakeProjects({ findOneAndUpdate: () => null, findOne: () => ({ state: "video_ready", currentRenderId: ids.renderId, planRequestCount: 20 }) });
-    expect(await countCaptionRequest(full.db, ids)).toEqual({ ok: false, reason: "quota", used: 20 });
-    const moved = fakeProjects({ findOneAndUpdate: () => null, findOne: () => ({ state: "generating", currentRenderId: ids.renderId, planRequestCount: 3 }) });
-    expect(await countCaptionRequest(moved.db, ids)).toEqual({ ok: false, reason: "state" });
-    const missing = fakeProjects({ findOneAndUpdate: () => null, findOne: () => null });
-    expect(await countCaptionRequest(missing.db, ids)).toEqual({ ok: false, reason: "state" });
+  it("a caption typed while the AI writes is KEPT (onlyIfEmpty) and returned", async () => {
+    const t = liveSetup(readyProject());
+    t.hold();
+    const first = t.run(true);
+    await t.inGemini();
+    expect((await saveCaptionDraft(t.store.db, { ownerId: user.id, projectId: PROJECT_ID, text: "Mine, typed meanwhile", clientSeq: 10 }))?.applied).toBe(true);
+    t.release();
+    const result = await first;
+    expect(result.applied).toBe(false);
+    expect(result.draft).toMatchObject({ text: "Mine, typed meanwhile", source: "edited" });
+    expect(t.store.docs[0]!.captionDraft).toMatchObject({ text: "Mine, typed meanwhile", source: "edited" });
+    expect(t.store.docs[0]!.captionSuggestingId).toBeUndefined();
   });
 
-  it("saves only on the owner's video_ready project, and only captionDraft (no stateVersion, no updatedAt)", async () => {
+  it("whitespace only counts as an empty box", async () => {
+    const t = liveSetup(readyProject({ captionDraft: { text: "  \n ", updatedAt: new Date(), source: "edited" } }));
+    expect((await t.run(true)).applied).toBe(true);
+  });
+
+  it("an expired lease (a crashed request) no longer blocks; a live one does", async () => {
     const now = new Date("2026-11-24T06:00:00.000Z");
-    const fake = fakeProjects({ updateOne: () => ({ matchedCount: 1 }) });
-    const draft = await saveCaptionDraft(fake.db, { ownerId: user.id, projectId: ids.projectId, text: "Hi", source: "edited", now });
-    expect(draft).toEqual({ text: "Hi", updatedAt: now, source: "edited" });
-    const [filter, update] = fake.calls[0]!.args;
-    expect(filter).toEqual({ _id: ids.projectId, ownerId: new ObjectId(user.id), state: "video_ready" });
-    expect(update).toEqual({ $set: { captionDraft: { text: "Hi", updatedAt: now, source: "edited" } } });
-    const other = fakeProjects({ updateOne: () => ({ matchedCount: 0 }) });
-    expect(await saveCaptionDraft(other.db, { ownerId: user.id, projectId: ids.projectId, text: "Hi", source: "ai" })).toBeNull();
+    const store = memoryDb([readyProject({ captionSuggestingUntil: new Date(now.getTime() + 5_000), captionSuggestingId: new ObjectId() })]);
+    const ids = { ownerId: user.id, projectId: PROJECT_ID, renderId: RENDER_ID };
+    expect(await countCaptionRequest(store.db, { ...ids, now })).toEqual({ ok: false, reason: "in_progress" });
+    expect(store.docs[0]!.planRequestCount).toBe(3);
+    const later = new Date(now.getTime() + 5_000); // exactly at the end: free
+    const counted = await countCaptionRequest(store.db, { ...ids, now: later });
+    expect(counted).toMatchObject({ ok: true, used: 4 });
+    expect(store.docs[0]!.captionSuggestingUntil).toEqual(new Date(later.getTime() + CAPTION_SUGGESTION_LEASE_MS));
+    expect(CAPTION_SUGGESTION_LEASE_MS).toBe(60_000);
+  });
+
+  it("a failed suggestion releases its lease (counted once); a release never clears another request's lease", async () => {
+    const t = liveSetup(readyProject(), [new ProviderError({ provider: "gemini", kind: "safety", message: "blocked" })]);
+    expect(await reasonOf(t.run(false))).toBe("PROVIDER_REJECTED");
+    expect(t.store.docs[0]!.planRequestCount).toBe(4);
+    expect(t.store.docs[0]!.captionSuggestingUntil).toBeUndefined();
+    const other = new ObjectId();
+    t.store.docs[0]!.captionSuggestingId = other;
+    t.store.docs[0]!.captionSuggestingUntil = new Date(Date.now() + 60_000);
+    await releaseCaptionSuggestion(t.store.db, { ownerId: user.id, projectId: PROJECT_ID, leaseId: new ObjectId().toHexString() });
+    expect(t.store.docs[0]!.captionSuggestingId).toEqual(other);
+  });
+
+  it("count: only the owner's video_ready project with THIS video, under 20; at 20 → quota; else state", async () => {
+    const ids = { ownerId: user.id, projectId: PROJECT_ID, renderId: RENDER_ID };
+    expect(await countCaptionRequest(memoryDb([readyProject({ planRequestCount: 20 })]).db, ids)).toEqual({ ok: false, reason: "quota", used: 20 });
+    expect(await countCaptionRequest(memoryDb([readyProject({ state: "generating" })]).db, ids)).toEqual({ ok: false, reason: "state" });
+    expect(await countCaptionRequest(memoryDb([readyProject({ currentRenderId: new ObjectId() })]).db, ids)).toEqual({ ok: false, reason: "state" });
+    expect(await countCaptionRequest(memoryDb([readyProject({ ownerId: new ObjectId() })]).db, ids)).toEqual({ ok: false, reason: "state" });
+    const draft = { text: "Mine", updatedAt: new Date(), source: "edited" };
+    expect(await countCaptionRequest(memoryDb([readyProject({ captionDraft: draft })]).db, { ...ids, onlyIfEmpty: true })).toEqual({ ok: false, reason: "draft_exists", draft });
+    // Without onlyIfEmpty (Suggest again) a saved caption doesn't stop it.
+    expect(await countCaptionRequest(memoryDb([readyProject({ captionDraft: draft })]).db, ids)).toMatchObject({ ok: true, used: 4 });
+  });
+
+  it("H7 clientSeq: a newer save wins, an older or repeated one is skipped (the stored caption returned); no seq always saves; stateVersion untouched", async () => {
+    const store = memoryDb([readyProject({ stateVersion: 5, updatedAt: new Date("2026-11-01T00:00:00Z") })]);
+    const save = (text: string, clientSeq?: number) => saveCaptionDraft(store.db, { ownerId: user.id, projectId: PROJECT_ID, text, clientSeq });
+    expect((await save("v2", 200))?.applied).toBe(true);
+    const late = await save("v1 (late)", 100);
+    expect(late).toMatchObject({ applied: false, draft: { text: "v2" } });
+    expect((await save("v2 again", 200))?.applied).toBe(false);
+    expect((await save("v3", 300))?.applied).toBe(true);
+    expect((await save("no seq"))?.applied).toBe(true);
+    expect(store.docs[0]).toMatchObject({ captionDraft: { text: "no seq", source: "edited" }, captionDraftSeq: 300, stateVersion: 5, updatedAt: new Date("2026-11-01T00:00:00Z") });
+    expect(await saveCaptionDraft(memoryDb([readyProject({ state: "generating" })]).db, { ownerId: user.id, projectId: PROJECT_ID, text: "x", clientSeq: 1 })).toBeNull();
+    expect(await saveCaptionDraft(memoryDb([readyProject({ ownerId: new ObjectId() })]).db, { ownerId: user.id, projectId: PROJECT_ID, text: "x" })).toBeNull();
+  });
+
+  it("the AI save without onlyIfEmpty (Suggest again) replaces the caption; never on a project that isn't ready", async () => {
+    const store = memoryDb([readyProject({ captionDraft: { text: "Mine", updatedAt: new Date(), source: "edited" } })]);
+    expect((await saveAiCaptionDraft(store.db, { ownerId: user.id, projectId: PROJECT_ID, text: "AI" }))?.applied).toBe(true);
+    expect(store.docs[0]!.captionDraft).toMatchObject({ text: "AI", source: "ai" });
+    expect(await saveAiCaptionDraft(memoryDb([readyProject({ state: "generating" })]).db, { ownerId: user.id, projectId: PROJECT_ID, text: "AI", onlyIfEmpty: true })).toBeNull();
   });
 });
 

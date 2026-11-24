@@ -69,4 +69,6 @@ export const POST_CAPTION_MESSAGES = {
   NOT_CONNECTED: "Please connect your Instagram first.",
   NOT_READY: "This video can't be published right now. Please go back to your video.",
   DRAFT_EXISTS: "A caption is already saved for this video.",
+  /** H1 while another suggestion for this project is still being written (a reload, another tab). */
+  IN_PROGRESS: "Your caption is still being written. Please wait a moment, then press Suggest again.",
 } as const;

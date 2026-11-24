@@ -1,6 +1,7 @@
 import { brainstormIdeas, BrainstormError, type BrainstormInput, type BrainstormUsageSink, type TokenUsage } from "@bytereel/pipeline/brainstorm";
 import type { BrainstormBody, BrainstormCountResult } from "@bytereel/db/brainstorm";
 import { isLanguageEnabled, languageUnavailableMessage } from "@bytereel/db/languages";
+import { GEMINI_FREE_TIER_COST_INR } from "../ai-costs";
 import { API_MESSAGES, ApiProblem } from "../api/v1";
 import type { SessionUser } from "../auth/session";
 import type { BrainstormProviderResult } from "./provider";
@@ -14,8 +15,6 @@ import type { BrainstormProviderResult } from "./provider";
 // TODO(F27/F36): 503 SPEND_CEILING and 503 MAINTENANCE (from the `settings` document), checked
 // before the daily count, like C2.
 
-/** We pay nothing on Gemini's free tier; the token counts are kept, so a paid price can be applied later. */
-export const GEMINI_FREE_TIER_COST_INR = 0;
 
 export interface UsageFinish {
   status: "final" | "failed";

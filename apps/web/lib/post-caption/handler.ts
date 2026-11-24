@@ -1,9 +1,9 @@
-import { USAGE_LIMITS, type CaptionDraftBody, type CaptionDraftResource, type CaptionRequestCount, type CaptionSuggestionBody } from "@bytereel/db";
+import { hasCaptionText, USAGE_LIMITS, type CaptionDraftBody, type CaptionDraftResource, type CaptionRequestCount, type CaptionSuggestionBody } from "@bytereel/db";
 import { isLanguageEnabled, languageUnavailableMessage, type Language } from "@bytereel/db/languages";
 import { joinPostCaption, POST_CAPTION_MESSAGES } from "@bytereel/db/post-caption";
 import { PostCaptionError, suggestPostCaption, type PostCaptionInput, type PostCaptionScript, type PostCaptionUsageSink, type TokenUsage } from "@bytereel/pipeline/post-caption";
+import { GEMINI_FREE_TIER_COST_INR } from "../ai-costs";
 import { ApiProblem } from "../api/v1";
-import { GEMINI_FREE_TIER_COST_INR } from "../brainstorm/handler";
 import type { PostCaptionProviderResult } from "./provider";
 
 // F29 "AI caption + hashtags": the work of H1 (POST …/caption-suggestions) and H7 (PUT …/caption-draft)
@@ -12,9 +12,13 @@ import type { PostCaptionProviderResult } from "./provider";
 // H1 order: the owner's project (404) → its language is switched on (422) → the video is ready, current
 // and made from the current storyboard (409 INVALID_STATE) → the renderId sent is that video (409) →
 // Instagram connected (409 INSTAGRAM_NOT_CONNECTED, decision 5) → `onlyIfEmpty` and a caption already
-// saved (409 `draft_exists`, no AI) → the AI is set up (500) → count 1 of the project's 20 AI requests,
-// atomically (429 QUOTA_EXCEEDED) → Gemini (30 s) → save the draft → 200. A refused request never
-// reaches Gemini. No Gemini spend ceiling exists yet (API.md §10.2, F27: free tier), so no SPEND_CEILING.
+// saved (409 `draft_exists`, no AI) → the AI is set up (500) → ONE atomic update: count 1 of the
+// project's 20 AI requests AND take the 60 s suggestion lease (429 QUOTA_EXCEEDED; 409
+// `suggestion_in_progress` while another suggestion runs; 409 `draft_exists` if the box was filled
+// meanwhile) → Gemini (30 s) → save (onlyIfEmpty: only into a still-empty box; a caption typed
+// meanwhile is kept and returned) → release the lease (also when anything failed) → 200.
+// A refused request never reaches Gemini. No Gemini spend ceiling exists yet (API.md §10.2, F27: free
+// tier), so no SPEND_CEILING.
 
 /** What H1 needs about the project, read by the route with the owner check. */
 export interface CaptionTarget {
@@ -37,11 +41,16 @@ export interface CaptionUsageFinish {
   errorCode?: string;
 }
 
+/** The AI save's result, as the route returns it: `applied: false` = a caption typed meanwhile was kept. */
+export type AiSaveResult = { applied: boolean; draft: CaptionDraftResource } | null;
+
 export interface CaptionSuggestionDeps {
   load: () => Promise<CaptionTarget | null>;
   provider: () => PostCaptionProviderResult;
-  countRequest: (renderId: string) => Promise<CaptionRequestCount>;
-  saveDraft: (text: string) => Promise<CaptionDraftResource | null>;
+  /** The atomic count + lease (countCaptionRequest), with the caption as a resource when one exists. */
+  countRequest: (renderId: string, onlyIfEmpty: boolean) => Promise<CaptionRequestCountResult>;
+  saveDraft: (text: string, onlyIfEmpty: boolean) => Promise<AiSaveResult>;
+  releaseLease: (leaseId: string) => Promise<void>;
   reserveUsage: (input: { model: string; estCostInr: number }) => Promise<unknown>;
   finishUsage: (handle: unknown, input: CaptionUsageFinish) => Promise<void>;
   log?: (level: "warn" | "error", message: string) => void;
@@ -49,7 +58,10 @@ export interface CaptionSuggestionDeps {
   run?: Pick<PostCaptionInput, "timeoutMs" | "sleep" | "retry">;
 }
 
-export type CaptionSuggestionResponse = { caption: string; hashtags: string[]; language: Language; draft: CaptionDraftResource };
+/** countCaptionRequest's answer with the saved caption already turned into a resource. */
+export type CaptionRequestCountResult = Exclude<CaptionRequestCount, { reason: "draft_exists" }> | { ok: false; reason: "draft_exists"; draft: CaptionDraftResource };
+
+export type CaptionSuggestionResponse = { caption: string; hashtags: string[]; language: Language; draft: CaptionDraftResource; applied: boolean };
 
 export const PROJECT_NOT_FOUND = "We couldn't find this project.";
 
@@ -58,10 +70,12 @@ function unitsOf(usage: TokenUsage | null): CaptionUsageFinish["units"] {
 }
 
 const notReady = (reason: string) => new ApiProblem(409, "INVALID_STATE", POST_CAPTION_MESSAGES.NOT_READY, { reason });
+const draftExists = (draft: CaptionDraftResource) => new ApiProblem(409, "INVALID_STATE", POST_CAPTION_MESSAGES.DRAFT_EXISTS, { reason: "draft_exists", draft });
 
 export async function runCaptionSuggestion(context: { body: CaptionSuggestionBody; requestId: string }, deps: CaptionSuggestionDeps): Promise<CaptionSuggestionResponse> {
   const { body, requestId } = context;
   const log = deps.log ?? ((level, message) => console[level](message));
+  const onlyIfEmpty = body.onlyIfEmpty === true;
 
   const target = await deps.load();
   if (!target) throw new ApiProblem(404, "NOT_FOUND", PROJECT_NOT_FOUND);
@@ -70,72 +84,88 @@ export async function runCaptionSuggestion(context: { body: CaptionSuggestionBod
   if (!renderId) throw notReady("video_not_ready");
   if (body.renderId !== "current" && body.renderId !== renderId) throw notReady("render_not_current");
   if (!target.instagramActive) throw new ApiProblem(409, "INSTAGRAM_NOT_CONNECTED", POST_CAPTION_MESSAGES.NOT_CONNECTED);
-  // An empty saved box counts as "no caption" (the creator cleared it): the first suggestion may fill it.
-  if (body.onlyIfEmpty === true && target.draft && target.draft.text.trim() !== "") throw new ApiProblem(409, "INVALID_STATE", POST_CAPTION_MESSAGES.DRAFT_EXISTS, { reason: "draft_exists", draft: target.draft });
+  // An empty saved box (whitespace only) counts as "no caption": the first suggestion may fill it.
+  if (onlyIfEmpty && target.draft && hasCaptionText(target.draft)) throw draftExists(target.draft);
 
   const ai = deps.provider();
   if (!ai.ok) throw new Error(`Caption suggestions are not set up: ${ai.problem}`);
   if (!target.script) throw new Error("The storyboard version of this video is missing.");
 
-  const counted = await deps.countRequest(renderId);
-  if (!counted.ok && counted.reason === "quota") {
-    throw new ApiProblem(429, "QUOTA_EXCEEDED", POST_CAPTION_MESSAGES.QUOTA_EXCEEDED, { quota: "plan_requests_per_project", limit: USAGE_LIMITS.planRequestsPerProject, used: counted.used, resetsAt: null });
-  }
-  if (!counted.ok) throw notReady("video_not_ready");
-
-  const usage: PostCaptionUsageSink = {
-    begin: () => deps.reserveUsage({ model: ai.provider.model, estCostInr: GEMINI_FREE_TIER_COST_INR }),
-    end: (handle, report) =>
-      deps.finishUsage(handle, {
-        status: report.status,
-        outcome: report.outcome,
-        model: report.model,
-        units: unitsOf(report.usage),
-        estCostInr: GEMINI_FREE_TIER_COST_INR,
-        latencyMs: report.latencyMs,
-        ...(report.errorCode ? { errorCode: report.errorCode } : {}),
-      }),
-  };
-
-  let suggestion;
-  try {
-    const result = await suggestPostCaption({
-      ...deps.run,
-      provider: ai.provider,
-      script: target.script,
-      language: target.language,
-      usage,
-      onUsageError: (error) => log("error", `Caption usage log failed (request ${requestId}): ${error instanceof Error ? error.message : String(error)}`),
-    });
-    suggestion = result.suggestion;
-  } catch (error) {
-    if (!(error instanceof PostCaptionError)) throw error;
-    if (error.reason === "rejected") throw new ApiProblem(422, "PROVIDER_REJECTED", POST_CAPTION_MESSAGES.PROVIDER_REJECTED);
-    if (error.reason === "busy") {
-      log("warn", `Caption suggestion busy (request ${requestId}): ${error.detail}`);
-      throw new ApiProblem(503, "PROVIDER_BUSY", POST_CAPTION_MESSAGES.PROVIDER_BUSY, undefined, { "Retry-After": "60" });
+  const counted = await deps.countRequest(renderId, onlyIfEmpty);
+  if (!counted.ok) {
+    if (counted.reason === "quota") {
+      throw new ApiProblem(429, "QUOTA_EXCEEDED", POST_CAPTION_MESSAGES.QUOTA_EXCEEDED, { quota: "plan_requests_per_project", limit: USAGE_LIMITS.planRequestsPerProject, used: counted.used, resetsAt: null });
     }
-    throw new Error(`Caption provider problem (${error.detail}): ${error.message}`);
+    if (counted.reason === "draft_exists") throw draftExists(counted.draft);
+    if (counted.reason === "in_progress") throw new ApiProblem(409, "INVALID_STATE", POST_CAPTION_MESSAGES.IN_PROGRESS, { reason: "suggestion_in_progress" });
+    throw notReady("video_not_ready");
   }
 
-  const draft = await deps.saveDraft(joinPostCaption(suggestion.caption, suggestion.hashtags));
-  // The video changed (or the project was archived) while the AI was writing: nothing is saved.
-  if (!draft) throw notReady("video_not_ready");
-  return { caption: suggestion.caption, hashtags: suggestion.hashtags, language: target.language, draft };
+  try {
+    const usage: PostCaptionUsageSink = {
+      begin: () => deps.reserveUsage({ model: ai.provider.model, estCostInr: GEMINI_FREE_TIER_COST_INR }),
+      end: (handle, report) =>
+        deps.finishUsage(handle, {
+          status: report.status,
+          outcome: report.outcome,
+          model: report.model,
+          units: unitsOf(report.usage),
+          estCostInr: GEMINI_FREE_TIER_COST_INR,
+          latencyMs: report.latencyMs,
+          ...(report.errorCode ? { errorCode: report.errorCode } : {}),
+        }),
+    };
+
+    let suggestion;
+    try {
+      const result = await suggestPostCaption({
+        ...deps.run,
+        provider: ai.provider,
+        script: target.script,
+        language: target.language,
+        usage,
+        onUsageError: (error) => log("error", `Caption usage log failed (request ${requestId}): ${error instanceof Error ? error.message : String(error)}`),
+      });
+      suggestion = result.suggestion;
+    } catch (error) {
+      if (!(error instanceof PostCaptionError)) throw error;
+      if (error.reason === "rejected") throw new ApiProblem(422, "PROVIDER_REJECTED", POST_CAPTION_MESSAGES.PROVIDER_REJECTED);
+      if (error.reason === "busy") {
+        log("warn", `Caption suggestion busy (request ${requestId}): ${error.detail}`);
+        throw new ApiProblem(503, "PROVIDER_BUSY", POST_CAPTION_MESSAGES.PROVIDER_BUSY, undefined, { "Retry-After": "60" });
+      }
+      throw new Error(`Caption provider problem (${error.detail}): ${error.message}`);
+    }
+
+    const saved = await deps.saveDraft(joinPostCaption(suggestion.caption, suggestion.hashtags), onlyIfEmpty);
+    // The video changed (or the project was archived) while the AI was writing: nothing is saved.
+    if (!saved) throw notReady("video_not_ready");
+    return { caption: suggestion.caption, hashtags: suggestion.hashtags, language: target.language, draft: saved.draft, applied: saved.applied };
+  } finally {
+    // The lease ends with this request, whatever happened (it would also expire by itself after 60 s).
+    try {
+      await deps.releaseLease(counted.leaseId);
+    } catch (error) {
+      log("error", `Caption lease release failed (request ${requestId}): ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 export interface CaptionDraftDeps {
   /** The owner's project (null: not found / not theirs) and whether its video is ready to publish. */
   load: () => Promise<{ videoReady: boolean } | null>;
-  save: (text: string) => Promise<CaptionDraftResource | null>;
+  save: (text: string, clientSeq: number | undefined) => Promise<{ applied: boolean; draft: CaptionDraftResource } | null>;
 }
 
-/** H7: save the creator's caption as typed (cleaned by the body schema), `source: "edited"`. */
-export async function runCaptionDraftSave(context: { body: CaptionDraftBody }, deps: CaptionDraftDeps): Promise<{ draft: CaptionDraftResource }> {
+/**
+ * H7: save the creator's caption as typed (cleaned by the body schema), `source: "edited"`. A save
+ * older than the stored one (`clientSeq`) is skipped: `applied: false` with the stored caption.
+ */
+export async function runCaptionDraftSave(context: { body: CaptionDraftBody }, deps: CaptionDraftDeps): Promise<{ draft: CaptionDraftResource; applied: boolean }> {
   const project = await deps.load();
   if (!project) throw new ApiProblem(404, "NOT_FOUND", PROJECT_NOT_FOUND);
   if (!project.videoReady) throw notReady("video_not_ready");
-  const draft = await deps.save(context.body.text);
-  if (!draft) throw notReady("video_not_ready");
-  return { draft };
+  const saved = await deps.save(context.body.text, context.body.clientSeq);
+  if (!saved) throw notReady("video_not_ready");
+  return { draft: saved.draft, applied: saved.applied };
 }

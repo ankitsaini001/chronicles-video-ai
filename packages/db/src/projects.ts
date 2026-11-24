@@ -91,6 +91,16 @@ export interface ProjectDocument {
    * Not part of the project's state: saving it never changes `stateVersion` or `updatedAt`.
    */
   captionDraft?: { text: string; updatedAt: Date; source: "ai" | "edited" } | null;
+  /** F29 review: the newest H7 save's `clientSeq` (an older save arriving late is skipped). */
+  captionDraftSeq?: number | null;
+  /**
+   * F29 review: an AI caption suggestion is being written until this time (a 60 s lease taken in the
+   * same atomic update that counts the request; cleared when it ends). While it runs, H1 answers 409
+   * `suggestion_in_progress`, so a reload or a second tab never spends a second request.
+   */
+  captionSuggestingUntil?: Date | null;
+  /** The lease's id, so only the request that took it clears it. */
+  captionSuggestingId?: ObjectId | null;
 }
 
 /** API.md §2: control characters removed, NFC, trimmed, before length checks (idea-text.ts). */

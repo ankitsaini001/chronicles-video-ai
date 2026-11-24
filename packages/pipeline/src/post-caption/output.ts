@@ -6,9 +6,10 @@ import { CAPTION_OUTPUT_LIMITS } from "./prompts";
  * The model's caption answer (H1, F29): the structured-output schema we send, and the strict check of
  * what comes back. The model is never trusted: the caption is cleaned (control and invisible
  * characters removed, NFC, at most one blank line in a row, trimmed), then it must be 1–2,000
- * characters, without hashtags of its own, in the project's script; 3–5 hashtags, each "#" + 1–100
- * letters, digits or underscores (duplicates dropped); caption + hashtags together at most 2,200
- * (Instagram's limit). Problems go to ONE repair attempt.
+ * characters, without hashtags, @mentions or links of its own, in the project's script; hashtags:
+ * each "#" + 1–100 letters, digits or underscores; invalid ones, repeats and any beyond 5 are dropped,
+ * and at least 3 must remain; caption + hashtags together at most 2,200 (Instagram's limit). Problems
+ * go to ONE repair attempt.
  */
 
 export interface PostCaptionSuggestion {
@@ -59,6 +60,10 @@ export function cleanSuggestedCaption(raw: string): string {
 const HASHTAG = new RegExp(`^#[\\p{L}\\p{M}\\p{N}_]{1,${CAPTION_OUTPUT_LIMITS.hashtagCharsMax}}$`, "u");
 /** A hashtag written inside the caption text. */
 const HASHTAG_IN_TEXT = /(^|\s)#[\p{L}\p{N}_]/u;
+/** An @mention (an account we never checked) inside the caption text. */
+const MENTION_IN_TEXT = /(^|[\s(])@[\p{L}\p{N}_.]/u;
+/** A link inside the caption text (Instagram captions don't link; the model must not invent one). */
+const LINK_IN_TEXT = /https?:\/\/|www\.|\b[\p{L}\p{N}-]+\.(com|in|org|net|io|co|edu|gov|ly|me)\b/iu;
 
 /** Trims, adds a missing "#", NFC. The format itself is checked by isValidHashtag. */
 export function normalizeHashtag(raw: string): string {
@@ -105,23 +110,31 @@ export function evaluatePostCaptionOutput(text: string, language: Language): Pos
   if (caption.length === 0) problems.push("The caption is empty.");
   else if (length(caption) > captionMax) problems.push(`The caption has ${length(caption)} characters; at most ${captionMax} are allowed.`);
   else if (HASHTAG_IN_TEXT.test(caption)) problems.push('The caption contains hashtags; put every hashtag only in "hashtags".');
+  else if (MENTION_IN_TEXT.test(caption)) problems.push("The caption contains an @mention; remove every @mention.");
+  else if (LINK_IN_TEXT.test(caption)) problems.push("The caption contains a link or web address; remove it.");
   else if (language === "hi" && !DEVANAGARI.test(caption)) problems.push("The caption is not written in Hindi (Devanagari script).");
   else if (language !== "hi" && !mostlyLatin(caption)) problems.push(`The caption is not in ${language === "en" ? "English" : "Roman script"}; use Latin letters only.`);
 
+  // Invalid and repeated hashtags are simply dropped, extras beyond 5 too (F29 review); only fewer
+  // than 3 good ones left goes to the repair.
   const hashtags: string[] = [];
+  const dropped: string[] = [];
   const seen = new Set<string>();
   for (const raw of parsed.data.hashtags) {
     const tag = normalizeHashtag(raw);
     if (!isValidHashtag(tag)) {
-      problems.push(`The hashtag "${tag.slice(0, 40)}" is not allowed: "#" then 1-${hashtagCharsMax} letters, digits or underscores, no spaces.`);
+      dropped.push(tag.slice(0, 40));
       continue;
     }
     const key = tag.toLocaleLowerCase();
-    if (seen.has(key)) continue; // a repeated hashtag is simply dropped
+    if (seen.has(key)) continue;
     seen.add(key);
-    hashtags.push(tag);
+    if (hashtags.length < hashtagsMax) hashtags.push(tag);
   }
-  if (hashtags.length < hashtagsMin || hashtags.length > hashtagsMax) problems.push(`There were ${hashtags.length} different valid hashtags; ${hashtagsMin} to ${hashtagsMax} are needed.`);
+  if (hashtags.length < hashtagsMin) {
+    const why = dropped.length > 0 ? ` (not allowed: ${dropped.map((t) => `"${t}"`).join(", ")}: each must be "#" then 1-${hashtagCharsMax} letters, digits or underscores, no spaces)` : "";
+    problems.push(`There were ${hashtags.length} different valid hashtags${why}; ${hashtagsMin} to ${hashtagsMax} are needed.`);
+  }
   // The saved text is caption + blank line + hashtags (joinPostCaption): it must fit Instagram's limit.
   const total = length(caption) + (hashtags.length > 0 ? 2 + hashtags.reduce((sum, tag) => sum + length(tag), 0) + hashtags.length - 1 : 0);
   if (problems.length === 0 && total > CAPTION_OUTPUT_LIMITS.textMax) problems.push(`The caption and hashtags together have ${total} characters; at most ${CAPTION_OUTPUT_LIMITS.textMax} are allowed. Shorten the caption.`);
