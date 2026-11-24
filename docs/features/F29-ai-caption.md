@@ -38,7 +38,7 @@ Caption box and '✨ Suggest again' on the Publish screen.
 - [x] 2. Screen: caption box, counter, Suggest again on Step 4 (phone + desktop)
 - [x] 3. Tests: unit + e2e with stand-in Gemini and Instagram (zero real calls)
 - [x] 4. Docs: API.md, openapi.yaml, DATABASE.md, this file, tracker
-- [ ] 5. Code review + fixes
+- [x] 5. Code review + fixes
 - [ ] 6. Founder test (~2 Gemini requests, no voice, no video of the day)
 
 ## Decisions made while building (2026-11-24)
@@ -52,6 +52,14 @@ Caption box and '✨ Suggest again' on the Publish screen.
 8. **While the AI writes** (up to 30 s) the box is read-only with "Writing a caption for your video…"; edits are saved first. After a failure typing works at once.
 9. **Layout:** the connected card ("Publishing to @username", Disconnect) stays as in F28; the CAPTION card sits below it, and "Publishing comes next…" moved below the caption (it was inside the card).
 10. **The saved caption is kept** when the storyboard or video later changes (the creator sees it on Step 4 before publishing; F30's approval hashes the exact caption).
+
+## Code review fixes (2026-11-24)
+11. **No double request on a reload:** the count and a **60 s suggestion lease** (`captionSuggestingUntil` + its id) are taken in ONE atomic update that, for `onlyIfEmpty`, also requires an empty box. A second request while one runs → `409 suggestion_in_progress` (Suggest again too, so two tabs can't both spend); the page keeps "Writing…", checks once more after ~10 s, then shows Suggest again. The lease is released after the save and after any failure, and expires by itself after 60 s.
+12. **A caption typed while the AI writes is kept:** the `onlyIfEmpty` save only fills an empty box; otherwise H1 returns the typed caption with `applied: false`.
+13. **H7 `clientSeq`:** each save from the page carries a growing number; an older or repeated one arriving late is skipped (`applied: false`, `projects.captionDraftSeq`). Text counts as saved only after a successful answer; coming back from the back/forward cache saves what's left. A failure with an answer shows the server's message; only no answer says "Check your internet".
+14. **Answer check:** invalid hashtags, repeats and extras beyond 5 are dropped; only fewer than 3 good ones goes to the repair. @mentions and links in the caption go to the repair.
+15. **Confirm:** focus goes to Replace when it opens; Escape = Keep mine (focus back on Suggest again). The Gemini free-tier cost constant moved to `apps/web/lib/ai-costs.ts` (brainstorm and caption).
+16. **For F30 (noted in its file):** "Caption edits after approval: H7 does not bump stateVersion, so F30 must either set the post to approval_invalidated and notify, inside the same transaction, when the saved text's NFC hash differs from posts.approval.captionHash, or refuse H7 while a live post exists (PRD §7: any caption edit invalidates the approval)."
 
 ## Founder test (when F28's real connect works)
 1. Open a ready video → **Publish →**. With Instagram connected, the CAPTION box writes a caption by itself (1 Gemini request, ~5–30 s).
@@ -69,3 +77,4 @@ Caption box and '✨ Suggest again' on the Publish screen.
 | Date | What happened |
 |---|---|
 | 2026-11-24 | Built with stand-ins (zero Gemini/Meta calls): H1 (Gemini 30 s, structured output, 1 of the project's 20 AI requests, 10/hour, usage log with errorCode, saves `captionDraft`), new H7 save endpoint, the CAPTION box on Step 4 (auto-suggest once, Suggest again with a confirm after edits, autosave, n / 2,200 counter, red over). Unit tests 47 (suite 1,199/1,199), e2e `tools/e2e/f29-caption.ts` 31/31, F28 e2e still 43/43, browser check at 390 px and 1440 px 10/10. Found and fixed while testing: an empty box saved an empty caption before the first suggestion (so it never came), and caption + hashtags could exceed 2,200. Docs: API.md H1 as built + H7, openapi.yaml, DATABASE.md, ARCHITECTURE.md, `.env.example` (`GEMINI_CAPTION_MODEL`). |
+| 2026-11-24 | Code review fixes (decisions 11–16): atomic count + 60 s suggestion lease (a reload or second tab never spends twice), conditional AI save keeps a caption typed meanwhile, H7 `clientSeq`, saved-only-after-success and back/forward-cache re-sync, confirm focus/Escape, server messages for save failures, softer hashtag check, no @mentions/links, shared cost constant; F30 note on caption edits after approval. Unit tests 54 (suite 1,206/1,206, with an in-memory store that runs the real filters: the reload race, an edit kept, the lease expiring), e2e F29 33/33 (a real two-request race: one count, one Gemini request), F28 43/43, browser 12/12 at 390 px and 1440 px. Still 🔨 until the founder tests. |

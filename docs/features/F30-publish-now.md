@@ -24,6 +24,7 @@ Approve the exact video and account, then publish; show the live post or a clear
 - Re-check approval right before posting
 - Never posts twice
 - Retry on failure
+- **Decision to make (from the F29 code review, 2026-11-24):** Caption edits after approval: H7 does not bump stateVersion, so F30 must either set the post to approval_invalidated and notify, inside the same transaction, when the saved text's NFC hash differs from posts.approval.captionHash, or refuse H7 while a live post exists (PRD §7: any caption edit invalidates the approval). Also: H7 and H1 only save while the project is `video_ready` today; F30 decides which publish states (`scheduled`, `publish_failed`) may edit the caption.
 
 ## Not in this feature
 - —
