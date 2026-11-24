@@ -62,6 +62,8 @@ export const API_RATE_LIMITS = {
   captionSuggestionsPerUser: { name: "caption-suggestions", limit: 10, windowSeconds: 60 * 60 },
   /** H7 save the caption draft (autosave while typing, ~1.5 s after the last key): 60 per minute (F29). */
   captionDraftPerUser: { name: "caption-draft", limit: 60, windowSeconds: 60 },
+  /** H2 publish / schedule, H5 cancel, H6 retry: 10 per hour, one shared counter (F30). */
+  publishPerUser: { name: "publish", limit: 10, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

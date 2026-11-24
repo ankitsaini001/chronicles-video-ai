@@ -1,13 +1,22 @@
-import { type Db, type Filter, ObjectId } from "mongodb";
+import { type Db, type Filter, ObjectId, type UpdateFilter } from "mongodb";
 import { z } from "zod";
+import { captionHash, invalidateOpenPosts } from "./post-approval";
 import { cleanPostCaptionText, POST_CAPTION_LIMITS, postCaptionLength } from "./post-caption";
-import { PROJECTS_COLLECTION, type ProjectDocument } from "./projects";
+import { PROJECTS_COLLECTION, type ProjectDocument, type ProjectState } from "./projects";
 import { USAGE_LIMITS } from "./usage";
 
 // F29 "AI caption + hashtags" (API.md H1, H7; DATABASE.md §4.8 `captionDraft`): the request bodies,
 // the count of one AI caption suggestion toward the project's 20 AI requests (with its in-flight
 // lease), and the saved draft. Every function takes the signed-in user's id and puts it in every
 // filter (§6.3).
+// F30 (decision 1): the caption can also be edited in `publish_failed`. There a save whose text (NFC)
+// differs from the approved caption (`posts.approval.captionHash`) cancels the failed post's approval
+// in the SAME transaction (post → `approval_invalidated` + notification; PRD §7: a caption change
+// invalidates the approval), so Try again becomes "approve again".
+
+/** F30: the project states in which the caption may be edited (H1, H7). */
+export const CAPTION_EDIT_STATES: readonly ProjectState[] = ["video_ready", "publish_failed"];
+const EDITABLE = { $in: [...CAPTION_EDIT_STATES] };
 
 /** How long one AI suggestion holds the project's lease (H1 itself stops after 30 s). */
 export const CAPTION_SUGGESTION_LEASE_MS = 60_000;
@@ -87,7 +96,7 @@ export async function countCaptionRequest(
     {
       _id: input.projectId,
       ownerId,
-      state: "video_ready",
+      state: EDITABLE,
       currentRenderId: input.renderId,
       planRequestCount: { $lt: limit },
       $and: [leaseFree(now), ...(input.onlyIfEmpty ? [EMPTY_DRAFT] : [])],
@@ -102,7 +111,7 @@ export async function countCaptionRequest(
     { _id: input.projectId, ownerId },
     { projection: { state: 1, currentRenderId: 1, planRequestCount: 1, captionDraft: 1, captionSuggestingUntil: 1 } },
   );
-  if (!project || project.state !== "video_ready" || !project.currentRenderId?.equals(input.renderId)) return { ok: false, reason: "state" };
+  if (!project || !CAPTION_EDIT_STATES.includes(project.state) || !project.currentRenderId?.equals(input.renderId)) return { ok: false, reason: "state" };
   if (input.onlyIfEmpty && project.captionDraft && hasCaptionText(project.captionDraft)) return { ok: false, reason: "draft_exists", draft: project.captionDraft };
   if (project.captionSuggestingUntil && project.captionSuggestingUntil.getTime() > now.getTime()) return { ok: false, reason: "in_progress" };
   if (project.planRequestCount >= limit) return { ok: false, reason: "quota", used: project.planRequestCount };
@@ -133,11 +142,11 @@ export async function saveAiCaptionDraft(
   const projects = db.collection<ProjectDocument>(PROJECTS_COLLECTION);
   const ownerId = new ObjectId(input.ownerId);
   const draft: CaptionDraftDocument = { text: input.text, updatedAt: input.now ?? new Date(), source: "ai" };
-  const result = await projects.updateOne({ _id: input.projectId, ownerId, state: "video_ready", ...(input.onlyIfEmpty ? EMPTY_DRAFT : {}) }, { $set: { captionDraft: draft } });
-  if (result.matchedCount === 1) return { applied: true, draft };
+  const applied = await saveDraftWhere(db, { ownerId, projectId: input.projectId, draft, filter: input.onlyIfEmpty ? EMPTY_DRAFT : {}, update: { $set: { captionDraft: draft } } });
+  if (applied) return { applied: true, draft };
   if (!input.onlyIfEmpty) return null;
   const project = await projects.findOne({ _id: input.projectId, ownerId }, { projection: { state: 1, captionDraft: 1 } });
-  if (project?.state === "video_ready" && project.captionDraft && hasCaptionText(project.captionDraft)) return { applied: false, draft: project.captionDraft };
+  if (project && CAPTION_EDIT_STATES.includes(project.state) && project.captionDraft && hasCaptionText(project.captionDraft)) return { applied: false, draft: project.captionDraft };
   return null;
 }
 
@@ -145,7 +154,7 @@ export type CaptionDraftSave = { applied: boolean; draft: CaptionDraftDocument }
 
 /**
  * H7: save the creator's caption (`source: "edited"`) on the owner's project while its video is ready
- * (`video_ready`; F30 adds the publish states). With `clientSeq`, only if it is higher than the stored
+ * (`video_ready`, or `publish_failed` since F30: see saveDraftWhere). With `clientSeq`, only if it is higher than the stored
  * one: an older save that arrives late (e.g. the request sent when the page was left) is skipped and
  * the stored caption is returned (`applied: false`). Null when the project isn't the owner's or isn't
  * ready. `stateVersion` and `updatedAt` are NOT changed: a caption is not a project change.
@@ -158,13 +167,54 @@ export async function saveCaptionDraft(
   const ownerId = new ObjectId(input.ownerId);
   const draft: CaptionDraftDocument = { text: input.text, updatedAt: input.now ?? new Date(), source: "edited" };
   const seq = input.clientSeq;
-  const result = await projects.updateOne(
-    { _id: input.projectId, ownerId, state: "video_ready", ...(seq !== undefined ? { $or: [{ captionDraftSeq: null }, { captionDraftSeq: { $lt: seq } }] } : {}) },
-    { $set: { captionDraft: draft, ...(seq !== undefined ? { captionDraftSeq: seq } : {}) } },
-  );
-  if (result.matchedCount === 1) return { applied: true, draft };
+  const applied = await saveDraftWhere(db, {
+    ownerId,
+    projectId: input.projectId,
+    draft,
+    filter: seq !== undefined ? { $or: [{ captionDraftSeq: null }, { captionDraftSeq: { $lt: seq } }] } : {},
+    update: { $set: { captionDraft: draft, ...(seq !== undefined ? { captionDraftSeq: seq } : {}) } },
+  });
+  if (applied) return { applied: true, draft };
   if (seq === undefined) return null;
   const project = await projects.findOne({ _id: input.projectId, ownerId }, { projection: { state: 1, captionDraft: 1 } });
-  if (project?.state !== "video_ready") return null;
+  if (!project || !CAPTION_EDIT_STATES.includes(project.state)) return null;
   return { applied: false, draft: project.captionDraft ?? { text: "", updatedAt: draft.updatedAt, source: "edited" } };
+}
+
+/**
+ * The one conditional save of a caption draft (H1, H7). In `video_ready` a single atomic update. In
+ * `publish_failed` (F30) ONE transaction: the same conditional update, then, when the saved text (NFC)
+ * differs from the failed post's approved caption, that post → `approval_invalidated` + notification.
+ * True when the draft was saved.
+ */
+async function saveDraftWhere(
+  db: Db,
+  input: { ownerId: ObjectId; projectId: ObjectId; draft: CaptionDraftDocument; filter: Filter<ProjectDocument>; update: UpdateFilter<ProjectDocument> },
+): Promise<boolean> {
+  const projects = db.collection<ProjectDocument>(PROJECTS_COLLECTION);
+  const current = await projects.findOne({ _id: input.projectId, ownerId: input.ownerId }, { projection: { state: 1 } });
+  if (current?.state !== "publish_failed") {
+    const result = await projects.updateOne({ _id: input.projectId, ownerId: input.ownerId, state: "video_ready", ...input.filter }, input.update);
+    return result.matchedCount === 1;
+  }
+  const session = db.client.startSession();
+  let saved = false;
+  try {
+    await session.withTransaction(async () => {
+      saved = false;
+      const result = await projects.updateOne({ _id: input.projectId, ownerId: input.ownerId, state: "publish_failed", ...input.filter }, input.update, { session });
+      if (result.matchedCount !== 1) return;
+      await invalidateOpenPosts(db, session, {
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+        reason: "caption_edit",
+        now: input.draft.updatedAt,
+        extraFilter: { "approval.captionHash": { $ne: captionHash(input.draft.text) } },
+      });
+      saved = true;
+    });
+  } finally {
+    await session.endSession();
+  }
+  return saved;
 }

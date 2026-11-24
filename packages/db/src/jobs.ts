@@ -124,9 +124,9 @@ export interface JobDocument {
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
   needsInput: JobNeedsInput | null;
-  /** Revise jobs carry `revisionId` from the start (API.md §8.2). Generate jobs (F23): `renderId` on success. */
-  result: { planVersionId?: ObjectId; revisionId?: ObjectId; renderId?: ObjectId } | null;
-  /** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}` or `cap:{captionOverrideSetId}` (unique). */
+  /** Revise jobs carry `revisionId` from the start (API.md §8.2). Generate jobs (F23): `renderId` on success. Publish jobs (F30): `postId` from the start. */
+  result: { planVersionId?: ObjectId; revisionId?: ObjectId; renderId?: ObjectId; postId?: ObjectId } | null;
+  /** `plan:{projectId}:{inputHash}`, `rev:{revisionId}`, `gen:{planVersionId}`, `cap:{captionOverrideSetId}` or `pubjob:{postId}` (unique). */
   idempotencyKey: string;
   inngestRunId: string | null;
   cancelRequestedAt: Date | null;
@@ -146,6 +146,11 @@ export interface JobDocument {
   voice?: { cacheKeys: string[]; characters: number; sentKeys?: string[]; period?: { user: string; app: string } | null } | null;
   /** Generate and caption jobs (F23, F25): the render attempt in progress. Every attempt gets a NEW renderId (R2 folder). */
   render?: { renderId: ObjectId; startedAt: Date } | null;
+  /**
+   * Publish jobs (F30): this attempt's time limit. Instagram hiccups (5xx, timeouts, still
+   * processing) are retried automatically until `deadline` (about 10 minutes), then the post fails.
+   */
+  publish?: { attempt: number; deadline: Date } | null;
   /** When the job last became `queued` (C2 or E2), for the stuck-job rule. */
   queuedAt: Date;
   createdAt: Date;
@@ -165,7 +170,7 @@ export type JobResource = {
   progress: { stage: string; percent: number; message: string };
   error: JobError | null;
   needsInput: JobNeedsInput | null;
-  result: { planVersionId?: string; revisionId?: string; renderId?: string } | null;
+  result: { planVersionId?: string; revisionId?: string; renderId?: string; postId?: string } | null;
   /**
    * Generate and caption jobs waiting for their turn (F23, F25; additive): how many video jobs are
    * running or wait before this one (only one video is rendered at a time). Null when not waiting
@@ -202,6 +207,7 @@ export function toJobResource(doc: JobDocument, extras: { ahead?: number | null 
           ...(doc.result.planVersionId ? { planVersionId: doc.result.planVersionId.toHexString() } : {}),
           ...(doc.result.revisionId ? { revisionId: doc.result.revisionId.toHexString() } : {}),
           ...(doc.result.renderId ? { renderId: doc.result.renderId.toHexString() } : {}),
+          ...(doc.result.postId ? { postId: doc.result.postId.toHexString() } : {}),
         }
       : null,
     queue: doc.state === "queued" && typeof extras.ahead === "number" ? { ahead: extras.ahead } : null,

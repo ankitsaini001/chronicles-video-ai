@@ -1,4 +1,4 @@
-import { toInstagramConnectionResource, type InstagramConnectionDocument, type InstagramConnectionResource } from "@bytereel/db";
+import { InstagramBusyError, toInstagramConnectionResource, type InstagramConnectionDocument, type InstagramConnectionResource } from "@bytereel/db";
 import { ApiProblem } from "../api/v1";
 
 // G1 (connection status) and G4 (disconnect) (F28; API.md §14.7). The token is never part of an
@@ -18,9 +18,15 @@ export async function connectionStatus(store: ConnectionStore, userId: string): 
   return { connection: doc ? toInstagramConnectionResource(doc) : null };
 }
 
-/** G4: token removed, status `revoked`. Nothing connected → 404. */
+/** G4: token removed, status `revoked`. Nothing connected → 404. A post being published right now → 409 (F30). */
 export async function disconnectConnection(store: ConnectionStore, userId: string): Promise<{ connection: InstagramConnectionResource }> {
-  const doc = await store.disconnect(userId);
+  let doc: InstagramConnectionDocument | null;
+  try {
+    doc = await store.disconnect(userId);
+  } catch (error) {
+    if (error instanceof InstagramBusyError) throw new ApiProblem(409, "INVALID_STATE", error.message, { reason: "post_publishing" });
+    throw error;
+  }
   if (!doc) throw new ApiProblem(404, "NOT_FOUND", NO_CONNECTION_MESSAGE);
   return { connection: toInstagramConnectionResource(doc) };
 }

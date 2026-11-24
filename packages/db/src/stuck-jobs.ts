@@ -3,6 +3,7 @@ import { endCaptionJob } from "./caption-fixes";
 import { endGenerateJob, lastGenerateActivity } from "./generate-jobs";
 import { getJob, JOBS_COLLECTION, type JobDocument } from "./jobs";
 import { failPlanJob, STUCK_JOB_RULES } from "./plan-jobs";
+import { endPublishJob } from "./posts";
 import { failReviseJob } from "./revisions";
 
 // The stuck-job rule (ARCHITECTURE §20.3, DATABASE.md Q11, API.md §8.5), checked whenever the status
@@ -25,6 +26,10 @@ import { failReviseJob } from "./revisions";
 // did arrive. Only one reader claims a resend (conditional update on `event.lastTriedAt`).
 // A failed plan job leaves the project `plan_failed`; a failed revise job leaves the storyboard as it
 // was; a failed generate job leaves the project `generate_failed` (an older video stays its video).
+// `publish` jobs (F30) follow the plan-job rule (they write progress at least every ~20 s while they
+// run, and give up by themselves after ~10 min): running with no update for 10 min, or queued for
+// 15 min → failed (INTERNAL, retryable): the post and project become `publish_failed` (Try again; a
+// publish that may have gone out is checked on Instagram first).
 
 /** Generate jobs: failed only when the whole video queue has been still for this long. */
 export const GENERATE_IDLE_LIMIT_MS = 15 * 60_000;
@@ -46,7 +51,7 @@ export function isGenerateJobStuck(job: Pick<JobDocument, "state" | "updatedAt" 
 export type StuckCheck = { job: JobDocument; resendEventId: string | null };
 
 export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Date()): Promise<StuckCheck> {
-  if (job.type !== "plan" && job.type !== "revise" && job.type !== "generate" && job.type !== "caption") return { job, resendEventId: null };
+  if (job.type !== "plan" && job.type !== "revise" && job.type !== "generate" && job.type !== "caption" && job.type !== "publish") return { job, resendEventId: null };
   const at = now.getTime();
   const reload = async () => (await getJob(db, job._id)) ?? job;
 
@@ -71,6 +76,15 @@ export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Da
         ...(job.state === "running" ? { staleBefore: cutoff } : { queuedBefore: cutoff }),
         now,
       });
+      return { job: await reload(), resendEventId: null };
+    }
+  } else if (job.type === "publish") {
+    if (job.state === "running" && at - job.updatedAt.getTime() >= STUCK_JOB_RULES.runningStaleMs) {
+      await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", detail: "No progress for 10 minutes (stuck-job rule)", staleBefore: new Date(at - STUCK_JOB_RULES.runningStaleMs), now });
+      return { job: await reload(), resendEventId: null };
+    }
+    if (job.state === "queued" && at - job.queuedAt.getTime() >= STUCK_JOB_RULES.queuedGiveUpMs) {
+      await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", stage: "approve", detail: "Never started (stuck-job rule)", queuedBefore: new Date(at - STUCK_JOB_RULES.queuedGiveUpMs), now });
       return { job: await reload(), resendEventId: null };
     }
   } else {

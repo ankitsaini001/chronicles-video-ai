@@ -7,15 +7,23 @@ import {
   getLatestPlanJob,
   getLatestReviseJob,
   getOwnedProject,
+  latestPostOf,
   markJobEventSent,
   type JobDocument,
+  type PostDocument,
   type ProjectDocument,
 } from "@bytereel/db";
 import type { Db } from "mongodb";
-import { getInngest, PLAN_REQUESTED, REVISION_REQUESTED, VIDEO_GENERATE_REQUESTED, VIDEO_RECAPTION_REQUESTED } from "../../inngest/client";
+import { getInngest, PLAN_REQUESTED, POST_PUBLISH_REQUESTED, REVISION_REQUESTED, VIDEO_GENERATE_REQUESTED, VIDEO_RECAPTION_REQUESTED } from "../../inngest/client";
 
 /** The Inngest event that starts each job type. */
-const EVENT_OF: Partial<Record<JobDocument["type"], string>> = { plan: PLAN_REQUESTED, revise: REVISION_REQUESTED, generate: VIDEO_GENERATE_REQUESTED, caption: VIDEO_RECAPTION_REQUESTED };
+const EVENT_OF: Partial<Record<JobDocument["type"], string>> = {
+  plan: PLAN_REQUESTED,
+  revise: REVISION_REQUESTED,
+  generate: VIDEO_GENERATE_REQUESTED,
+  caption: VIDEO_RECAPTION_REQUESTED,
+  publish: POST_PUBLISH_REQUESTED,
+};
 
 // Starting and watching plan jobs (F15), revise jobs (F18), video jobs (F23) and caption jobs (F25) from the API routes
 // and the project pages (server only).
@@ -38,7 +46,14 @@ export async function sendPlanEvent(db: Db, job: JobDocument, log: Log = default
       await inngest.client.send({
         id: job.event.id,
         name: EVENT_OF[job.type] ?? PLAN_REQUESTED,
-        data: { jobId: job._id.toHexString(), projectId: job.projectId.toHexString(), ownerId: job.ownerId.toHexString(), attempt: job.attempt },
+        data: {
+          jobId: job._id.toHexString(),
+          projectId: job.projectId.toHexString(),
+          ownerId: job.ownerId.toHexString(),
+          attempt: job.attempt,
+          // F30: the publish job's post (its runs are lined up one at a time per post).
+          ...(job.inputRef.postId ? { postId: job.inputRef.postId.toHexString() } : {}),
+        },
       });
       ok = true;
     } catch (error) {
@@ -67,9 +82,11 @@ export type ProjectWithJobs = {
   latestReviseJob?: JobDocument | null;
   latestGenerateJob?: JobDocument | null;
   latestCaptionJob?: JobDocument | null;
+  /** F30: the project's newest post. */
+  latestPost?: PostDocument | null;
 };
 
-/** The owner's project with its active job (stuck-job rule applied) and its newest plan, revise, video and caption jobs, or null. */
+/** The owner's project with its active job (stuck-job rule applied), its newest plan, revise, video and caption jobs, and (F30) its newest post, or null. */
 export async function loadProjectWithJobs(db: Db, ownerId: string, projectId: string, log: Log = defaultLog): Promise<ProjectWithJobs | null> {
   let project = await getOwnedProject(db, ownerId, projectId);
   if (!project) return null;
@@ -81,13 +98,14 @@ export async function loadProjectWithJobs(db: Db, ownerId: string, projectId: st
     }
   }
   const activeJob = project.activeJobId ? await getJob(db, project.activeJobId) : null;
-  const [latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob] = await Promise.all([
+  const [latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob, latestPost] = await Promise.all([
     getLatestPlanJob(db, project._id),
     project.currentPlanVersionId ? getLatestReviseJob(db, project._id) : null,
     project.currentPlanVersionId ? getLatestGenerateJob(db, project._id) : null,
     project.currentRenderId ? getLatestCaptionJob(db, project._id) : null,
+    project.currentRenderId ? latestPostOf(db, { ownerId: project.ownerId, projectId: project._id }) : null,
   ]);
-  return { project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob };
+  return { project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob, latestPost };
 }
 
 /** A video or caption job waiting for its turn: how many video jobs are running or wait before it (else null). */

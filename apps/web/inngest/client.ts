@@ -31,6 +31,9 @@ export const VIDEO_GENERATE_REQUESTED = "video.generate.requested";
 /** Event that starts a caption-fix re-render (API.md F4, E2; F25). Carries ids only. */
 export const VIDEO_RECAPTION_REQUESTED = "video.recaption.requested";
 
+/** Event that starts publishing a post (API.md H2, H6; F30). Carries ids only (+ postId). */
+export const POST_PUBLISH_REQUESTED = "post.publish.requested";
+
 /**
  * Only ONE video job step runs at a time across the whole app (F23, founder 2026-11-15), shared by
  * `generate-video` and `fix-captions` (F25: a caption fix re-renders the video): renders run

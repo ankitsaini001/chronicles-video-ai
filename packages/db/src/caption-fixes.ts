@@ -7,7 +7,8 @@ import { cleanIdeaText } from "./idea-text";
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { getJob, JOBS_COLLECTION, retryEventId, type JobDocument, type JobStage } from "./jobs";
 import { PLAN_VERSIONS_COLLECTION, type PlanVersionDocument } from "./plan-versions";
-import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, type ProjectDocument } from "./projects";
+import { invalidateOpenPosts } from "./post-approval";
+import { assertLanguageEnabled, POST_OPEN_PROJECT_STATES, ProjectActionError, PROJECTS_COLLECTION, type ProjectDocument } from "./projects";
 import { RENDER_SCHEMA_VERSION, RENDERS_COLLECTION, type RenderDocument } from "./renders";
 import { SPEECH_ARTIFACTS_COLLECTION, type SpeechArtifactDocument } from "./speech-artifacts";
 
@@ -26,8 +27,9 @@ import { SPEECH_ARTIFACTS_COLLECTION, type SpeechArtifactDocument } from "./spee
 //   back to `video_ready` with the previous video still current (nothing else changes).
 // - Fixes belong to their storyboard version (founder, 2026-11-16): a new storyboard version starts
 //   with no fixes (a set is only carried on while `basePlanVersionId` is the video's version).
-// Not yet in `scheduled` / `publish_failed` (those states come with F28–F30): a caption fix there must
-// also cancel the post's approval in this same transaction (API.md §9), which F30 adds.
+// F30: also in `scheduled` / `publish_failed`: the fix cancels the post's approval in this same
+// transaction (post → `approval_invalidated` + notification; API.md §9). The job then ends the
+// project at `video_ready` like any caption job.
 
 export const CAPTION_OVERRIDES_COLLECTION = "captionOverrides";
 export const CAPTION_OVERRIDE_SCHEMA_VERSION = 1;
@@ -195,9 +197,10 @@ export function assertCaptionsFixable(project: ProjectDocument, render: Pick<Ren
   if (!project.currentRenderId?.equals(render._id) || render.status !== "ready") {
     throw new ProjectActionError("INVALID_STATE", "Only your latest video's captions can be fixed.", { reason: "not_current", currentRenderId: project.currentRenderId?.toHexString() ?? null });
   }
-  // `scheduled` / `publish_failed` are not built yet (F28–F30): adding them here needs the post's
-  // approval cancelled in the same transaction (API.md §9).
-  if (project.state !== "video_ready") throw new ProjectActionError("INVALID_STATE", "Captions can be fixed once your video is ready.", { state: project.state });
+  // F30: also while a post waits (scheduled / publish_failed); saveCaptionFixes cancels its approval.
+  if (project.state !== "video_ready" && !POST_OPEN_PROJECT_STATES.includes(project.state)) {
+    throw new ProjectActionError("INVALID_STATE", "Captions can be fixed once your video is ready.", { state: project.state });
+  }
 }
 
 /** The project's video by id or "current" (owner AND project scoped), or null. */
@@ -221,8 +224,9 @@ export async function currentCaptionOverrides(db: Db, render: Pick<RenderDocumen
  * against the video's captions (each phrase exists, the text fits on screen) and carry each
  * phrase's compiled text. Checks again: the project (404), the video (404), assertCaptionsFixable
  * (409). Then: the new set (previous fixes of the same storyboard version + these; nothing changed
- * → 400), the queued caption job, project → `generating`, +1 stateVersion. No usage counter is
- * touched. The Inngest event is sent by the caller AFTER the commit.
+ * → 400), the queued caption job, project → `generating`, +1 stateVersion; F30: a `scheduled` /
+ * `publish_failed` post → `approval_invalidated` (+ notification). No usage counter is touched. The
+ * Inngest event is sent by the caller AFTER the commit.
  */
 export async function saveCaptionFixes(
   db: Db,
@@ -270,12 +274,15 @@ export async function saveCaptionFixes(
       const job = newCaptionJob({ ownerId: project.ownerId, projectId: project._id, render, set, now });
       await db.collection<JobDocument>(JOBS_COLLECTION).insertOne(job, { session });
       const moved = await projects.findOneAndUpdate(
-        { _id: project._id, stateVersion: project.stateVersion, activeJobId: null, state: "video_ready", currentRenderId: render._id },
+        { _id: project._id, stateVersion: project.stateVersion, activeJobId: null, state: project.state, currentRenderId: render._id },
         // currentRenderId is kept: the video stays the project's video until the fixed one is ready.
         { $set: { state: "generating", activeJobId: job._id, lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
         { session, returnDocument: "after" },
       );
       if (!moved) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.");
+      if (POST_OPEN_PROJECT_STATES.includes(project.state)) {
+        await invalidateOpenPosts(db, session, { ownerId: project.ownerId, projectId: project._id, reason: "caption_fix", now });
+      }
       result = { set, job, project: moved };
       if (input.idempotencyLock) {
         const answer = input.respond(result);

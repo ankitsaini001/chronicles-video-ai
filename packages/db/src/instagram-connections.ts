@@ -1,5 +1,6 @@
 import { type Db, ObjectId } from "mongodb";
 import { AUDIT_LOGS_COLLECTION } from "./collections";
+import { hasPostInFlight, invalidateOpenPosts } from "./post-approval";
 import type { EncryptedToken } from "./token-crypto";
 
 // `instagramConnections` (DATABASE.md §4.21; F28): the creator's connected Instagram professional
@@ -8,10 +9,10 @@ import type { EncryptedToken } from "./token-crypto";
 // account (unique partial igUserId where status "active"), both ways (PRD #24d).
 // The token is never returned by `toInstagramConnectionResource` and never written to the audit log.
 //
-// TODO(F30): connect (a DIFFERENT account) and disconnect must also turn the user's `scheduled` and
+// F30: connecting a DIFFERENT account and disconnecting turn the user's `scheduled` and
 // `publish_failed` posts into `approval_invalidated` (+ a notification) inside the SAME transactions
-// below (DATABASE.md §7.2 rows 13 and 14). There are no posts before F30, so nothing to do yet; and
-// G4 must answer 409 INVALID_STATE while a post is `publishing`.
+// below (DATABASE.md §7.2 rows 13 and 14). Disconnect is refused (InstagramBusyError → 409
+// INVALID_STATE) while one of the user's posts is being published (`publishing` / `outcome_unknown`).
 
 export const INSTAGRAM_CONNECTIONS_COLLECTION = "instagramConnections";
 export const INSTAGRAM_CONNECTION_SCHEMA_VERSION = 1;
@@ -74,6 +75,14 @@ export function eligibleAccountType(value: unknown): InstagramAccountType | null
   if (typeof value !== "string") return null;
   const upper = value.trim().toUpperCase();
   return INSTAGRAM_ACCOUNT_TYPES.find((t) => t === upper) ?? null;
+}
+
+/** G4 while a post is being published (`publishing` / `outcome_unknown`): 409 INVALID_STATE, try again in a few minutes. */
+export class InstagramBusyError extends Error {
+  override name = "InstagramBusyError";
+  constructor() {
+    super("A post is being published to Instagram right now. You can disconnect in a few minutes.");
+  }
 }
 
 /** This Instagram account already has an ACTIVE connection owned by another user (INSTAGRAM_ACCOUNT_IN_USE). */
@@ -159,7 +168,10 @@ async function saveOnce(db: Db, owner: ObjectId, input: InstagramConnectionToSav
       };
       if (existing) await connections(db).replaceOne({ _id: existing._id, ownerId: owner }, doc, { session });
       else await connections(db).insertOne(doc, { session });
-      // TODO(F30): if existing?.igUserId !== input.igUserId, invalidate scheduled/publish_failed posts here.
+      // F30: another Instagram account than before → posts approved for the old one can't publish.
+      if (existing && existing.igUserId !== input.igUserId) {
+        await invalidateOpenPosts(db, session, { ownerId: owner, reason: "instagram_account_changed", now });
+      }
       await db.collection(AUDIT_LOGS_COLLECTION).insertOne(
         {
           schemaVersion: 1,
@@ -184,6 +196,8 @@ async function saveOnce(db: Db, owner: ObjectId, input: InstagramConnectionToSav
  * G4: remove the token, status `revoked`, `revokedAt`, audit `instagram.disconnected`, in ONE
  * transaction (DATABASE.md §7.2 row 14). Null when nothing is connected: no connection, or it was
  * already disconnected (nothing is written again). An `expired`/`error` connection is disconnected too.
+ * F30: refused (InstagramBusyError) while a post is being published; the user's `scheduled` /
+ * `publish_failed` posts → `approval_invalidated` (+ notification) in the same transaction.
  */
 export async function disconnectInstagram(db: Db, ownerId: string | ObjectId, now: Date = new Date()): Promise<InstagramConnectionDocument | null> {
   const owner = ownerObjectId(ownerId);
@@ -194,7 +208,8 @@ export async function disconnectInstagram(db: Db, ownerId: string | ObjectId, no
       result = null;
       const existing = await connections(db).findOne({ ownerId: owner }, { session });
       if (!existing || existing.status === "revoked") return;
-      // TODO(F30): refuse (409 INVALID_STATE) while a post is `publishing`; invalidate scheduled/publish_failed posts.
+      if (await hasPostInFlight(db, { ownerId: owner }, session)) throw new InstagramBusyError();
+      await invalidateOpenPosts(db, session, { ownerId: owner, reason: "instagram_disconnected", now });
       const updated = await connections(db).findOneAndUpdate(
         { _id: existing._id, ownerId: owner },
         { $set: { status: "revoked", revokedAt: now }, $unset: { accessToken: "" } },

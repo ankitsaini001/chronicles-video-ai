@@ -15,7 +15,7 @@ export interface IndexDefinition {
   keys: IndexSpecification;
   options: Omit<CreateIndexesOptions, "name">;
   /** Feature that creates it (docs/features). */
-  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20" | "F21" | "F23" | "F28";
+  feature: "F07" | "F08" | "F12" | "F14" | "F15" | "F18" | "F20" | "F21" | "F23" | "F28" | "F30";
   /** Why it exists, in plain words (shown by `npm run db -- indexes`). */
   why: string;
 }
@@ -68,6 +68,20 @@ export const INDEXES: readonly IndexDefinition[] = [
     why: "An Instagram account is actively connected to one user only (also catches two users finishing at once)",
   },
   { collection: "instagramConnections", name: "status_tokenExpiresAt", keys: { status: 1, tokenExpiresAt: 1 }, options: {}, feature: "F28", why: "Find tokens about to expire (daily refresh, F32)" },
+  // F30. The two unique ones are part of "never posts twice": apply them before the first real post.
+  { collection: "posts", name: "publishKey_unique", keys: { publishKey: 1 }, options: { unique: true }, feature: "F30", why: "One approval publishes at most once" },
+  {
+    collection: "posts",
+    name: "projectId_live_unique",
+    keys: { projectId: 1 },
+    options: { unique: true, partialFilterExpression: { state: { $in: ["scheduled", "publishing", "outcome_unknown"] } } },
+    feature: "F30",
+    why: "One live post per project (also stops a second approval at the same moment)",
+  },
+  { collection: "posts", name: "ownerId_createdAt", keys: { ownerId: 1, createdAt: -1 }, options: {}, feature: "F30", why: "A user's posts, newest first (also a project's newest post)" },
+  { collection: "posts", name: "state_scheduledAt", keys: { state: 1, scheduledAt: 1 }, options: {}, feature: "F30", why: "Find scheduled posts that are due (F31)" },
+  { collection: "publishAttempts", name: "postId", keys: { postId: 1 }, options: {}, feature: "F30", why: "A post's calls to Instagram; Meta data deletion" },
+  { collection: "notifications", name: "ownerId_createdAt", keys: { ownerId: 1, createdAt: -1 }, options: {}, feature: "F30", why: "The notifications list, newest first (the bell comes in F32)" },
 ];
 
 /** Features that have indexes in the list (for checking command-line input). */

@@ -2,7 +2,8 @@ import { type ClientSession, type Db, ObjectId } from "mongodb";
 import { z } from "zod";
 import { cleanIdeaText } from "./idea-text";
 import { PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanStatsDoc, type PlanVersionDocument, type StoredPlan } from "./plan-versions";
-import { ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument, type ProjectState, type VoiceGender } from "./projects";
+import { invalidateOpenPosts } from "./post-approval";
+import { POST_OPEN_PROJECT_STATES, ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument, type ProjectState, type VoiceGender } from "./projects";
 import { RENDERS_COLLECTION, type RenderDocument } from "./renders";
 import { STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalDocument } from "./storyboard-approvals";
 
@@ -17,8 +18,9 @@ import { STORYBOARD_APPROVALS_COLLECTION, type StoryboardApprovalDocument } from
 // - Every change sends the `stateVersion` the browser saw (`expectedStateVersion`); if another tab
 //   changed the project meanwhile, nothing is written: 409 STALE_VERSION ("refresh").
 // - Each one is ONE transaction: the checks and the writes can't be split by another request.
-// Not in `scheduled` / `publish_failed` until F30 (STORYBOARD_EDIT_STATES): there a change must also
-// move the post to `approval_invalidated` in the same transaction (API.md §9).
+// F30: also in `scheduled` / `publish_failed`: there the change moves the post to
+// `approval_invalidated` (+ a notification) in the SAME transaction (API.md §9, PRD §7), so the old
+// approval can never publish the changed storyboard.
 
 /** A storyboard scene/narration id (SAFE_ID_PATTERN in packages/pipeline/src/contracts/common.ts). */
 const SafeId = z.string({ error: "must be text" }).regex(/^[a-z0-9][a-z0-9-]{0,63}$/, { error: "is not a valid id" });
@@ -200,6 +202,10 @@ export async function saveUserEditVersion(
         { session, returnDocument: "after" },
       );
       if (!updated) throw STALE(input.expectedStateVersion, project.stateVersion + 1);
+      // F30: the publish approval is cancelled at the moment the change is made (API.md §9).
+      if (POST_OPEN_PROJECT_STATES.includes(project.state)) {
+        await invalidateOpenPosts(db, session, { ownerId: project.ownerId, projectId: project._id, reason: input.voiceGender ? "voice_switch" : "narration_edit", now });
+      }
       result = { version, project: updated };
     });
   } finally {
@@ -216,7 +222,8 @@ export async function saveUserEditVersion(
  * F26 (code review): back to the version the project's video was made from (approved, and the
  * `currentRenderId` render is ready and made from exactly that version, e.g. Undo after a change
  * asked on the video): state `video_ready`, so the video is "ready" again with its captions and
- * changes (restoredState). Still refused in `scheduled` / `publish_failed` (assertStoryboardEditable).
+ * changes (restoredState). F30: in `scheduled` / `publish_failed` the post's approval is cancelled in
+ * the same transaction (the project leaves the publish step: video_ready or storyboard_ready).
  */
 export async function restorePlanVersion(
   db: Db,
@@ -257,6 +264,9 @@ export async function restorePlanVersion(
         { session, returnDocument: "after" },
       );
       if (!updated) throw STALE(input.expectedStateVersion, project.stateVersion + 1);
+      if (POST_OPEN_PROJECT_STATES.includes(project.state)) {
+        await invalidateOpenPosts(db, session, { ownerId: project.ownerId, projectId: project._id, reason: "restore", now });
+      }
       result = updated;
     });
   } finally {

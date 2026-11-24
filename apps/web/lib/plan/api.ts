@@ -1,4 +1,4 @@
-import { isTerminal, POLL_AFTER_MS, ProjectActionError, toJobResource, toProjectResource, currentStepOf, displayStateOf, type JobResource, type ProjectResource } from "@bytereel/db";
+import { isTerminal, POLL_AFTER_MS, ProjectActionError, toJobResource, toProjectResource, currentStepOf, displayStateOf, type JobResource, type PostSummaryResource, type ProjectResource } from "@bytereel/db";
 import { getInngest } from "../../inngest/client";
 import { ApiProblem, type ApiErrorCode } from "../api/v1";
 import { plannerProviderFromEnv } from "./provider";
@@ -19,6 +19,8 @@ const STATUS: Record<ProjectActionError["code"], number> = {
   LANGUAGE_UNAVAILABLE: 422,
   APPROVAL_REQUIRED: 409,
   SPEND_CEILING: 503,
+  INSTAGRAM_NOT_CONNECTED: 409,
+  INSTAGRAM_TOKEN_EXPIRED: 409,
 };
 
 /** A refused project/job action → its documented API error (API.md §4.2). Anything else is rethrown. */
@@ -47,25 +49,34 @@ export type ProjectStatusResource = {
   currentRenderId: string | null;
   activeJob: JobResource | null;
   lastError: ProjectResource["lastError"];
-  latestPost: null;
+  /** F30: the project's newest post (null when it has none). */
+  latestPost: PostSummaryResource | null;
   allowedActions: string[];
   updatedAt: string;
   pollAfterMs: number | null;
 };
 
 /** C3 `Project` (API.md §11.3) with its active job embedded. */
-export function toProjectResourceOf({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob }: ProjectWithJobs): ProjectResource {
+export function toProjectResourceOf({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob, latestPost }: ProjectWithJobs): ProjectResource {
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
-  return toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null, latestGenerateJob: latestGenerateJob ?? null, latestCaptionJob: latestCaptionJob ?? null });
+  return toProjectResource(project, {
+    activeJob: active,
+    latestPlanJob,
+    latestReviseJob: latestReviseJob ?? null,
+    latestGenerateJob: latestGenerateJob ?? null,
+    latestCaptionJob: latestCaptionJob ?? null,
+    latestPost: latestPost ?? null,
+  });
 }
 
 /**
  * C6 `ProjectStatus` (API.md §11.3): polling stops when `pollAfterMs` is null (no active job).
  * `ahead` (F23): for a video job still waiting for its turn, how many videos are before it.
  */
-export function toProjectStatus({ project, activeJob, latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob }: ProjectWithJobs, extras: { ahead?: number | null } = {}): ProjectStatusResource {
+export function toProjectStatus(loaded: ProjectWithJobs, extras: { ahead?: number | null } = {}): ProjectStatusResource {
+  const { project, activeJob } = loaded;
   const active = activeJob && project.activeJobId?.equals(activeJob._id) ? activeJob : null;
-  const resource = toProjectResource(project, { activeJob: active, latestPlanJob, latestReviseJob: latestReviseJob ?? null, latestGenerateJob: latestGenerateJob ?? null, latestCaptionJob: latestCaptionJob ?? null });
+  const resource = toProjectResourceOf(loaded);
   return {
     projectId: resource.id,
     state: project.state,
@@ -75,7 +86,7 @@ export function toProjectStatus({ project, activeJob, latestPlanJob, latestRevis
     currentRenderId: resource.currentRenderId,
     activeJob: active ? toJobResource(active, extras) : null,
     lastError: resource.lastError,
-    latestPost: null,
+    latestPost: resource.latestPost,
     allowedActions: resource.allowedActions,
     updatedAt: resource.updatedAt,
     pollAfterMs: active && !isTerminal(active.state) ? POLL_AFTER_MS : project.activeJobId ? POLL_AFTER_MS : null,

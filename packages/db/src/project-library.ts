@@ -1,10 +1,11 @@
-import { type Db, type Filter, ObjectId, type UpdateFilter } from "mongodb";
+import { type ClientSession, type Db, type Filter, ObjectId, type UpdateFilter } from "mongodb";
 import { isTerminal, JOBS_COLLECTION, type JobDocument, type JobState, type JobType } from "./jobs";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./plan-versions";
 import {
   currentStepOf,
   displayStateOf,
   getOwnedProject,
+  POST_OPEN_PROJECT_STATES,
   ProjectActionError,
   PROJECTS_COLLECTION,
   type Language,
@@ -13,6 +14,7 @@ import {
   type ProjectStep,
   type VoiceGender,
 } from "./projects";
+import { cancelOpenPosts } from "./post-approval";
 import { rendersForCards } from "./renders";
 
 // "My videos" (F21; docs/API.md C1, C4 rename, C5 archive; DATABASE.md §4.8, §6.6).
@@ -188,13 +190,15 @@ const stale = (expected: number, current: number) =>
  * One guarded change to one project: the owner's, the stateVersion the browser saw, no job
  * running, plus `check` (the action's own state rule). One conditional update, so it is
  * all-or-nothing; if the project changed between the read and the write, the reason is reported
- * from the current document and nothing is written.
+ * from the current document and nothing is written. `alsoInTransaction` (F30): when it returns a
+ * function for this project, the update and that function's writes run in ONE transaction.
  */
 async function guardedUpdate(
   db: Db,
   input: { ownerId: string; projectId: string; expectedStateVersion: number },
   check: (project: ProjectDocument) => void,
   update: (project: ProjectDocument) => UpdateFilter<ProjectDocument>,
+  alsoInTransaction?: (project: ProjectDocument) => ((session: ClientSession) => Promise<unknown>) | null,
 ): Promise<ProjectDocument> {
   const verify = (project: ProjectDocument) => {
     if (project.state === "archived") throw new ProjectActionError("INVALID_STATE", "This video is archived.", { state: project.state });
@@ -205,9 +209,22 @@ async function guardedUpdate(
   const project = await getOwnedProject(db, input.ownerId, input.projectId);
   if (!project) throw notFound();
   verify(project);
-  const updated = await db
-    .collection<ProjectDocument>(PROJECTS_COLLECTION)
-    .findOneAndUpdate({ _id: project._id, ownerId: project.ownerId, state: project.state, activeJobId: null, stateVersion: input.expectedStateVersion }, update(project), { returnDocument: "after" });
+  const filter = { _id: project._id, ownerId: project.ownerId, state: project.state, activeJobId: null, stateVersion: input.expectedStateVersion };
+  const extra = alsoInTransaction?.(project) ?? null;
+  let updated: ProjectDocument | null = null;
+  if (!extra) {
+    updated = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOneAndUpdate(filter, update(project), { returnDocument: "after" });
+  } else {
+    const session = db.client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        updated = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOneAndUpdate(filter, update(project), { returnDocument: "after", session });
+        if (updated) await extra(session);
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
   if (updated) return updated;
   const current = await getOwnedProject(db, input.ownerId, input.projectId);
   if (!current) throw notFound();
@@ -229,8 +246,9 @@ export function renameProject(db: Db, input: { ownerId: string; projectId: strin
  * C5 archive (API.md C5, DATABASE.md §6.6, F21): a soft delete. `state = archived`, `archivedAt`,
  * `stateBeforeArchive` kept, +1 stateVersion. Nothing is deleted (MongoDB or R2). Refused while a
  * job runs (409 JOB_ALREADY_RUNNING; there is no job cancel yet, E3) and while a post is being
- * published (409 INVALID_STATE). No posts exist yet: F30 MUST cancel a `scheduled` /
- * `publish_failed` post in the same transaction (DATABASE.md §7.2 #12).
+ * published (409 INVALID_STATE: the project is `publishing` while its post is `publishing` or
+ * `outcome_unknown`). F30: a `scheduled` / `publish_failed` post → `cancelled` in the SAME
+ * transaction (DATABASE.md §7.2 #12), so it can never be published or retried.
  */
 export function archiveProject(db: Db, input: { ownerId: string; projectId: string; expectedStateVersion: number; now?: Date }): Promise<ProjectDocument> {
   const now = input.now ?? new Date();
@@ -243,6 +261,7 @@ export function archiveProject(db: Db, input: { ownerId: string; projectId: stri
       }
     },
     (project) => ({ $set: { state: "archived", stateBeforeArchive: project.state, archivedAt: now, updatedAt: now }, $inc: { stateVersion: 1 } }),
+    (project) => (POST_OPEN_PROJECT_STATES.includes(project.state) ? (session) => cancelOpenPosts(db, session, { ownerId: project.ownerId, projectId: project._id, now }) : null),
   );
 }
 

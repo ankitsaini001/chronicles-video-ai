@@ -7,7 +7,8 @@ import { isLanguageEnabled, languageUnavailableMessage } from "./languages";
 import { getJob, JOB_SCHEMA_VERSION, JOBS_COLLECTION, PLAN_ERROR_RETRYABLE, PLAN_STAGES, retryEventId, type JobDocument, type PlanCheckpoint, type PlanJobErrorCode } from "./jobs";
 import type { PlanJobContext, ValidPlanToSave } from "./plan-jobs";
 import { decodeCursor, diffScenes, encodeCursor, InvalidCursorError, PLAN_VERSION_SCHEMA_VERSION, PLAN_VERSIONS_COLLECTION, type PlanVersionDocument, type SceneDiff } from "./plan-versions";
-import { assertLanguageEnabled, ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument } from "./projects";
+import { invalidateOpenPosts } from "./post-approval";
+import { assertLanguageEnabled, POST_OPEN_PROJECT_STATES, ProjectActionError, PROJECTS_COLLECTION, STORYBOARD_EDIT_STATES, type ProjectDocument } from "./projects";
 import { assertStoryboardEditable, ObjectIdString } from "./storyboard-edits";
 import { USAGE_LIMITS } from "./usage";
 
@@ -198,7 +199,8 @@ export async function requestRevision(
       }
       // F26: a change "on the video" is asked while watching it: only on a ready video. After a
       // storyboard change (storyboard_ready with the older video kept) it is asked on the storyboard.
-      if (body.stage === "video" && (!project.currentRenderId || project.state !== "video_ready")) {
+      // F30: also while a post waits (publish_failed / scheduled): the video is still the current one.
+      if (body.stage === "video" && (!project.currentRenderId || !(project.state === "video_ready" || POST_OPEN_PROJECT_STATES.includes(project.state)))) {
         throw new ProjectActionError("INVALID_STATE", project.currentRenderId ? VIDEO_STAGE_NOT_READY : "There is no video to change yet.", { state: project.state });
       }
       const base = await db.collection<PlanVersionDocument>(PLAN_VERSIONS_COLLECTION).findOne({ _id: project.currentPlanVersionId!, projectId: project._id }, { session, projection: { "plan.scenes.id": 1 } });
@@ -265,6 +267,11 @@ export async function requestRevision(
         { session, returnDocument: "after" },
       );
       if (!updated) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", { expectedStateVersion: body.expectedStateVersion, currentStateVersion: project.stateVersion + 1 });
+      // F30 (PRD §7): a change REQUESTED while a post waits cancels its approval now, not when the
+      // revision job finishes; the post stays cancelled even if the revision fails.
+      if (POST_OPEN_PROJECT_STATES.includes(project.state)) {
+        await invalidateOpenPosts(db, session, { ownerId: project.ownerId, projectId: project._id, reason: "revision", now });
+      }
       if (input.idempotencyLock) {
         const answer = input.respond({ revision, job });
         await finishIdempotencyInTransaction(db, input.idempotencyLock, answer.status, answer.body, session);

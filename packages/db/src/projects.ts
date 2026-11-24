@@ -4,6 +4,7 @@ import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS } f
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { isLanguageEnabled, LANGUAGES, languageUnavailableMessage, type Language } from "./languages";
 import { canRetryPlanJob, JOBS_COLLECTION, newPlanJob, planInputHash, toJobResource, type JobDocument, type JobResource, type JobType } from "./jobs";
+import { toPostSummary, type PostDocument, type PostSummaryResource } from "./post-approval";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
 
@@ -42,11 +43,14 @@ export type ProjectStep = "idea" | "storyboard" | "video" | "publish";
 /**
  * States in which the storyboard may be changed (API.md D3–D7): edit, voice, revision, undo.
  * Anything but a running job; a change after a video exists makes a new version to approve again.
- * NOT YET `scheduled` / `publish_failed` (F16–F20 review): a change there must also move the post
- * to `approval_invalidated` in the same transaction (API.md §9), which F30 builds. Until then those
- * two states are refused with 409 INVALID_STATE. F30 MUST add them back with the post invalidation.
+ * F30: also `scheduled` / `publish_failed`. There each change moves the post to
+ * `approval_invalidated` (+ a notification) in the SAME transaction (post-approval.ts
+ * invalidateOpenPosts; API.md §9), so an old approval can never publish the changed project.
  */
-export const STORYBOARD_EDIT_STATES: readonly ProjectState[] = ["storyboard_ready", "generate_failed", "video_ready"];
+export const STORYBOARD_EDIT_STATES: readonly ProjectState[] = ["storyboard_ready", "generate_failed", "video_ready", "scheduled", "publish_failed"];
+
+/** F30: the states where a project has a post whose approval a change must cancel. */
+export const POST_OPEN_PROJECT_STATES: readonly ProjectState[] = ["scheduled", "publish_failed"];
 
 /** Idea text limits per input type (API.md C2, DATABASE.md §4.8), counted after trim + NFC. */
 export const IDEA_LIMITS = {
@@ -185,7 +189,8 @@ export type ProjectResource = {
   state: ProjectState;
   currentStep: ProjectStep;
   thumbnailUrl: string | null;
-  latestPost: null;
+  /** F30: the project's newest post (C3, C6), null when it has none or the caller didn't load it. */
+  latestPost: PostSummaryResource | null;
   activeJobType: JobType | null;
   input: { type: InputType; text: string; brainstormChoice: BrainstormChoice | null };
   stateVersion: number;
@@ -215,7 +220,19 @@ export function displayStateOf(doc: Pick<ProjectDocument, "state" | "stateBefore
  * API.md §11.1 `AllowedAction`: only those whose endpoints exist so far. F23 adds `generate_video`
  * (D8 on a version that is already approved but has no video job yet) and `cancel_job` (E3).
  */
-export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storyboard" | "request_revision" | "approve_storyboard" | "generate_video" | "edit_captions" | "cancel_job" | "archive";
+export type AllowedAction =
+  | "rename"
+  | "edit_idea"
+  | "retry_job"
+  | "edit_storyboard"
+  | "request_revision"
+  | "approve_storyboard"
+  | "generate_video"
+  | "edit_captions"
+  | "cancel_job"
+  | "publish"
+  | "retry_post"
+  | "archive";
 
 /**
  * What the creator may do now (API.md §11.1, "the server owns state"). While a job runs: only
@@ -240,6 +257,9 @@ export type AllowedAction = "rename" | "edit_idea" | "retry_job" | "edit_storybo
  *   caption job waits or runs: `cancel_job` (like a video job). `retry_job` (E2) in video_ready when
  *   the newest caption job failed with a retryable error or was cancelled, and the video it was made
  *   on is still the project's video.
+ * - F30: `publish` (H2) in video_ready with a video, or in publish_failed / scheduled when the newest
+ *   post's approval was cancelled (approve again); `retry_post` (H6) in publish_failed when the newest
+ *   post failed. `edit_captions` also in publish_failed / scheduled (F4 cancels the post's approval).
  * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
  *   loses every action that costs AI or voice: `retry_job`, `request_revision`, `edit_idea` (only
  *   useful for its Try again), and since F23 `approve_storyboard` / `generate_video` (approving now
@@ -250,7 +270,7 @@ export function allowedActionsFor(
   doc: ProjectDocument,
   latestPlanJob: JobDocument | null | undefined,
   latestReviseJob?: JobDocument | null,
-  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null; latestCaptionJob?: JobDocument | null } = {},
+  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null; latestCaptionJob?: JobDocument | null; latestPost?: Pick<PostDocument, "state"> | null } = {},
 ): AllowedAction[] {
   if (doc.state === "archived") return [];
   if (doc.activeJobId) {
@@ -258,10 +278,19 @@ export function allowedActionsFor(
     const videoJob = active?.type === "generate" || active?.type === "caption";
     return active && videoJob && (active.state === "queued" || active.state === "running") && !active.cancelRequestedAt ? ["cancel_job"] : [];
   }
-  const stepActions = stepActionsFor(doc, latestPlanJob, latestReviseJob, more.latestGenerateJob, more.latestCaptionJob);
+  const stepActions = [...stepActionsFor(doc, latestPlanJob, latestReviseJob, more.latestGenerateJob, more.latestCaptionJob), ...postActionsFor(doc, more.latestPost ?? null)];
   const actions: AllowedAction[] = ["rename", ...(isLanguageEnabled(doc.language) ? stepActions : stepActions.filter((a) => !AI_ACTIONS.includes(a)))];
   if (doc.state !== "publishing") actions.push("archive");
   return actions;
+}
+
+/** F30: publishing actions (they cost no AI or voice, so the language switch doesn't remove them). */
+function postActionsFor(doc: ProjectDocument, latestPost: Pick<PostDocument, "state"> | null): AllowedAction[] {
+  if (!doc.currentRenderId) return [];
+  if (doc.state === "video_ready") return ["publish"];
+  if ((doc.state === "publish_failed" || doc.state === "scheduled") && latestPost?.state === "approval_invalidated") return ["publish"];
+  if (doc.state === "publish_failed" && latestPost?.state === "publish_failed") return ["retry_post"];
+  return [];
 }
 
 /** Actions that start an AI or voice job (or lead only to one): refused for a switched-off language. */
@@ -306,6 +335,8 @@ function stepActionsFor(
   const videoNeedsChange = videoJob?.state === "needs_input" || (videoJob?.state === "failed" && videoJob.error?.retryable !== true);
   if (doc.state === "storyboard_ready" && approved && !videoNeedsChange) actions.push("generate_video");
   if (doc.state === "generate_failed" && approved && videoJob?.state === "failed" && videoJob.error?.retryable === true && !actions.includes("retry_job")) actions.push("retry_job");
+  // F30: caption fixes also while a post waits (publish_failed / scheduled): F4 cancels its approval.
+  if (POST_OPEN_PROJECT_STATES.includes(doc.state) && doc.currentRenderId) actions.push("edit_captions");
   // F25: caption fixes on the project's video, and Try again for the last caption job made on it.
   if (doc.state === "video_ready" && doc.currentRenderId) {
     actions.push("edit_captions");
@@ -329,11 +360,13 @@ export interface ProjectRelated {
   latestGenerateJob?: JobDocument | null;
   /** The project's newest caption job (F25: `retry_job` after a failed or cancelled caption fix). */
   latestCaptionJob?: JobDocument | null;
+  /** The project's newest post (F30: `latestPost`, `publish` / `retry_post`). */
+  latestPost?: PostDocument | null;
 }
 
 /**
- * Database document → API resource. Posts don't exist yet (F30); the thumbnail is only on the My
- * videos cards (C1, F23), so here it is null.
+ * Database document → API resource. `latestPost` (F30) when the caller loaded it; the thumbnail is
+ * only on the My videos cards (C1, F23), so here it is null.
  */
 export function toProjectResource(doc: ProjectDocument, related: ProjectRelated = {}): ProjectResource {
   const activeJob = related.activeJob && doc.activeJobId && related.activeJob._id.equals(doc.activeJobId) ? related.activeJob : null;
@@ -346,7 +379,7 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     state: doc.state,
     currentStep: currentStepOf(state),
     thumbnailUrl: null,
-    latestPost: null,
+    latestPost: related.latestPost ? toPostSummary(related.latestPost) : null,
     activeJobType: activeJob ? activeJob.type : null,
     input: { type: doc.input.type, text: doc.input.text, brainstormChoice: doc.input.brainstormChoice },
     stateVersion: doc.stateVersion,
@@ -356,7 +389,12 @@ export function toProjectResource(doc: ProjectDocument, related: ProjectRelated 
     activeJobId: hexOrNull(doc.activeJobId),
     activeJob: activeJob && related.embedActiveJob !== false ? toJobResource(activeJob) : null,
     lastError: doc.lastError ? { code: doc.lastError.code, message: doc.lastError.message, at: doc.lastError.at.toISOString() } : null,
-    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob, { activeJob, latestGenerateJob: related.latestGenerateJob ?? null, latestCaptionJob: related.latestCaptionJob ?? null }),
+    allowedActions: allowedActionsFor(doc, related.latestPlanJob, related.latestReviseJob, {
+      activeJob,
+      latestGenerateJob: related.latestGenerateJob ?? null,
+      latestCaptionJob: related.latestCaptionJob ?? null,
+      latestPost: related.latestPost ?? null,
+    }),
     archivedAt: doc.archivedAt ? doc.archivedAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -478,7 +516,9 @@ export class ProjectActionError extends Error {
       | "PLAN_INVALID"
       | "LANGUAGE_UNAVAILABLE"
       | "APPROVAL_REQUIRED"
-      | "SPEND_CEILING",
+      | "SPEND_CEILING"
+      | "INSTAGRAM_NOT_CONNECTED"
+      | "INSTAGRAM_TOKEN_EXPIRED",
     message: string,
     readonly details?: Record<string, unknown>,
   ) {
