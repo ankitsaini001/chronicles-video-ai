@@ -85,6 +85,12 @@ export interface ProjectDocument {
   updatedAt: Date;
   archivedAt: Date | null;
   stateBeforeArchive?: ProjectState;
+  /**
+   * F29: the Instagram caption being written on Step 4 (caption + hashtags in one text), saved by H1
+   * (an AI suggestion, `source: "ai"`) and H7 (the creator's edits, `"edited"`). Missing = none yet.
+   * Not part of the project's state: saving it never changes `stateVersion` or `updatedAt`.
+   */
+  captionDraft?: { text: string; updatedAt: Date; source: "ai" | "edited" } | null;
 }
 
 /** API.md §2: control characters removed, NFC, trimmed, before length checks (idea-text.ts). */

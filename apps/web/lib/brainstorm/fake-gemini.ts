@@ -15,6 +15,10 @@ import path from "node:path";
 // "e2e invalid" / "e2e repair" as above; "e2e nochange" → the current storyboard unchanged; anything
 // else → the current storyboard with " Simple as that." added to the first narration block of the
 // requested scene (scene 2 for the whole storyboard).
+// Instagram caption (F29, prompts with a <<<VIDEO SCRIPT block; the video's title decides): "e2e busy"
+// → 503 every time, "e2e unsafe" → safety block, "e2e unsuitable" → suitable:false, "e2e invalid" → 6
+// hashtags and a hashtag inside the caption every time, "e2e repair" → that, then valid after the
+// repair message; anything else → a hook-first caption naming the title, and 4 hashtags.
 
 type GeminiRequestBody = { contents?: { role?: string; parts?: { text?: string }[] }[] };
 
@@ -78,9 +82,29 @@ function ideas(count: number, subject: string, prompt: string): string {
   return JSON.stringify({ suitable: true, ideas: list });
 }
 
+/** H1 caption (F29): the video's title picks the answer (see the header). */
+function captionAnswer(script: string, isRepair: boolean): Response {
+  const title = /^Title: (.*)$/m.exec(script)?.[1] ?? "this topic";
+  if (title.includes("e2e busy")) return Response.json({ error: { code: 503, message: "The model is overloaded.", status: "UNAVAILABLE" } }, { status: 503 });
+  if (title.includes("e2e unsafe")) return sse({ promptFeedback: { blockReason: "SAFETY" }, modelVersion: "fake-gemini-e2e" });
+  if (title.includes("e2e unsuitable")) return answer(JSON.stringify({ suitable: false, caption: "", hashtags: [] }));
+  const broken = title.includes("e2e invalid") || (title.includes("e2e repair") && !isRepair);
+  if (broken) return answer(JSON.stringify({ suitable: true, caption: `Learn ${title} #now`, hashtags: ["#one", "#two", "#three", "#four", "#five", "#six"] }));
+  const scenes = (script.match(/^Scene \d+:/gm) ?? []).length;
+  return answer(
+    JSON.stringify({
+      suitable: true,
+      caption: `Ever wondered how ${title.replace(/ \/ .*$/, "").toLowerCase()} really works? 🌧️\n\nWatch this ${scenes}-scene explainer and learn it the easy way. Save it for your exams!`,
+      hashtags: ["#Science", "#LearnWithReels", "#Education", "#StudyTips"],
+    }),
+  );
+}
+
 export const fakeGeminiFetch: typeof fetch = async (_input, init) => {
   const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as GeminiRequestBody;
   const prompt = body.contents?.[0]?.parts?.[0]?.text ?? "";
+  const script = /<<<VIDEO SCRIPT\n([\s\S]*?)\nVIDEO SCRIPT>>>/.exec(prompt)?.[1];
+  if (script !== undefined) return captionAnswer(script, (body.contents?.length ?? 0) > 1);
   const change = /<<<CHANGE REQUEST\n([\s\S]*?)\nCHANGE REQUEST>>>/.exec(prompt)?.[1];
   if (change !== undefined) return revisionAnswer(prompt, change, (body.contents?.length ?? 0) > 1);
   const idea = /<<<CREATOR IDEA\n([\s\S]*?)\nCREATOR IDEA>>>/.exec(prompt)?.[1];

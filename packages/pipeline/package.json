@@ -18,6 +18,7 @@
     "./pipeline/speech": "./src/pipeline/speech.ts",
     "./pipeline/speech-key": "./src/pipeline/speech-key.ts",
     "./planning": "./src/planning/index.ts",
+    "./post-caption": "./src/post-caption/index.ts",
     "./planning/hero-catalog": "./src/planning/hero-catalog.ts",
     "./planning/icon-catalog": "./src/planning/icon-catalog.ts",
     "./providers": "./src/providers/index.ts",

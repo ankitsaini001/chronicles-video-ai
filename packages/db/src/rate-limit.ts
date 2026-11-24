@@ -58,6 +58,10 @@ export const API_RATE_LIMITS = {
   instagramCallbackPerUser: { name: "instagram-callback", limit: 20, windowSeconds: 60 * 60 },
   /** G4 disconnect Instagram: 30 per hour (F28; API.md §10.3 "other writes"). */
   instagramDisconnectPerUser: { name: "instagram-disconnect", limit: 30, windowSeconds: 60 * 60 },
+  /** H1 AI caption suggestions: 10 per hour (F29; plus the project's 20 AI requests). */
+  captionSuggestionsPerUser: { name: "caption-suggestions", limit: 10, windowSeconds: 60 * 60 },
+  /** H7 save the caption draft (autosave while typing, ~1.5 s after the last key): 60 per minute (F29). */
+  captionDraftPerUser: { name: "caption-draft", limit: 60, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitDocument {

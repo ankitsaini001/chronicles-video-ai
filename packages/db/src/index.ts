@@ -275,6 +275,20 @@ export {
   type CaptionStage,
   type SaveCaptionFixesResult,
 } from "./caption-fixes";
+export {
+  CaptionDraftBodySchema,
+  CaptionSuggestionBodySchema,
+  countCaptionRequest,
+  saveCaptionDraft,
+  toCaptionDraftResource,
+  type CaptionDraftBody,
+  type CaptionDraftDocument,
+  type CaptionDraftResource,
+  type CaptionDraftSource,
+  type CaptionRequestCount,
+  type CaptionSuggestionBody,
+} from "./caption-drafts";
+export { cleanPostCaptionText, joinPostCaption, POST_CAPTION_LIMITS, POST_CAPTION_MESSAGES, postCaptionLength } from "./post-caption";
 export { checkStuckJob, checkStuckPlanJob, GENERATE_CANCEL_GRACE_MS, GENERATE_IDLE_LIMIT_MS, isGenerateJobStuck, type StuckCheck } from "./stuck-jobs";
 export { limitShortReason, projectsPerDayMessage, resetClock, resetDate, videosPerDayMessage, voiceCeilingMessage, voiceQuotaMessage, voiceQuotaShortMessage } from "./limit-messages";
 export {
