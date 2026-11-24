@@ -1818,7 +1818,15 @@ paths:
     post:
       operationId: suggestCaption
       summary: AI Instagram caption and hashtags
-      description: H1. Synchronous Gemini call (30 s timeout) in the project language; not stored. Rate limit 10/hour. 409 INVALID_STATE (render not ready); 422 PROVIDER_REJECTED; 503 PROVIDER_BUSY / SPEND_CEILING.
+      description: >-
+        H1. Synchronous Gemini call (30 s timeout) in the project language. As built (F29): the answer is saved as the
+        project's caption draft (caption + blank line + hashtags, source ai) and returned as `draft`. Counts 1 of the
+        project's 20 AI requests (429 QUOTA_EXCEEDED at 20). Rate limit 10/hour. Requires the creator's project with a
+        ready, current video made from the current storyboard (else 409 INVALID_STATE, details.reason video_not_ready /
+        render_not_current) and an active Instagram connection (409 INSTAGRAM_NOT_CONNECTED). `onlyIfEmpty: true` (the
+        page's automatic first suggestion) with a non-empty saved caption → 409 INVALID_STATE, details { reason:
+        draft_exists, draft }, no AI call. 422 PROVIDER_REJECTED; 503 PROVIDER_BUSY. No Gemini spend ceiling exists yet,
+        so SPEND_CEILING is not returned.
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -1828,10 +1836,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CaptionSuggestionRequest'
-            example: { renderId: current }
+            example: { renderId: current, onlyIfEmpty: true }
       responses:
         '200':
-          description: Suggested caption.
+          description: Suggested caption, saved as the caption draft.
           content:
             application/json:
               schema:
@@ -1840,6 +1848,10 @@ paths:
                 caption: "Ever wondered how ₹20 reaches the chaiwala before you put your phone back in your pocket? Here's the 2-second journey of a UPI payment 👇"
                 hashtags: ['#UPI', '#DigitalIndia', '#FinanceBasics', '#LearnOnInstagram', '#NPCI']
                 language: en
+                draft:
+                  text: "Ever wondered how ₹20 reaches the chaiwala before you put your phone back in your pocket? Here's the 2-second journey of a UPI payment 👇\n\n#UPI #DigitalIndia #FinanceBasics #LearnOnInstagram #NPCI"
+                  updatedAt: '2026-11-24T06:00:00.000Z'
+                  source: ai
         '400':
           $ref: '#/components/responses/InvalidInput'
         '401':
@@ -1874,6 +1886,55 @@ paths:
               examples:
                 busy:
                   $ref: '#/components/examples/ErrProviderBusy'
+  /api/v1/projects/{projectId}/caption-draft:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    put:
+      operationId: saveCaptionDraft
+      summary: Save the Instagram caption as typed
+      description: >-
+        H7 (F29). Autosave of the Step 4 caption box (~1.5 s after the last key, on blur and when the page is left).
+        Owner only (another user's project → 404). Only while the video can be published from Step 4 (else 409
+        INVALID_STATE). `text` is cleaned (line ends → \n, other control and invisible characters removed, NFC; not
+        trimmed), then 0–2,200 characters counted as Unicode code points. Saves `captionDraft` with source edited;
+        stateVersion and updatedAt are not changed. Rate limit 60/minute (its own counter). No Idempotency-Key.
+      tags: [Publish]
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptionDraftRequest'
+            example: { text: "Ever wondered where rain comes from?\n\n#WaterCycle #Science #Education" }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draft]
+                properties:
+                  draft:
+                    $ref: '#/components/schemas/CaptionDraft'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
   /api/v1/projects/{projectId}/posts:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -4491,6 +4552,29 @@ components:
         renderId:
           type: string
           pattern: '^([0-9a-f]{24}|current)$'
+        onlyIfEmpty:
+          type: boolean
+          description: F29. The automatic first suggestion; refused with 409 draft_exists when a non-empty caption is saved.
+    CaptionDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: 0–2,200 characters (Unicode code points) after cleaning; caption and hashtags in one text.
+    CaptionDraft:
+      type: object
+      required: [text, updatedAt, source]
+      properties:
+        text:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [ai, edited]
     CreatePostRequest:
       type: object
       additionalProperties: false
@@ -4622,19 +4706,23 @@ components:
             - type: 'null'
     CaptionSuggestion:
       type: object
-      required: [caption, hashtags, language]
+      required: [caption, hashtags, language, draft]
       properties:
         caption:
           type: string
           maxLength: 2000
         hashtags:
           type: array
-          maxItems: 30
+          description: As built (F29) 3–5 hashtags, each "#" + 1–100 letters, digits or underscores; caption + blank line + hashtags fit 2,200.
+          minItems: 3
+          maxItems: 5
           items:
             type: string
             pattern: '^#[^\s#]{1,100}$'
         language:
           $ref: '#/components/schemas/Language'
+        draft:
+          $ref: '#/components/schemas/CaptionDraft'
     BrainstormResponse:
       type: object
       required: [subject, language, ideas]

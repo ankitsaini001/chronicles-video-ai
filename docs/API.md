@@ -409,7 +409,7 @@ Codes marked **§12.4** came from the error list that used to be ARCHITECTURE §
 | `NEEDS_INPUT` **§12.4** | — (job/project only) | The pipeline needs a creator change (duration outside 60–90 s, uncertain alignment, ambiguous revision). Never an HTTP error; appears in `job.needsInput` and `project.lastError` | generate/revise jobs |
 | `RENDER_FAILED` | — (job only) | Rendering or MP4 validation failed after the automatic retry | generate/caption jobs |
 | `CANCELLED` | — (job only) | The job was cancelled by the creator | all jobs |
-| `INSTAGRAM_NOT_CONNECTED` **§12.4** | 409 | No active Instagram connection (or `connectionId` isn't yours/active) | H2, H6 |
+| `INSTAGRAM_NOT_CONNECTED` **§12.4** | 409 | No active Instagram connection (or `connectionId` isn't yours/active) | H1 (F29), H2, H6 |
 | `INSTAGRAM_TOKEN_EXPIRED` **§12.4** | 409 | Connection `expired`/`revoked`: reconnect needed | H2, H6; publish job |
 | `INSTAGRAM_ACCOUNT_INELIGIBLE` **§12.4** | 422 | Account isn't Business/Creator. Delivered as a redirect query on the OAuth callback | G3 |
 | `INSTAGRAM_ACCOUNT_IN_USE` | — (redirect only) | The Instagram account (`igUserId`) already has an **active** connection owned by a **different** ByteReel user (one Instagram account per ByteReel user, both ways; PRD decision #24d). Delivered as a redirect query on the OAuth callback | G3 |
@@ -650,7 +650,7 @@ Every background write is conditional on "still running this attempt", so a late
 |---|---|---|---|---|
 | **Videos per user per day** | **3** | A `generate` job is **accepted** (D8). Caption fixes (F4) **don't count** (decision #24). Retries of the same job and reuse of an identical render don't count | 00:00 in the user's timezone (`resetsAt` in UTC) | `429 QUOTA_EXCEEDED` (`quota: videos_per_day`) |
 | Projects created per user per day | 5 | C2 accepted. Editing the idea of a `plan_failed` project (C4) and trying again (E2) doesn't count. **Counted and enforced since F12** (inside C2's transaction, so concurrent clicks can't pass 5) | same | `quota: projects_per_day` |
-| Plan + revision requests per project | 20 | Every plan job attempt that asks Gemini (C2's job and each E2 retry, with or without an Edit idea; an attempt counts 1 when it sends its **first** Gemini request (atomically, only below 20; retries and the repair inside the attempt don't add more); a job that never reached Gemini, or a Try again that reuses a saved answer, costs nothing (F15, after code review)), and each D5 revision attempt that asks Gemini (as built in F18: same rule as E2, counted at the attempt's first Gemini request, not at acceptance; D5 refuses at 20); stored in `projects.planRequestCount`. **Enforced since F15**: E2 refuses at 20; a job reaching Gemini at 20 fails with `QUOTA_EXCEEDED` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
+| Plan + revision requests per project | 20 | Every plan job attempt that asks Gemini (C2's job and each E2 retry, with or without an Edit idea; an attempt counts 1 when it sends its **first** Gemini request (atomically, only below 20; retries and the repair inside the attempt don't add more); a job that never reached Gemini, or a Try again that reuses a saved answer, costs nothing (F15, after code review)), and each D5 revision attempt that asks Gemini (as built in F18: same rule as E2, counted at the attempt's first Gemini request, not at acceptance; D5 refuses at 20), and each H1 AI caption suggestion (F29: counted once, right before its first Gemini request; H1 refuses at 20); stored in `projects.planRequestCount`. **Enforced since F15**: E2 refuses at 20; a job reaching Gemini at 20 fails with `QUOTA_EXCEEDED` | never (`resetsAt: null`) | `quota: plan_requests_per_project` |
 | Brainstorms (C7) per user per day | 30 | C7 accepted (after the 10/hour check and the body check, before Gemini); busy or refused answers still count. Not in a transaction: one atomic "add 1 while under 30" on the counter (F14) | 00:00 in the user's timezone | `quota: brainstorms_per_day` |
 | ElevenLabs characters per user per month | 3,000 | Reserved before each speech call (generate job) | 1st of the month 00:00 user timezone | generate job fails `QUOTA_EXCEEDED` (checked at D8 using the plan's character estimate too) |
 
@@ -680,7 +680,7 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | Auth (A1, A2, A5, A6) | see §3.7 |
 | Polling reads (C6, E1, H4) | 120 / min (one shared counter per user; F15) |
 | Other reads (`GET`) | 300 / min (one shared counter per user for all of these reads; F11) |
-| C7 brainstorm, H1 caption suggestions | 10 / hour each (C7 also 30 / day, §10.1) |
+| C7 brainstorm, H1 caption suggestions | 10 / hour each (C7 also 30 / day, §10.1; H1 as built in F29: `caption-suggestions`, plus the project's 20 AI requests) |
 | C2 create project | 10 / hour (plus the daily quota) |
 | D3 narration edit, D4 voice, D7 restore, C4 rename / edit idea, C5 archive | 60 / min (one shared counter per user; F15 counts C4, F21 adds C5) |
 | D5 revision | 20 / hour |
@@ -691,6 +691,7 @@ Global ElevenLabs characters/month (90% of the plan), Gemini requests/day, Sandb
 | G2 connect | 10 / hour |
 | G3 callback | 20 / hour (its own counter; counted only after a valid state, before any call to Instagram; over it → `302` back with `?instagram_error=RATE_LIMITED`; F28 review) |
 | G4 disconnect | 30 / hour (its own counter; F28) |
+| H7 caption draft (autosave) | 60 / min (its own counter `caption-draft`; F29) |
 | Admin endpoints | 120 / min per admin |
 | J1–J3 Meta callbacks | 60 / min per IP |
 
@@ -863,7 +864,8 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | G2 | GET | `/api/v1/instagram/connect` | Start Instagram OAuth | creator | 302 | | |
 | G3 | GET | `/api/v1/instagram/callback` | OAuth callback | creator (state) | 302 | | |
 | G4 | DELETE | `/api/v1/instagram/connection` | Disconnect | creator | 200 | | |
-| H1 | POST | `/api/v1/projects/{projectId}/caption-suggestions` | AI Instagram caption + hashtags (sync) | creator | 200 | | |
+| H1 | POST | `/api/v1/projects/{projectId}/caption-suggestions` | AI Instagram caption + hashtags (sync; F29: saved as the caption draft) | creator | 200 | | |
+| H7 | PUT | `/api/v1/projects/{projectId}/caption-draft` | Save the Instagram caption as typed (F29) | creator | 200 | | |
 | H2 | POST | `/api/v1/projects/{projectId}/posts` | Publish now **or** schedule (approval #2) | creator | 202 | ✓ | ✓ |
 | H3 | GET | `/api/v1/projects/{projectId}/posts` | Posts of a project | creator | 200 | | |
 | H4 | GET | `/api/v1/posts/{postId}` | Post status (polling) | creator | 200 | | |
@@ -905,7 +907,7 @@ Auth: **anon** = anonymous · **session** = any signed-in user (Better Auth) · 
 | ① Idea of an existing project in `plan_failed` (storyboard failed) | C3 (idea text + `lastError`) | **Edit idea** = C4 with `text` (and optional `title`), then **Try again** = E2 on the failed plan job → poll C6 |
 | `/projects/[id]/storyboard` ② | C3, D2 `current`, D6, (D1 when history opens) | D3 narration edit, D4 voice, D5 revision (`stage: storyboard`), D7 undo/restore, D8 approve & generate, E2 retry / E3 cancel, poll C6 every 2 s while `activeJob`. **As built (F16–F20):** the page reads C3/D2/D6 data on the server; `/projects/[id]` redirects here when `currentStep` is `storyboard`; no E3 Cancel yet; D8 approves only (video job F23) |
 | `/projects/[id]/video` ③ | C3, F2 current render, F3 `kind=video` | F3 `kind=download`, F4 caption fixes, D5 revision (`stage: video`), E2 retry, E3 cancel, F1 previous versions, poll C6. **As built (F23, code review):** after a failure or when the video is ready, **Edit storyboard** opens `/projects/[id]/storyboard`, which opens in every state where `edit_storyboard` is allowed (`storyboard_ready`, `generate_failed`, `video_ready`) and shows **Back to video** for a failed or ready video. **As built (F24):** when ready, the page reads the current render on the server (same function as F3 `current`) and makes its thumbnail and `kind=video` links after the owner check; the player renews an expired link with F3 `kind=video`; the "Video version N ▾" picker calls F1 each time it opens; **Download MP4** asks F3 `kind=download` as JSON and then opens the link (a problem shows as a plain line on the screen, never a raw error page); its `href` is F3 `kind=download&redirect=true` for middle-click. **As built (F25):** the Captions tab (F2, F4). **As built (F26):** next to Captions, the **Ask for changes** tab (D5 `stage: video`, history D6 `stage=video`), offered while `request_revision` is allowed; while the change runs the page polls C6 (2 s, 15 s in a hidden tab), the video still plays and downloads, the Captions tab says fixes wait (F4 → `409 JOB_ALREADY_RUNNING`); a new version opens `/projects/[id]/storyboard`; an unclear or failed request stays here with the reply (Try again = E2). After a change (`storyboard_ready` with `currentRenderId`) this page still shows that video read-only ("Back to video" from the storyboard), with a note to approve the new storyboard there |
-| `/projects/[id]/publish` ④ | C3, F2, F3 (`thumbnail`, `video`), G1, H3 | G2 connect, H1 AI caption, H2 publish now / schedule, H5 cancel, H6 retry, F3 download, poll H4 / C6 |
+| `/projects/[id]/publish` ④ | C3, F2, F3 (`thumbnail`, `video`), G1, H3 | G2 connect, H1 AI caption, H2 publish now / schedule, H5 cancel, H6 retry, F3 download, poll H4 / C6. **As built (F29):** the page reads the saved caption (`captionDraft`) on the server; the CAPTION box (only while Instagram is connected) calls H1 once by itself when nothing is saved (`onlyIfEmpty: true`), H1 again for ✨ Suggest again (after the creator's own edits it asks "Replace your caption with a new suggestion?" first) and H7 to autosave edits |
 | `/settings` | B1, G1 | B2 defaults, A5 change password, G2 connect, G4 disconnect, B3 delete account |
 | `/admin` | I1, I4, I8, I10, I11 | I2, I3, I5, I6, I7, I9, I12 |
 | `/data-deletion/[code]` (Meta status page) | J3 | — |
@@ -1759,7 +1761,7 @@ Success `200` → `{ connection: InstagramConnection }` (status `revoked`). Erro
 ### 14.8 ④ Publish
 
 #### H1. `POST /api/v1/projects/{projectId}/caption-suggestions` — AI caption + hashtags
-Purpose: AI-suggested Instagram caption and hashtags in the project language (synchronous Gemini call, 30 s timeout). Not stored; the creator edits it before H2. Auth: creator. Rate: 10/hour.
+Purpose: AI-suggested Instagram caption and hashtags in the project language (synchronous Gemini call, 30 s timeout). ~~Not stored~~ **Stored since F29** as the project's caption draft (see "As built (F29)" below); the creator edits it before H2. Auth: creator. Rate: 10/hour.
 Body: `renderId` id ✓ (current render; `current` allowed).
 Success `200` → `{ caption (≤ 2,000), hashtags: string[] (≤ 30, each `#` + 1–100 chars, no spaces), language }`.
 Errors: `400 INVALID_INPUT` · `404` · `409 INVALID_STATE` (render not ready) · `422 PROVIDER_REJECTED` · `503 PROVIDER_BUSY` · `503 SPEND_CEILING`.
@@ -1776,6 +1778,28 @@ Errors: `400 INVALID_INPUT` · `404` · `409 INVALID_STATE` (render not ready) �
 ```json
 { "error": { "code": "PROVIDER_BUSY", "message": "Our AI is very busy right now. Your idea is saved; please try again in a few minutes.", "requestId": "req_01JCXM4K9L0M" } }
 ```
+
+**As built (F29, 2026-11-24): now stored.** Code: `apps/web/app/api/v1/projects/[projectId]/caption-suggestions/route.ts`, `apps/web/lib/post-caption/` (handler, provider, server), `packages/pipeline/src/post-caption/` (prompt `post-caption-v1`, answer check, runner), `packages/db/src/caption-drafts.ts`, `packages/db/src/post-caption.ts`.
+- **Body:** `renderId` (`current` or the video's id) and, new, optional `onlyIfEmpty` (boolean): the Step 4 page's automatic first suggestion sends `true`; if the project already has a non-empty saved caption the answer is `409 INVALID_STATE` `details: { reason: "draft_exists", draft }` (no AI, nothing counted), so a second tab or a quick reload never spends another request. Strict body.
+- **Order** (a refused request never reaches Gemini): Origin → session → `caption-suggestions` 10/hour → body → the owner's project (404 "We couldn't find this project.") → its language switched on (422 `LANGUAGE_UNAVAILABLE`) → the video can be published from Step 4: `video_ready`, the current render `ready`, made from the current storyboard version (the publish page's `storyboardChangedSince` rule) (else `409 INVALID_STATE` "This video can't be published right now. Please go back to your video.", `details.reason: "video_not_ready"`) → a `renderId` other than that video → the same 409 with `reason: "render_not_current"` → an `active` Instagram connection (else `409 INSTAGRAM_NOT_CONNECTED` "Please connect your Instagram first."; decision 5) → `onlyIfEmpty` → the AI is set up (else 500, reason in the server log) → **count 1 of the project's 20 AI requests** (`projects.planRequestCount`, the same counter and rule as storyboard requests and D5 changes: one atomic update, only below 20, also re-checking `video_ready` + this video; at 20 → `429 QUOTA_EXCEEDED` "This project has used all 20 of its AI requests. You can still write your own caption." `details { quota: "plan_requests_per_project", limit: 20, used, resetsAt: null }`) → Gemini → save → 200.
+- **Gemini:** the storyboard model `GEMINI_MODEL` (optional override `GEMINI_CAPTION_MODEL`, e.g. the faster brainstorm model if the 30 s limit is too tight on the free tier), `thinkingLevel: "low"`, structured output `{ suitable, caption, hashtags[] }`. Input: the APPROVED storyboard the video was made from: the project title and every scene's narration (joined per scene), as delimited data (`<<<VIDEO SCRIPT … VIDEO SCRIPT>>>`), plus the project language. The prompt asks for a short hook-first caption (aim ≤ 300 characters) that never adds facts beyond the script, at most two emojis, no hashtags/links/@mentions inside it, and 3–5 focused hashtags (no generic spam). **30 s for the whole suggestion**; busy/network errors get at most 2 quick retries (1 s, 2.5 s, never past the 30 s, a retry or the repair only with ≥ 5 s left); one repair of an invalid answer. Each request is logged in `providerUsage` (`provider: "gemini"`, `operation: "caption"`, with `projectId`; a failed one with the short `errorCode` of F26, e.g. `transient 503 UNAVAILABLE`). The count is added once per suggestion, before its first request (retries and the repair add nothing).
+- **Answer check:** the caption is cleaned (control and invisible characters removed except ZWNJ/ZWJ, NFC, at most one blank line in a row, trimmed): 1–2,000 characters, no hashtag inside, in the project's script; hashtags: a missing `#` is added, repeats (any case) dropped, each `#` + 1–100 letters (with combining marks), digits or `_`, **3–5** of them (decision 4); caption + blank line + hashtags together ≤ 2,200. Problems → the one repair; still invalid → `503 PROVIDER_BUSY`. `suitable: false` or a safety block → `422 PROVIDER_REJECTED` "Our AI couldn't suggest a caption for this video. Please write your own."; busy/too slow → `503 PROVIDER_BUSY` "Our AI is busy or taking too long right now. Please try again in a few minutes, or write your own caption." (`Retry-After: 60`).
+- **Saved:** `projects.captionDraft = { text: caption + "\n\n" + hashtags joined by spaces, updatedAt, source: "ai" }` (only while the project is still `video_ready`; if the video changed meanwhile → 409, nothing saved). `stateVersion` and `updatedAt` are not changed. **Answer `200` → `{ caption, hashtags, language, draft: { text, updatedAt, source } }`.**
+- **Hashtag limit (checked 2026-11-24, Meta's IG User Media reference, read only):** "Maximum 2200 characters, 30 hashtags, and 20 @ tags". We suggest 3–5; H2 keeps its ≤ 30 check.
+- **No `SPEND_CEILING`:** no Gemini spend ceiling exists yet (§10.2, F27: Gemini free tier); it comes with paid Gemini.
+
+#### H7. `PUT /api/v1/projects/{projectId}/caption-draft` — Save the caption as typed (F29)
+Purpose: keep the creator's caption edits on the server, so they survive a reload or another device (F29 decision 2). Auth: creator (owner only: another user's project, a missing one and a malformed id → `404`). Rate: 60/minute (`caption-draft`, its own counter). No Idempotency-Key (saving the same text twice is harmless).
+Body: `text` string ✓: cleaned like the caption (Windows line ends → `\n`, every other control character → a space, invisible format characters removed except ZWNJ/ZWJ, NFC; **not trimmed**, so an autosave never moves the cursor), then **0–2,200 characters counted as Unicode code points** (an emoji is 1; the counter on the page counts the same way). Strict body. Over the limit → `400 INVALID_INPUT` at `text`.
+Allowed only while the video can be published from Step 4 (the same rule as H1); otherwise `409 INVALID_STATE` (`details.reason: "video_not_ready"`). Instagram need not be connected. Effect: `projects.captionDraft = { text, updatedAt: now, source: "edited" }`; `stateVersion` and `updatedAt` unchanged.
+Success `200` → `{ draft: { text, updatedAt, source: "edited" } }`. Errors: `400` · `403` (Origin) · `404` · `409 INVALID_STATE` · `429 RATE_LIMITED`.
+```json
+{ "text": "Ever wondered where rain comes from? 🌧️\n\n#WaterCycle #Science #Education" }
+```
+```json
+{ "draft": { "text": "Ever wondered where rain comes from? 🌧️\n\n#WaterCycle #Science #Education", "updatedAt": "2026-11-24T06:05:00.000Z", "source": "edited" } }
+```
+The Step 4 page saves ~1.5 s after the last key, when the box loses focus and when the page is left (a `keepalive` request). Code: `apps/web/app/api/v1/projects/[projectId]/caption-draft/route.ts`, `runCaptionDraftSave` in `apps/web/lib/post-caption/handler.ts`, `saveCaptionDraft` in `packages/db/src/caption-drafts.ts`. Tests: `tests/post-caption.test.ts`, `tools/e2e/f29-caption.ts`.
 
 #### H2. `POST /api/v1/projects/{projectId}/posts` — Publish now or schedule (approval #2)
 Purpose: the creator approves the **exact video + destination + caption** and publishes now or at a time. Auth: creator. Rate: 10/hour. **Idempotency-Key required.**
