@@ -28,7 +28,7 @@ export function newIdempotencyKey(): string {
 }
 
 export async function apiSend<T = Record<string, unknown>>(
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   url: string,
   body?: unknown,
   headers: Record<string, string> = {},

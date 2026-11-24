@@ -17,6 +17,8 @@ export const POST_CAPTION_PROMPT_VERSION = "post-caption-v1";
  * (the packages don't import each other; tests/post-caption.test.ts checks they match).
  */
 export const CAPTION_OUTPUT_LIMITS = {
+  /** Caption + blank line + hashtags together: Instagram's 2,200. */
+  textMax: 2200,
   captionMax: 2000,
   captionAim: 300,
   hashtagsMin: 3,

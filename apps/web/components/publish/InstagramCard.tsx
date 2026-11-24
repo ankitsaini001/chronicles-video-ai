@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { apiSend } from "@/components/storyboard/client";
 import { Note } from "@/components/storyboard/Note";
 import { Button, PlainLinkButton } from "@/components/ui";
@@ -10,9 +10,10 @@ import { INSTAGRAM_MESSAGES, type InstagramNotice } from "@/lib/instagram/messag
 // ④ Publish, the Instagram card (F28; Stitch "Step 4 Connect Instagram", decision 1).
 // Not connected: "Connect your Instagram", the three promises and Connect Instagram (a real page
 // load to G2, which sends the creator to Instagram's own login page). Connected: "Publishing to
-// @username" with the picture, Disconnect (G4: the token is deleted at once) and "Publishing comes
-// next" until publishing itself arrives (F30). A result from Instagram (connected, personal account,
-// cancelled, in use, expired) shows as one plain line on top.
+// @username" with the picture, Disconnect (G4: the token is deleted at once), then `children` (F29: the
+// CAPTION box, only while connected) and "Publishing comes next" until publishing itself arrives (F30).
+// A result from Instagram (connected, personal account, cancelled, in use, expired) shows as one plain
+// line on top.
 
 export type CardConnection = { username: string; profilePictureUrl: string | null; status: "active" | "expired" | "error" };
 
@@ -40,7 +41,7 @@ function InstagramIcon() {
   );
 }
 
-export function InstagramCard({ projectId, connection, notice }: { projectId: string; connection: CardConnection | null; notice: InstagramNotice | null }) {
+export function InstagramCard({ projectId, connection, notice, children }: { projectId: string; connection: CardConnection | null; notice: InstagramNotice | null; children?: ReactNode }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState<InstagramNotice | null>(notice);
@@ -75,22 +76,28 @@ export function InstagramCard({ projectId, connection, notice }: { projectId: st
 
   if (active) {
     return (
-      <section aria-labelledby="instagram-heading" data-testid="instagram-connected" className="flex w-full max-w-xl flex-col items-center rounded-2xl border border-line bg-surface p-6 text-center shadow-card sm:p-10">
-        {noticeLine}
-        {active.profilePictureUrl ? (
-          // Instagram's own picture address (its CDN): a plain <img>, no referrer sent.
-          <img src={active.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="mb-6 size-16 rounded-full border border-amber/30 object-cover" />
-        ) : (
-          <InstagramIcon />
-        )}
-        <h1 id="instagram-heading" className="mb-3 font-display text-2xl font-extrabold tracking-tight break-words text-text sm:text-3xl">
-          Publishing to <span data-testid="instagram-username">@{active.username}</span>
-        </h1>
-        <p className="mb-8 max-w-md text-sm leading-relaxed text-muted">Your Instagram is connected. Publishing comes next: soon you&apos;ll post or schedule this video from here, always after you approve it.</p>
-        <Button type="button" variant="secondary" onClick={() => void disconnect()} disabled={busy} data-testid="instagram-disconnect">
-          {busy ? "Disconnecting…" : "Disconnect"}
-        </Button>
-      </section>
+      <div className="flex w-full max-w-xl flex-col gap-5">
+        <section aria-labelledby="instagram-heading" data-testid="instagram-connected" className="flex w-full flex-col items-center rounded-2xl border border-line bg-surface p-6 text-center shadow-card sm:p-8">
+          {noticeLine}
+          {active.profilePictureUrl ? (
+            // Instagram's own picture address (its CDN): a plain <img>, no referrer sent.
+            <img src={active.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="mb-6 size-16 rounded-full border border-amber/30 object-cover" />
+          ) : (
+            <InstagramIcon />
+          )}
+          <h1 id="instagram-heading" className="mb-3 font-display text-2xl font-extrabold tracking-tight break-words text-text sm:text-3xl">
+            Publishing to <span data-testid="instagram-username">@{active.username}</span>
+          </h1>
+          <p className="mb-6 max-w-md text-sm leading-relaxed text-muted">Your Instagram is connected. Nothing is posted without your approval.</p>
+          <Button type="button" variant="secondary" onClick={() => void disconnect()} disabled={busy} data-testid="instagram-disconnect">
+            {busy ? "Disconnecting…" : "Disconnect"}
+          </Button>
+        </section>
+        {children}
+        <p data-testid="publishing-next" className="px-2 text-center text-xs leading-relaxed text-muted">
+          Publishing comes next: soon you&apos;ll post or schedule this video from here, always after you approve it.
+        </p>
+      </div>
     );
   }
 

@@ -7,7 +7,8 @@ import { CAPTION_OUTPUT_LIMITS } from "./prompts";
  * what comes back. The model is never trusted: the caption is cleaned (control and invisible
  * characters removed, NFC, at most one blank line in a row, trimmed), then it must be 1–2,000
  * characters, without hashtags of its own, in the project's script; 3–5 hashtags, each "#" + 1–100
- * letters, digits or underscores (duplicates dropped). Problems go to ONE repair attempt.
+ * letters, digits or underscores (duplicates dropped); caption + hashtags together at most 2,200
+ * (Instagram's limit). Problems go to ONE repair attempt.
  */
 
 export interface PostCaptionSuggestion {
@@ -121,6 +122,9 @@ export function evaluatePostCaptionOutput(text: string, language: Language): Pos
     hashtags.push(tag);
   }
   if (hashtags.length < hashtagsMin || hashtags.length > hashtagsMax) problems.push(`There were ${hashtags.length} different valid hashtags; ${hashtagsMin} to ${hashtagsMax} are needed.`);
+  // The saved text is caption + blank line + hashtags (joinPostCaption): it must fit Instagram's limit.
+  const total = length(caption) + (hashtags.length > 0 ? 2 + hashtags.reduce((sum, tag) => sum + length(tag), 0) + hashtags.length - 1 : 0);
+  if (problems.length === 0 && total > CAPTION_OUTPUT_LIMITS.textMax) problems.push(`The caption and hashtags together have ${total} characters; at most ${CAPTION_OUTPUT_LIMITS.textMax} are allowed. Shorten the caption.`);
 
   return problems.length > 0 ? { kind: "invalid", problems } : { kind: "ok", suggestion: { caption, hashtags } };
 }

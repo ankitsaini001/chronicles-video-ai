@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ProjectStepper } from "@/components/app/ProjectStepper";
+import { CaptionBox } from "@/components/publish/CaptionBox";
 import { InstagramCard, type CardConnection } from "@/components/publish/InstagramCard";
 import { PlainLinkButton } from "@/components/ui";
 import { requireUser } from "@/lib/auth/session";
@@ -13,7 +14,8 @@ import { thumbnailLink } from "@/lib/video/storage";
 // ④ Publish (F28; Stitch "ByteReel — Step 4 Connect Instagram", decision 1). Opens from the video's
 // "Publish →" when the video is ready. Left: the video's thumbnail, its version and Download MP4.
 // Right: the Instagram card (components/publish/InstagramCard.tsx): connect, or "Publishing to
-// @username" + Disconnect. Publishing itself (caption, Publish now / Schedule) comes with F29–F31.
+// @username" + Disconnect, and (F29) the CAPTION box with the saved caption (`captionDraft`, read
+// here so reopening never asks the AI again). Publish now / Schedule come with F30–F31.
 // Only the owner sees it (another user's project, a missing one, a bad id → the same 404 page). A
 // project whose video isn't ready, is archived, or was made from an older storyboard (the same
 // storyboardChangedSince rule as the video page's "Publish →") goes back to /projects/[id].
@@ -70,7 +72,14 @@ export default async function PublishPage({ params, searchParams }: { params: Pr
         </div>
 
         <div className="flex justify-center lg:col-span-8">
-          <InstagramCard projectId={projectId} connection={connection} notice={notice} />
+          <InstagramCard projectId={projectId} connection={connection} notice={notice}>
+            {/* Rendered by the card only while Instagram is connected (F29 decision 5). */}
+            <CaptionBox
+              projectId={projectId}
+              renderId={render._id.toHexString()}
+              initialDraft={project.captionDraft ? { text: project.captionDraft.text, source: project.captionDraft.source } : null}
+            />
+          </InstagramCard>
         </div>
       </div>
     </div>
