@@ -368,11 +368,35 @@ describe("Undo back to the video's own version (D7)", () => {
     expect(calls.map((c) => c.name)).not.toContain("renders.findOne");
   });
 
-  it("still refused in scheduled / publish_failed (until F30)", async () => {
+  it("F30: allowed in scheduled / publish_failed; the open post's approval is cancelled (restore) in the SAME transaction", async () => {
     for (const state of ["scheduled", "publish_failed"] as const) {
-      const { db } = fakeDb({ "projects.findOne": () => projectDoc({ state, currentPlanVersionId: V2 }), "planVersions.findOne": () => ({ _id: V1, plan: {} }) });
-      expect((await refusal(restore(db))).code).toBe("INVALID_STATE");
+      const failedPost = { _id: new ObjectId(), projectId: PROJECT, state };
+      const before = projectDoc({ state, currentPlanVersionId: V2 });
+      const { db, calls } = fakeDb({
+        "projects.findOne": () => before,
+        "planVersions.findOne": () => ({ _id: V1, plan: {} }),
+        "storyboardApprovals.findOne": () => null,
+        "projects.findOneAndUpdate": (_f: unknown, update: { $set: Record<string, unknown> }) => ({ ...before, ...update.$set }),
+        "posts.find": () => [failedPost],
+        "projects.find": () => [{ _id: PROJECT, title: "The water cycle" }],
+        "posts.updateOne": () => ({ modifiedCount: 1 }),
+        "notifications.insertMany": () => ({}),
+      });
+      expect((await restore(db)).state).toBe("storyboard_ready");
+      expect(calls.find((c) => c.name === "posts.find")!.args[0]).toEqual({ ownerId: OWNER, state: { $in: ["scheduled", "publish_failed"] }, projectId: PROJECT });
+      const [filter, update] = calls.find((c) => c.name === "posts.updateOne")!.args as [Record<string, unknown>, { $set: Record<string, unknown> }];
+      expect(filter).toEqual({ _id: failedPost._id, ownerId: OWNER, state });
+      expect(update.$set).toMatchObject({ state: "approval_invalidated", invalidatedReason: "restore", invalidatedAt: NOW });
+      const notes = calls.find((c) => c.name === "notifications.insertMany")!.args[0] as Array<{ type: string; postId: ObjectId }>;
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({ type: "approval_invalidated", postId: failedPost._id });
+      for (const c of calls) expect(c.args.at(-1)).toHaveProperty("session");
     }
+  });
+
+  it("still refused while a post is being published (publishing)", async () => {
+    const { db } = fakeDb({ "projects.findOne": () => projectDoc({ state: "publishing", currentPlanVersionId: V2 }), "planVersions.findOne": () => ({ _id: V1, plan: {} }) });
+    expect((await refusal(restore(db))).code).toBe("INVALID_STATE");
   });
 });
 

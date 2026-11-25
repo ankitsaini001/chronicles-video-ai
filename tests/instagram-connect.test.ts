@@ -5,6 +5,7 @@ import {
   eligibleAccountType,
   encryptToken,
   InstagramAccountInUseError,
+  InstagramBusyError,
   readTokenKeys,
   saveInstagramConnection,
   tokenAad,
@@ -521,6 +522,8 @@ function fakeDb(handlers: Record<string, (...args: any[]) => unknown>) {
           calls.push({ name: key, args });
           const handler = handlers[key];
           if (!handler) throw new Error(`unexpected ${key}`);
+          // `find` returns a cursor right away (its `.toArray()` is the async part).
+          if (method === "find") return handler(...args);
           try {
             return Promise.resolve(handler(...args));
           } catch (error) {
@@ -626,6 +629,8 @@ describe("disconnect (G4) and the resources", () => {
     const doc = existingDoc();
     const fake = fakeDb({
       "instagramConnections.findOne": () => doc,
+      "posts.findOne": () => null,
+      "posts.find": () => ({ toArray: async () => [] }),
       "instagramConnections.findOneAndUpdate": () => ({ ...doc, accessToken: undefined, status: "revoked", revokedAt: NOW }),
       "auditLogs.insertOne": () => ({}),
     });
@@ -636,6 +641,38 @@ describe("disconnect (G4) and the resources", () => {
     expect(update[1]).toEqual({ $set: { status: "revoked", revokedAt: NOW }, $unset: { accessToken: "" } });
     expect(fake.calls.find((c) => c.name === "auditLogs.insertOne")!.args[0]).toMatchObject({ action: "instagram.disconnected", actorId: OWNER });
     expect(fake.calls[0]!.args[0]).toEqual({ ownerId: OWNER });
+  });
+
+  it("F30: refused while a post is being published (nothing written); a failed post's approval is cancelled in the SAME transaction", async () => {
+    const busy = fakeDb({ "instagramConnections.findOne": () => existingDoc(), "posts.findOne": () => ({ _id: new ObjectId() }) });
+    await expect(disconnectInstagram(busy.db, OWNER, NOW)).rejects.toBeInstanceOf(InstagramBusyError);
+    expect(busy.names()).toEqual(["instagramConnections.findOne", "posts.findOne"]);
+    expect(busy.calls[1]!.args[0]).toEqual({ ownerId: OWNER, state: { $in: ["publishing", "outcome_unknown"] } });
+
+    const doc = existingDoc();
+    const failedPost = { _id: new ObjectId(), projectId: new ObjectId(), state: "publish_failed" };
+    const fake = fakeDb({
+      "instagramConnections.findOne": () => doc,
+      "posts.findOne": () => null,
+      "posts.find": () => ({ toArray: async () => [failedPost] }),
+      "projects.find": () => ({ toArray: async () => [{ _id: failedPost.projectId, title: "The water cycle" }] }),
+      "posts.updateOne": () => ({ modifiedCount: 1 }),
+      "notifications.insertMany": () => ({}),
+      "notifications.insertOne": () => ({}),
+      "instagramConnections.findOneAndUpdate": () => ({ ...doc, accessToken: undefined, status: "revoked", revokedAt: NOW }),
+      "auditLogs.insertOne": () => ({}),
+    });
+    await disconnectInstagram(fake.db, OWNER, NOW);
+    expect(fake.transactions()).toBe(1);
+    expect(fake.calls.find((c) => c.name === "posts.find")!.args[0]).toEqual({ ownerId: OWNER, state: { $in: ["scheduled", "publish_failed"] } });
+    const moved = fake.calls.find((c) => c.name === "posts.updateOne")!.args;
+    expect(moved[0]).toEqual({ _id: failedPost._id, ownerId: OWNER, state: "publish_failed" });
+    expect(moved[1].$set).toMatchObject({ state: "approval_invalidated", invalidatedReason: "instagram_disconnected", invalidatedAt: NOW });
+    const note = fake.calls.find((c) => c.name.startsWith("notifications.insert"))!.args[0];
+    expect(JSON.stringify(note)).toContain("approval_invalidated");
+    expect(JSON.stringify(note)).toContain("The water cycle");
+    // Every write ran inside the one transaction (each got the session).
+    for (const c of fake.calls.filter((c) => /update|insert|find/i.test(c.name))) expect(c.args.at(-1)).toHaveProperty("session");
   });
 
   it("nothing connected, or already disconnected → null (nothing written) → G4 404", async () => {

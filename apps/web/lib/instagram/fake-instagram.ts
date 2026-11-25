@@ -88,7 +88,8 @@ export function fakeAuthorizePage(callbackUrl: string, state: string): string {
 //   [e2e:busy]      creating the container fails with 503 twice, then works (automatic retries)
 //   [e2e:lost]      media_publish PUBLISHES the reel but its answer is lost (a timeout) the first
 //                   time: the job must find it by reconciling and must never publish again
-//   [e2e:limit]     media_publish is refused with Instagram's daily-limit error (code 9 / 2207042)
+//   [e2e:limit]     the FIRST media_publish of a container is refused with Instagram's daily-limit
+//                   error (code 9 / 2207042); a later one works (the limit "lifted": Try again)
 // Its "Instagram" lives in the TEST database's `e2eFakeInstagram` collection (containers and posted
 // media), so the e2e check can count the reels that went live. It only ever runs on bytereel_test
 // (provider.ts). The video link is never fetched, stored or printed.
@@ -155,7 +156,7 @@ export class FakeInstagramPublisher implements InstagramPublisher {
     if (container.status === "PUBLISHED") throw new InstagramPublishError("media_publish", "rejected", 400, 24, 2207008);
     if (container.status !== "FINISHED") throw new InstagramPublishError("media_publish", "rejected", 400, 9007, 2207027);
     const scenario = scenarioOf(container.caption ?? "");
-    if (scenario === "limit") throw new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042);
+    if (scenario === "limit" && (container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042);
     const mediaId = `1791${digits(13)}`;
     // Instagram's own rule: a container is published once; it is PUBLISHED from now on.
     const claimed = await this.docs.updateOne({ _id: container._id, status: "FINISHED" }, { $set: { status: "PUBLISHED" } });

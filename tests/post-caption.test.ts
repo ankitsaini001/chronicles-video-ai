@@ -483,6 +483,8 @@ function matchValue(value: any, cond: any): boolean {
       if (op === "$gt") return value !== undefined && value !== null && comparable(value) > comparable(arg);
       if (op === "$not") return !matchValue(value, arg);
       if (op === "$regex") return typeof value === "string" && (arg as RegExp).test(value);
+      if (op === "$in") return (arg as any[]).some((x) => matchValue(value, x));
+      if (op === "$ne") return !matchValue(value, arg);
       throw new Error(`fake: unsupported ${op}`);
     });
   }
@@ -655,10 +657,12 @@ describe("the suggestion lease and the conditional save (F29 review)", () => {
     expect(t.store.docs[0]!.captionSuggestingId).toEqual(other);
   });
 
-  it("count: only the owner's video_ready project with THIS video, under 20; at 20 → quota; else state", async () => {
+  it("count: only the owner's video_ready (or, since F30, publish_failed) project with THIS video, under 20; at 20 → quota; else state", async () => {
     const ids = { ownerId: user.id, projectId: PROJECT_ID, renderId: RENDER_ID };
     expect(await countCaptionRequest(memoryDb([readyProject({ planRequestCount: 20 })]).db, ids)).toEqual({ ok: false, reason: "quota", used: 20 });
     expect(await countCaptionRequest(memoryDb([readyProject({ state: "generating" })]).db, ids)).toEqual({ ok: false, reason: "state" });
+    expect(await countCaptionRequest(memoryDb([readyProject({ state: "publish_failed" })]).db, ids)).toMatchObject({ ok: true, used: 4 });
+    for (const state of ["publishing", "published", "scheduled"]) expect(await countCaptionRequest(memoryDb([readyProject({ state })]).db, ids)).toEqual({ ok: false, reason: "state" });
     expect(await countCaptionRequest(memoryDb([readyProject({ currentRenderId: new ObjectId() })]).db, ids)).toEqual({ ok: false, reason: "state" });
     expect(await countCaptionRequest(memoryDb([readyProject({ ownerId: new ObjectId() })]).db, ids)).toEqual({ ok: false, reason: "state" });
     const draft = { text: "Mine", updatedAt: new Date(), source: "edited" };

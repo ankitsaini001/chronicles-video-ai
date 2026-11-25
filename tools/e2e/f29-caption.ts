@@ -216,8 +216,14 @@ async function main(): Promise<void> {
   check("A connects Instagram (stand-in)", await connect(a, pa.projectId));
   const empty = await get(a.cookie, `/projects/${pa.projectId}/publish`);
   check(
-    "Step 4 connected, no caption yet: the CAPTION box (empty), 'Suggest a caption', '0 / 2,200', and 'Publishing comes next' below",
-    empty.text.includes('data-testid="caption-box"') && textareaOf(empty.text) === "" && empty.text.includes("Suggest a caption") && empty.text.includes("0 / 2,200") && empty.text.includes("Publishing comes next"),
+    "Step 4 connected, no caption yet: the CAPTION box (empty), 'Suggest a caption', '0 / 2,200', and the publish form below (F30: WHEN, approval tick, Publish now)",
+    empty.text.includes('data-testid="caption-box"') &&
+      textareaOf(empty.text) === "" &&
+      empty.text.includes("Suggest a caption") &&
+      empty.text.includes("0 / 2,200") &&
+      empty.text.includes('data-testid="publish-when"') &&
+      empty.text.includes('data-testid="publish-approve"') &&
+      empty.text.includes('data-testid="publish-now"'),
   );
 
   // ---------- the first suggestion (what the page sends automatically) ----------

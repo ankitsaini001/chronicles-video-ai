@@ -233,9 +233,15 @@ describe("F17 narration edit and F19 voice switch (no AI)", () => {
     // F23: an approved version without a video job offers "Generate video" (D8 again).
     expect(allowedActionsFor(projectDoc({ approvedPlanVersionId: V1 }), null)).toEqual(["rename", "edit_storyboard", "request_revision", "generate_video", "archive"]);
     expect(allowedActionsFor(projectDoc({ activeJobId: new ObjectId() }), null)).toEqual([]);
-    // Until F30 (post invalidation), a scheduled or failed-publish project's storyboard can't change.
-    expect(allowedActionsFor(projectDoc({ state: "scheduled" }), null)).toEqual(["rename", "archive"]);
-    expect(allowedActionsFor(projectDoc({ state: "publish_failed" }), null)).toEqual(["rename", "archive"]);
+    // F30: a scheduled or failed-publish project's storyboard can change again (the change cancels the
+    // post's approval in the same transaction).
+    expect(allowedActionsFor(projectDoc({ state: "scheduled" }), null)).toEqual(["rename", "edit_storyboard", "request_revision", "archive"]);
+    expect(allowedActionsFor(projectDoc({ state: "publish_failed" }), null)).toEqual(["rename", "edit_storyboard", "request_revision", "archive"]);
+    // F30 publishing actions: Try again on a failed post, Publish (approve again) after a cancelled approval; no archive while publishing.
+    const withVideo = { currentRenderId: new ObjectId() };
+    expect(allowedActionsFor(projectDoc({ ...withVideo, state: "publish_failed" }), null, null, { latestPost: { state: "publish_failed" } })).toContain("retry_post");
+    expect(allowedActionsFor(projectDoc({ ...withVideo, state: "publish_failed" }), null, null, { latestPost: { state: "approval_invalidated" } })).toContain("publish");
+    expect(allowedActionsFor(projectDoc({ ...withVideo, state: "publishing" }), null)).toEqual(["rename"]);
     const failed = { ...newPlanJob({ ownerId: OWNER, projectId: PROJECT, project: projectDoc(), now: NOW }), type: "revise" as const, state: "failed" as const, inputRef: { planVersionId: V1 }, error: { code: "PROVIDER_BUSY", message: "", retryable: true } };
     expect(allowedActionsFor(projectDoc(), null, failed)).toContain("retry_job");
     expect(allowedActionsFor(projectDoc({ currentPlanVersionId: new ObjectId() }), null, failed)).not.toContain("retry_job");

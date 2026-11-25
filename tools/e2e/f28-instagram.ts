@@ -280,8 +280,11 @@ async function main(): Promise<void> {
   check("audit: instagram.connected (no token in it)", !!auditConnected && !JSON.stringify(auditConnected).includes(token?.ciphertext ?? "-") && !JSON.stringify(auditConnected).includes("e2e-long"));
   const step4Connected = await get(a.cookie, back(a, "instagram=connected"));
   check(
-    "Step 4 connected: 'Publishing to @username', 'Instagram connected.', Disconnect, 'Publishing comes next'",
-    step4Connected.text.includes(`data-testid="instagram-username">@e2e_${alpha}`) && step4Connected.text.includes("Instagram connected.") && step4Connected.text.includes("Disconnect") && step4Connected.text.includes("Publishing comes next"),
+    "Step 4 connected: 'Publishing to @username', 'Instagram connected.', Disconnect, and the publish form (F30: Publish now)",
+    step4Connected.text.includes(`data-testid="instagram-username">@e2e_${alpha}`) &&
+      step4Connected.text.includes("Instagram connected.") &&
+      step4Connected.text.includes("Disconnect") &&
+      step4Connected.text.includes('data-testid="publish-now"'),
   );
 
   // ---------- refusals for user B ----------
