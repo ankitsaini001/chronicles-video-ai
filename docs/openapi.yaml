@@ -1957,6 +1957,12 @@ paths:
         INSTAGRAM_NOT_CONNECTED, INSTAGRAM_TOKEN_EXPIRED, INVALID_STATE, JOB_ALREADY_RUNNING.
         Each approval gets a new approval.id; publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}
         (unique), so a re-approval makes a new post while the same approval can never publish twice.
+        As built (F30): only mode=now; mode=scheduled → 400 ("Scheduling is coming soon. Please choose Publish now.")
+        until F31. The caption is cleaned like H7 (NFC), then 1–2,200 code points, not only spaces, ≤ 30 hashtags.
+        Rate limit `publish` 10/hour shared with H6. INVALID_STATE details.reason: video_not_ready, already_published,
+        live_post, retry_instead (a failed post whose publish may have gone out: use H6). Allowed project states:
+        video_ready, publish_failed, scheduled (no live post). Inngest, token keys and R2 must be set up (else 500,
+        nothing saved). The event post.publish.requested is sent after the commit. See API.md "As built (F30)".
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -2141,7 +2147,7 @@ paths:
     post:
       operationId: retryPost
       summary: Retry a failed publish
-      description: H6. Only publish_failed. Re-checks the publish approval, including project not archived, user active, and the project's current render and current/approved plan still the approved ones (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED.
+      description: H6. Only publish_failed. Re-checks the publish approval, including project not archived, user active, and the project's current render and current/approved plan still the approved ones (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED. As built (F30) — an approval_invalidated post → 409 APPROVAL_STALE (reason approval_invalidated, approve again with H2); the same job is queued again (attempt + 1); a good container (not ERROR/EXPIRED, under 23 h) is reused; a post whose media_publish may have gone out is checked on Instagram first (reconcile), so Try again never posts twice. Rate limit shared with H2.
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -3948,6 +3954,9 @@ components:
               $ref: '#/components/schemas/Timestamp'
             updatedAt:
               $ref: '#/components/schemas/Timestamp'
+            pollAfterMs:
+              type: [integer, 'null']
+              description: As built (F30, additive) — 2000 while the post is publishing or outcome_unknown, else null.
 
     # ---------- admin ----------
     AllowlistEntry:
@@ -4590,7 +4599,7 @@ components:
       type: object
       additionalProperties: false
       required: [mode, renderId, mp4Sha256, connectionId, caption, expectedStateVersion]
-      description: scheduledAt is required iff mode = scheduled (≥ now + 10 min, ≤ now + 75 days).
+      description: scheduledAt is required iff mode = scheduled (≥ now + 10 min, ≤ now + 75 days). As built (F30) — mode=scheduled is refused (400) until F31; scheduledAt with mode=now → 400; caption 1–2,200 code points after cleaning, not only spaces, at most 30 hashtags.
       properties:
         mode:
           $ref: '#/components/schemas/PostMode'

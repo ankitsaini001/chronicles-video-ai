@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔨 Building (plan approved 2026-11-25) |
+| **Status** | 🔨 Building (plan approved 2026-11-25; built with the stand-in Instagram, waiting for code review and the founder's real post) |
 | **Phase** | A5 · Instagram publishing |
 | **Depends on** | F29 |
 | **Design** | Stitch: ByteReel — Step 4 Publish, ByteReel — Published |
@@ -10,7 +10,7 @@
 | **API endpoints** (docs/API.md) | H2, H3, H4, H6 |
 
 ## MUST from F16–F20 (code review, 2026-11-14)
-- [ ] **Add the post approval invalidation to every storyboard change and re-allow the two states.** Until F30, D3 (narration edit), D4 (voice), D5 (revision) and D7 (undo/restore) are refused with `409 INVALID_STATE` while the project is `scheduled` or `publish_failed` (`STORYBOARD_EDIT_STATES` in `packages/db/src/projects.ts`). F30 MUST, in the same transaction as each change, move a `scheduled`/`publish_failed` post to `approval_invalidated` and create the `approval_invalidated` notification (API.md §9, DATABASE.md §7.2 rows 3–5), then add `scheduled` and `publish_failed` back to `STORYBOARD_EDIT_STATES`, with tests.
+- [x] **Add the post approval invalidation to every storyboard change and re-allow the two states.** Until F30, D3 (narration edit), D4 (voice), D5 (revision) and D7 (undo/restore) are refused with `409 INVALID_STATE` while the project is `scheduled` or `publish_failed` (`STORYBOARD_EDIT_STATES` in `packages/db/src/projects.ts`). F30 MUST, in the same transaction as each change, move a `scheduled`/`publish_failed` post to `approval_invalidated` and create the `approval_invalidated` notification (API.md §9, DATABASE.md §7.2 rows 3–5), then add `scheduled` and `publish_failed` back to `STORYBOARD_EDIT_STATES`, with tests. *(Done 2026-11-25: `invalidateOpenPosts` in D3, D4, D5, D7, F4, H7, G3, G4; unit tests for D7 and G4, e2e for D3, H7, G4 and C5.)*
 
 ## Goal
 Approve the exact video and account, then publish; show the live post or a clear failure with Retry.
@@ -24,7 +24,7 @@ Approve the exact video and account, then publish; show the live post or a clear
 - Re-check approval right before posting
 - Never posts twice
 - Retry on failure
-- **Decision to make (from the F29 code review, 2026-11-24):** Caption edits after approval: H7 does not bump stateVersion, so F30 must either set the post to approval_invalidated and notify, inside the same transaction, when the saved text's NFC hash differs from posts.approval.captionHash, or refuse H7 while a live post exists (PRD §7: any caption edit invalidates the approval). Also: H7 and H1 only save while the project is `video_ready` today; F30 decides which publish states (`scheduled`, `publish_failed`) may edit the caption.
+- **Decision to make (from the F29 code review, 2026-11-24):** Caption edits after approval: H7 does not bump stateVersion, so F30 must either set the post to approval_invalidated and notify, inside the same transaction, when the saved text's NFC hash differs from posts.approval.captionHash, or refuse H7 while a live post exists (PRD §7: any caption edit invalidates the approval). Also: H7 and H1 only save while the project is `video_ready` today; F30 decides which publish states (`scheduled`, `publish_failed`) may edit the caption. *(Decided: decision 1 below.)*
 
 ## Not in this feature
 - Scheduling (F31: "Schedule" shows greyed out, "coming soon")
@@ -42,22 +42,30 @@ Approve the exact video and account, then publish; show the live post or a clear
 
 **How it works (as approved):** the approval locks the exact file (`mp4Sha256`), the account (`connectionId` + `igUserId`), the caption (`captionHash`) and the time; the background `publish` job (Inngest, stages approve → create_container → poll → publish, + reconcile) re-checks all of it right before creating the container and before publishing; Meta fetches the video through a private R2 presigned GET link (about 1 hour); Meta's flow: create REELS container → poll `status_code` → `media_publish` → permalink.
 
+**As built:** API.md "As built (F30)" (after H6), DATABASE.md "As built (F30)" (after 4.23), ARCHITECTURE.md §17.4 "As built (F30)". Differences from the plan: no `content_publishing_limit` call before posting (the limit is read from `media_publish`'s refusal); reconcile is a step of the same run, not a separate function.
+
 ## Steps
-- [ ] 1. Database: `posts` (approval snapshot, `publishKey`), publish job, indexes
-- [ ] 2. Server: H2, H3, H4, H6, the publish job with re-checks and reconcile; the approval-cancel rules in D3, D4, D5, D7, F4, H7, G3, G4, C5
-- [ ] 3. Screens: WHEN, approval tick, Publish now, progress, failed + Try again, Published (phone + desktop)
-- [ ] 4. Tests: unit + e2e with the stand-in Instagram (success, processing error, lost connection after publish → no duplicate, approval cancelled by a change, Try again)
-- [ ] 5. Docs, code review + fixes
+- [x] 1. Database: `posts` (approval snapshot, `publishKey`), publish job, indexes
+- [x] 2. Server: H2, H3, H4, H6, the publish job with re-checks and reconcile; the approval-cancel rules in D3, D4, D5, D7, F4, H7, G3, G4, C5
+- [x] 3. Screens: WHEN, approval tick, Publish now, progress, failed + Try again, Published (phone + desktop)
+- [x] 4. Tests: unit + e2e with the stand-in Instagram (success, processing error, lost connection after publish → no duplicate, approval cancelled by a change, Try again)
+- [ ] 5. Docs, code review + fixes *(docs done 2026-11-25; code review next)*
 - [ ] 6. Founder: one real Reel to Instagram (no voice, no video of the day, no AI)
 
 ## How we test it (done when all are ticked)
 - [ ] Reel appears on Instagram
-- [ ] Changing the caption after approval asks to approve again
-- [ ] Retry never creates a duplicate
+- [ ] Changing the caption after approval asks to approve again *(passes with the stand-in; tick after the founder sees it)*
+- [ ] Retry never creates a duplicate *(passes with the stand-in; tick after the founder sees it)*
 - [ ] Code review passed (code-reviewer agent)
 - [ ] Founder tested it and said OK
+
+**Before the founder's real post:** apply the F30 indexes once: `npm run db -- indexes --feature F30 --apply` (the two unique ones are part of "never posts twice").
 
 ## Progress log
 | Date | What happened |
 |---|---|
 | 2026-11-25 | Plan approved by the founder (decisions 1–7); building with the stand-in Instagram. |
+| 2026-11-25 | Steps 1–3 built: `posts` + publish job + indexes; H2/H3/H4/H6, the `publish-post` job (re-check before the container and before `media_publish`, claimed publish, `outcome_unknown` → reconcile, ~10 min of automatic retries), the approval-cancel rules; Step 4 publish form, progress / failed / Published screens. |
+| 2026-11-25 | Step 4 tests: `tests/publish.test.ts` (48: H2 body, caption hash, publish key, Meta client with a fake fetch, the job with a fake store: success, slow, busy, ERROR, EXPIRED, daily limit, change during processing, lost answer → reconcile, Try again after an unknown outcome); older tests updated for F30 (G4, D7, allowedActions, H1 count in `publish_failed`). Full suite 1,259/1,259. E2e with the stand-in Instagram and a private Inngest: `tools/e2e/f30-publish.ts` 47/47 (ONE reel per approval in every case, incl. the lost answer and Try again after the daily limit); F28 43/43 and F29 33/33 (updated for the publish form); F26 64/64. Typecheck and `next build` pass. Zero Meta, Gemini or ElevenLabs calls. |
+| 2026-11-25 | Found during the F26 run: Remotion's render server took the first free port from 3000 (the founder's dev site). Fixed: `REMOTION_SERVE_PORT` (default 3200; 3000 and 8288 refused) is passed to every Remotion call; the e2e scripts that render require 3240–3249. |
+| 2026-11-25 | Step 5 docs: API.md, openapi.yaml, DATABASE.md, ARCHITECTURE.md "As built (F30)", tracker. Next: code review, then the founder's one real Reel. |
