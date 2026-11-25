@@ -44,6 +44,8 @@ import { captionFailureOf, storyboardChangedSince } from "@/lib/video/review-sta
 // approve the new storyboard there. "Changed" means the video was made from another storyboard
 // version than the current one (lib/video/review-state.ts), not just the state.
 // F28: a ready, up-to-date video has "Publish →" and the stepper's "4 Publish" (/projects/[id]/publish).
+// F30: after a failed post (`publish_failed`) the video still opens here like a ready one (caption
+// fixes and changes cancel the failed post's approval, API.md §9).
 
 export const metadata: Metadata = { title: "Your video" };
 
@@ -77,7 +79,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
   );
 
   // F26: the kept video after a change (storyboard_ready with a currentRenderId) opens here too.
-  if (state === "video_ready" || (state === "storyboard_ready" && project.currentRenderId !== null)) {
+  if (state === "video_ready" || state === "publish_failed" || (state === "storyboard_ready" && project.currentRenderId !== null)) {
     // F24: the project's video. Its thumbnail and MP4 links (15 minutes, private) are made only after
     // the owner check above; a link that couldn't be made is fetched again by the screen.
     const render = await findProjectRender(db, project, "current");
@@ -99,7 +101,7 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
     // The last caption fix made on THIS video, when it FAILED (a fix the creator cancelled shows no note).
     const lastCaptionJob = captionFailureOf({ state, job: loaded.latestCaptionJob, renderId: render._id, retryAllowed: resource.allowedActions.includes("retry_job"), archived });
     // F28: ④ Publish opens only for a ready, up-to-date video of a project that isn't archived.
-    const canPublish = state === "video_ready" && !archived && !storyboardChanged;
+    const canPublish = (state === "video_ready" || state === "publish_failed") && !archived && !storyboardChanged;
     return frame(
       <ReviewVideoScreen
         projectId={projectId}

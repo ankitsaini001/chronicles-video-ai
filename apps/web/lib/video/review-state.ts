@@ -8,10 +8,13 @@ import type { ObjectId } from "mongodb";
  * Does the storyboard have changes this video doesn't show? True when the video was made from
  * another storyboard version than the current one, or the project isn't `video_ready` (after a change
  * the new version waits for approval on the storyboard). Then the video is shown read-only: no
- * caption fixes, no change requests here.
+ * caption fixes, no change requests here. F30: a project whose post failed (`publish_failed`) still
+ * has its ready video (captions, changes and the caption box stay available; each change cancels the
+ * failed post's approval).
  */
 export function storyboardChangedSince(input: { state: ProjectState; currentPlanVersionId: ObjectId | null; renderPlanVersionId: ObjectId }): boolean {
-  return input.state !== "video_ready" || input.currentPlanVersionId === null || !input.renderPlanVersionId.equals(input.currentPlanVersionId);
+  const ready = input.state === "video_ready" || input.state === "publish_failed";
+  return !ready || input.currentPlanVersionId === null || !input.renderPlanVersionId.equals(input.currentPlanVersionId);
 }
 
 export type CaptionFailure = { id: string; message: string; canRetry: boolean };

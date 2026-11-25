@@ -1,7 +1,9 @@
 import { readDbConfig } from "@bytereel/db";
+import type { Db } from "mongodb";
 import { readInstagramConfig } from "./config";
-import { FakeInstagramApi } from "./fake-instagram";
+import { FakeInstagramApi, FakeInstagramPublisher } from "./fake-instagram";
 import { MetaInstagramApi, type InstagramApi } from "./meta-client";
+import { MetaInstagramPublisher, type InstagramPublisher } from "./publish-client";
 
 // Which Instagram G2/G3 talk to (F28, server only): the real one (INSTAGRAM_APP_ID,
 // INSTAGRAM_APP_SECRET, the redirect address), or the stand-in when E2E_FAKE_INSTAGRAM=1.
@@ -43,4 +45,19 @@ export function instagramApiFromEnv(env: NodeJS.ProcessEnv = process.env): Insta
   const config = readInstagramConfig(env);
   if (!config.ok) return { ok: false, problems: config.problems };
   return { ok: true, fake: false, api: new MetaInstagramApi(config.config) };
+}
+
+export type InstagramPublisherResult = { ok: true; publisher: InstagramPublisher; fake: boolean } | { ok: false; problems: string[] };
+
+/**
+ * F30: who the publish job talks to. The real Instagram (it needs no app id or secret: publishing
+ * uses the creator's own token), or the stand-in when E2E_FAKE_INSTAGRAM=1 (same rules as above; its
+ * pretend Instagram lives in the test database `db`). The real one is refused on bytereel_test.
+ */
+export function instagramPublisherFromEnv(db: Db, env: NodeJS.ProcessEnv = process.env): InstagramPublisherResult {
+  const problem = fakeInstagramProblem(env);
+  if (problem) return { ok: false, problems: [problem] };
+  if (env[FAKE_INSTAGRAM_ENV] === "1") return { ok: true, fake: true, publisher: new FakeInstagramPublisher(db) };
+  if (databaseName(env) === TEST_DB) return { ok: false, problems: [`The real Instagram is never used with MONGODB_DB=${TEST_DB}. Set ${FAKE_INSTAGRAM_ENV}=1 for tests.`] };
+  return { ok: true, fake: false, publisher: new MetaInstagramPublisher() };
 }

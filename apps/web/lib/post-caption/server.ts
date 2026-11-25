@@ -1,4 +1,4 @@
-import { findProjectRender, getInstagramConnection, getOwnedProject, getProjectPlanVersion, toCaptionDraftResource, type ProjectDocument, type RenderDocument } from "@bytereel/db";
+import { CAPTION_EDIT_STATES, findProjectRender, getInstagramConnection, getOwnedProject, getProjectPlanVersion, toCaptionDraftResource, type ProjectDocument, type RenderDocument } from "@bytereel/db";
 import type { Db } from "mongodb";
 import { storyboardChangedSince } from "../video/review-state";
 import type { CaptionTarget } from "./handler";
@@ -6,11 +6,12 @@ import type { CaptionTarget } from "./handler";
 // F29: what H1 reads about the project (server only), owner-scoped: the video is "ready to publish" by
 // the same rule as the Step 4 page (video_ready, the current render ready, made from the current
 // storyboard version: storyboardChangedSince), the approved storyboard's title and narration, and
-// whether Instagram is connected (an `active` connection).
+// whether Instagram is connected (an `active` connection). F30 (decision 1): also `publish_failed`
+// (the caption stays editable after a failed post; a change cancels its approval).
 
 /** The project's video when it can be published from Step 4, else null (the publish page's own rule). */
 export async function publishableRender(db: Db, project: ProjectDocument): Promise<RenderDocument | null> {
-  if (project.state !== "video_ready" || project.currentRenderId === null) return null;
+  if (!CAPTION_EDIT_STATES.includes(project.state) || project.currentRenderId === null) return null;
   const render = await findProjectRender(db, project, "current");
   if (!render || render.status !== "ready") return null;
   if (storyboardChangedSince({ state: project.state, currentPlanVersionId: project.currentPlanVersionId, renderPlanVersionId: render.planVersionId })) return null;

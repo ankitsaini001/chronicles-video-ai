@@ -53,6 +53,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     handle: async ({ db, user, idempotencyLock }) => {
       const owned = await getOwnedJob(db, user.id, jobId);
       if (!owned) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));
+      // F30: a publish job is tried again through its post (H6), which re-checks the approval first.
+      if (owned.type === "publish") return toApiProblem(new ProjectActionError("INVALID_STATE", "Please use Try again on the post.", { jobType: owned.type }));
       if (owned.type === "generate" || owned.type === "caption") {
         const project = await getOwnedProject(db, user.id, owned.projectId.toHexString());
         if (!project) return toApiProblem(new ProjectActionError("NOT_FOUND", "We couldn't find this job."));

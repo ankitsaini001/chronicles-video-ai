@@ -717,11 +717,12 @@ export async function logPublishAttempt(db: Db, entry: PublishAttemptLog, now: D
 
 /**
  * The reel is live, ONE transaction (DATABASE.md §7.2 row 18): post → `published` (media id,
- * permalink, publishedAt), job → `succeeded`, project → `published` (activeJobId cleared, +1
+ * permalink, publishedAt; both null only when a reconcile saw the container PUBLISHED but couldn't
+ * find the media in the account's list), job → `succeeded`, project → `published` (activeJobId cleared, +1
  * stateVersion), notification `post_published`, audit `post.published`. False when the job no
  * longer runs this attempt.
  */
-export async function completePublishJob(db: Db, input: { jobId: ObjectId; attempt: number; mediaId: string; permalink: string | null; now?: Date }): Promise<boolean> {
+export async function completePublishJob(db: Db, input: { jobId: ObjectId; attempt: number; mediaId: string | null; permalink: string | null; now?: Date }): Promise<boolean> {
   const now = input.now ?? new Date();
   const session = db.client.startSession();
   let saved = false;

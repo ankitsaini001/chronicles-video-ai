@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import type { Db } from "mongodb";
 import { authorizeUrlFor, InstagramApiError, type InstagramApi, type InstagramProfile, type LongLivedToken, type ShortLivedToken } from "./meta-client";
+import { InstagramPublishError, type ContainerStatus, type InstagramPublisher, type RecentMedia } from "./publish-client";
 
 // A stand-in for Instagram, ONLY for automated tests and the local e2e check (E2E_FAKE_INSTAGRAM=1,
 // switched on by provider.ts on a local test server only): ZERO calls to Meta. "Instagram's login
@@ -76,4 +78,110 @@ export function fakeAuthorizePage(callbackUrl: string, state: string): string {
 <ul>${kinds}</ul>
 <p><a data-kind="cancel" href="${link({ error: "access_denied", error_reason: "user_denied", error_description: "The user denied your request." })}">Cancel</a></p>
 </body></html>`;
+}
+
+// ---------- F30: publishing (the stand-in for /media, /media_publish, the container status) ----------
+// What Instagram "does" is chosen by a word in the caption, so an e2e check can ask for each case:
+//   (none)          the container is IN_PROGRESS on the first check, then FINISHED; publishing works
+//   [e2e:slow]      IN_PROGRESS for the first 3 checks (slow processing), then FINISHED
+//   [e2e:error]     the container ends in ERROR (Instagram couldn't process the video)
+//   [e2e:busy]      creating the container fails with 503 twice, then works (automatic retries)
+//   [e2e:lost]      media_publish PUBLISHES the reel but its answer is lost (a timeout) the first
+//                   time: the job must find it by reconciling and must never publish again
+//   [e2e:limit]     media_publish is refused with Instagram's daily-limit error (code 9 / 2207042)
+// Its "Instagram" lives in the TEST database's `e2eFakeInstagram` collection (containers and posted
+// media), so the e2e check can count the reels that went live. It only ever runs on bytereel_test
+// (provider.ts). The video link is never fetched, stored or printed.
+
+export const FAKE_INSTAGRAM_COLLECTION = "e2eFakeInstagram";
+type FakeDoc = {
+  _id: string;
+  kind: "container" | "media" | "counter";
+  igUserId?: string;
+  caption?: string;
+  checks?: number;
+  status?: string;
+  containerId?: string;
+  timestamp?: string;
+  permalink?: string;
+  publishCalls?: number;
+  count?: number;
+};
+
+const scenarioOf = (caption: string) => /\[e2e:(slow|error|busy|lost|limit)\]/.exec(caption)?.[1] ?? "ok";
+const TOKEN_OK = /^e2e-long\./;
+const digits = (n: number) => Array.from(randomBytes(n), (b) => String(b % 10)).join("");
+
+export class FakeInstagramPublisher implements InstagramPublisher {
+  constructor(private readonly db: Db) {}
+
+  private get docs() {
+    return this.db.collection<FakeDoc>(FAKE_INSTAGRAM_COLLECTION);
+  }
+
+  private checkToken(step: ConstructorParameters<typeof InstagramPublishError>[0], accessToken: string): void {
+    if (!TOKEN_OK.test(accessToken)) throw new InstagramPublishError(step, "rejected", 400, 190, null);
+  }
+
+  async createReelsContainer(input: { igUserId: string; accessToken: string; videoUrl: string; caption: string }): Promise<{ containerId: string }> {
+    this.checkToken("create_container", input.accessToken);
+    if (!input.videoUrl.startsWith("https://")) throw new InstagramPublishError("create_container", "rejected", 400, 9004, 2207052);
+    if (scenarioOf(input.caption) === "busy") {
+      const key = `busy:${createHash("sha256").update(input.caption).digest("hex").slice(0, 24)}`;
+      const counter = await this.docs.findOneAndUpdate({ _id: key }, { $inc: { count: 1 }, $setOnInsert: { kind: "counter" } }, { upsert: true, returnDocument: "after" });
+      if ((counter?.count ?? 0) <= 2) throw new InstagramPublishError("create_container", "unavailable", 503, 2, null);
+    }
+    const containerId = `1790${digits(13)}`;
+    await this.docs.insertOne({ _id: `container:${containerId}`, kind: "container", igUserId: input.igUserId, caption: input.caption, checks: 0, status: "IN_PROGRESS", publishCalls: 0 });
+    return { containerId };
+  }
+
+  async containerStatus(input: { containerId: string; accessToken: string }): Promise<ContainerStatus> {
+    this.checkToken("container_status", input.accessToken);
+    const container = await this.docs.findOneAndUpdate({ _id: `container:${input.containerId}`, kind: "container" }, { $inc: { checks: 1 } }, { returnDocument: "after" });
+    if (!container) throw new InstagramPublishError("container_status", "rejected", 400, 24, 2207008);
+    if (container.status === "PUBLISHED") return { statusCode: "PUBLISHED", status: null };
+    const scenario = scenarioOf(container.caption ?? "");
+    const checks = container.checks ?? 1;
+    const statusCode = scenario === "error" ? "ERROR" : checks <= (scenario === "slow" ? 3 : 1) ? "IN_PROGRESS" : "FINISHED";
+    await this.docs.updateOne({ _id: container._id }, { $set: { status: statusCode } });
+    return { statusCode, status: statusCode === "ERROR" ? "2207032" : null };
+  }
+
+  async publishContainer(input: { igUserId: string; accessToken: string; containerId: string }): Promise<{ mediaId: string }> {
+    this.checkToken("media_publish", input.accessToken);
+    const container = await this.docs.findOneAndUpdate({ _id: `container:${input.containerId}`, kind: "container" }, { $inc: { publishCalls: 1 } }, { returnDocument: "after" });
+    if (!container || container.igUserId !== input.igUserId) throw new InstagramPublishError("media_publish", "rejected", 400, 24, 2207008);
+    if (container.status === "PUBLISHED") throw new InstagramPublishError("media_publish", "rejected", 400, 24, 2207008);
+    if (container.status !== "FINISHED") throw new InstagramPublishError("media_publish", "rejected", 400, 9007, 2207027);
+    const scenario = scenarioOf(container.caption ?? "");
+    if (scenario === "limit") throw new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042);
+    const mediaId = `1791${digits(13)}`;
+    // Instagram's own rule: a container is published once; it is PUBLISHED from now on.
+    const claimed = await this.docs.updateOne({ _id: container._id, status: "FINISHED" }, { $set: { status: "PUBLISHED" } });
+    if (claimed.modifiedCount !== 1) throw new InstagramPublishError("media_publish", "rejected", 400, 24, 2207008);
+    await this.docs.insertOne({
+      _id: `media:${mediaId}`,
+      kind: "media",
+      igUserId: input.igUserId,
+      containerId: input.containerId,
+      caption: container.caption ?? "",
+      timestamp: new Date().toISOString(),
+      permalink: `https://www.instagram.com/reel/E2E${mediaId.slice(-8)}/`,
+    });
+    // The first publish of a "lost" post goes live, but the answer never reaches us.
+    if (scenario === "lost" && (container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "timeout");
+    return { mediaId };
+  }
+
+  async permalink(input: { mediaId: string; accessToken: string }): Promise<string | null> {
+    this.checkToken("permalink", input.accessToken);
+    return (await this.docs.findOne({ _id: `media:${input.mediaId}`, kind: "media" }))?.permalink ?? null;
+  }
+
+  async recentMedia(input: { igUserId: string; accessToken: string }): Promise<RecentMedia[]> {
+    this.checkToken("recent_media", input.accessToken);
+    const media = await this.docs.find({ kind: "media", igUserId: input.igUserId }).sort({ timestamp: -1 }).limit(25).toArray();
+    return media.map((m) => ({ id: m._id.slice("media:".length), caption: m.caption ?? null, timestamp: m.timestamp ?? null, permalink: m.permalink ?? null }));
+  }
 }
