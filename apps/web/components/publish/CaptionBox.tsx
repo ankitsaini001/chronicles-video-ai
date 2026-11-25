@@ -1,7 +1,7 @@
 "use client";
 
 import { POST_CAPTION_LIMITS, POST_CAPTION_MESSAGES, postCaptionLength } from "@bytereel/db/post-caption";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { apiSend } from "@/components/storyboard/client";
 import { Note } from "@/components/storyboard/Note";
 import { Button, cn } from "@/components/ui";
@@ -21,6 +21,8 @@ import { Button, cn } from "@/components/ui";
 //   is saved until it is shortened.
 // - Suggest again replaces the text; after the creator's own edits it asks first (Escape = keep mine).
 // - Busy, refused and limit answers show the server's plain line; typing your own caption always works.
+// - F30: the publish form follows the text (`onTextChange`: a change unticks the approval) and saves
+//   anything still unsaved before approving (`flushRef`). `readOnly` while the post is being sent.
 
 const SAVE_DELAY_MS = 1500;
 /** H1 has 30 s for the AI; this leaves room for the request itself. */
@@ -42,7 +44,23 @@ function nextSeq(): number {
 export type CaptionDraftView = { text: string; source: "ai" | "edited" };
 type SaveState = "idle" | "saving" | "saved" | "failed";
 
-export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: string; renderId: string; initialDraft: CaptionDraftView | null }) {
+export function CaptionBox({
+  projectId,
+  renderId,
+  initialDraft,
+  onTextChange,
+  flushRef,
+  readOnly = false,
+}: {
+  projectId: string;
+  renderId: string;
+  initialDraft: CaptionDraftView | null;
+  /** F30: called with the text on screen whenever it changes (typed, suggested, loaded). */
+  onTextChange?: (text: string) => void;
+  /** F30: set to this box's "save now" (the publish form calls it before approving). */
+  flushRef?: MutableRefObject<(() => Promise<void>) | null>;
+  readOnly?: boolean;
+}) {
   const draftUrl = `/api/v1/projects/${projectId}/caption-draft`;
   const [text, setText] = useState(initialDraft?.text ?? "");
   const [edited, setEdited] = useState(initialDraft?.source === "edited");
@@ -90,14 +108,27 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
     return queue.current;
   }, [draftUrl]);
 
+  // F30: the publish form can save the caption right before approving it.
+  useEffect(() => {
+    if (!flushRef) return;
+    flushRef.current = flush;
+    return () => {
+      flushRef.current = null;
+    };
+  }, [flush, flushRef]);
+
   /** Shows a saved draft (from H1, or one another tab saved). */
-  const show = useCallback((draft: CaptionDraftView) => {
-    latest.current = draft.text;
-    saved.current = draft.text;
-    setText(draft.text);
-    setEdited(draft.source === "edited");
-    setSaveState("idle");
-  }, []);
+  const show = useCallback(
+    (draft: CaptionDraftView) => {
+      latest.current = draft.text;
+      saved.current = draft.text;
+      setText(draft.text);
+      setEdited(draft.source === "edited");
+      setSaveState("idle");
+      onTextChange?.(draft.text);
+    },
+    [onTextChange],
+  );
 
   const suggest = useCallback(
     async (onlyIfEmpty: boolean, isRecheck = false) => {
@@ -179,8 +210,10 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
   }, [confirming]);
 
   function change(value: string) {
+    if (readOnly) return;
     latest.current = value;
     setText(value);
+    onTextChange?.(value);
     setEdited(true);
     setConfirming(false);
     setSaveState("idle");
@@ -190,7 +223,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
   }
 
   function pressSuggest() {
-    if (suggesting) return;
+    if (suggesting || readOnly) return;
     // After the creator's own edits, a new suggestion would replace them: ask first.
     if (edited && text.trim() !== "") return setConfirming(true);
     void suggest(false);
@@ -223,7 +256,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
           ref={suggestButton}
           type="button"
           onClick={pressSuggest}
-          disabled={suggesting}
+          disabled={suggesting || readOnly}
           data-testid="caption-suggest"
           className="flex min-h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line bg-surface-2 px-3.5 py-1.5 text-xs text-text transition-colors hover:border-amber/40 hover:text-gold-cream disabled:pointer-events-none disabled:opacity-50"
         >
@@ -269,7 +302,7 @@ export function CaptionBox({ projectId, renderId, initialDraft }: { projectId: s
           value={text}
           onChange={(event) => change(event.target.value)}
           onBlur={() => void flush()}
-          readOnly={suggesting}
+          readOnly={suggesting || readOnly}
           aria-busy={suggesting}
           aria-describedby="caption-count caption-status"
           aria-invalid={tooLong}

@@ -11,7 +11,8 @@ import { INSTAGRAM_MESSAGES, type InstagramNotice } from "@/lib/instagram/messag
 // Not connected: "Connect your Instagram", the three promises and Connect Instagram (a real page
 // load to G2, which sends the creator to Instagram's own login page). Connected: "Publishing to
 // @username" with the picture, Disconnect (G4: the token is deleted at once), then `children` (F29: the
-// CAPTION box, only while connected) and "Publishing comes next" until publishing itself arrives (F30).
+// CAPTION box; F30: the whole publish form: caption, WHEN, the approval tick, Publish now), only while
+// connected.
 // A result from Instagram (connected, personal account, cancelled, in use, expired) shows as one plain
 // line on top.
 
@@ -94,9 +95,6 @@ export function InstagramCard({ projectId, connection, notice, children }: { pro
           </Button>
         </section>
         {children}
-        <p data-testid="publishing-next" className="px-2 text-center text-xs leading-relaxed text-muted">
-          Publishing comes next: soon you&apos;ll post or schedule this video from here, always after you approve it.
-        </p>
       </div>
     );
   }
