@@ -12,9 +12,10 @@ export const SITE = {
   /** Year shown in the footer copyright. */
   copyrightYear: 2026,
   /**
-   * Where "Contact us" emails go.
-   * TEMPORARY: a dummy testing address (example.com is reserved for examples, so mail goes
-   * nowhere). Replace with the real address before launch (tracked in F38).
+   * Where "Contact us" emails go; also the privacy and grievance contact on /privacy and /terms
+   * (founder, 2026-11-25).
    */
-  contactEmail: "contact@example.com",
+  contactEmail: "studioajdigitaltalk@gmail.com",
+  /** Who runs the service, as named on /privacy and /terms (founder, 2026-11-25). */
+  operator: { name: "TechByte Chronicles", city: "Pune", state: "Maharashtra", country: "India" },
 } as const;
