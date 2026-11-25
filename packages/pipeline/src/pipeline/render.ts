@@ -27,7 +27,31 @@ export const RENDER_SETTINGS = {
   audioBitrate: "160k",
 } as const;
 
+/**
+ * The local port Remotion's bundle server listens on while it renders (selectComposition,
+ * renderMedia, renderStill each start it for their call, on 127.0.0.1). Without a port Remotion takes
+ * the first free one from 3000, which is the founder's dev site, so a port is ALWAYS given:
+ * REMOTION_SERVE_PORT, or 3200 (outside Remotion's own 3000–3100 search). Remotion then uses exactly
+ * that port and fails clearly if it is busy. Renders run one at a time per environment
+ * (VIDEO_CONCURRENCY), so one port per server is enough; a second server that renders at the same
+ * time (a local test server) sets its own (the e2e scripts use 3240–3249).
+ */
+export const DEFAULT_REMOTION_SERVE_PORT = 3200;
+/** Never these: the founder's dev site (3000) and the local Inngest Dev Server (8288). */
+const RESERVED_PORTS: readonly number[] = [3000, 8288];
+
+export function remotionServePort(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.REMOTION_SERVE_PORT?.trim();
+  if (!raw) return DEFAULT_REMOTION_SERVE_PORT;
+  const port = /^\d{4,5}$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(`REMOTION_SERVE_PORT must be a port number between 1024 and 65535 (got "${raw}").`);
+  if (RESERVED_PORTS.includes(port)) throw new Error(`REMOTION_SERVE_PORT can't be ${port}: that port belongs to the dev site (3000) or the Inngest Dev Server (8288).`);
+  return port;
+}
+
 export interface RenderJob {
+  /** Remotion's bundle server port (default: remotionServePort() from the environment). */
+  servePort?: number;
   timeline: Timeline;
   captions: CaptionTrack;
   /** Final MP4 path (written by Remotion; the caller moves it into the artifact store). */
@@ -75,6 +99,8 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
   const music = job.music ?? false;
   if (music && !job.publicDir) throw new Error("the music bed needs a public folder");
   const inputProps = { timeline: job.timeline, captions: job.captions, music };
+  // Checked before any work, so a wrong setting fails at once with a clear message.
+  const port = job.servePort ?? remotionServePort();
   await fs.mkdir(job.workDir, { recursive: true });
   const bundleDir = await fs.mkdtemp(path.join(job.workDir, "bytereel-bundle-"));
 
@@ -92,7 +118,7 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
 
     const browser = await openBrowser("chrome", { logLevel: "error" });
     try {
-      const composition = await selectComposition({ serveUrl, id: COMPOSITION_ID, inputProps, puppeteerInstance: browser, logLevel: "error" });
+      const composition = await selectComposition({ serveUrl, id: COMPOSITION_ID, inputProps, puppeteerInstance: browser, logLevel: "error", port });
       if (composition.durationInFrames !== job.timeline.totalFrames) {
         throw new Error(`composition is ${composition.durationInFrames} frames but the timeline has ${job.timeline.totalFrames}`);
       }
@@ -114,6 +140,7 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
         audioBitrate: RENDER_SETTINGS.audioBitrate,
         outputLocation: job.outputPath,
         puppeteerInstance: browser,
+        port,
         concurrency: job.concurrency ?? null,
         overwrite: true,
         logLevel: "error",
@@ -134,7 +161,7 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
       const previews: RenderReport["previews"] = [];
       for (const { id, frame } of job.previewFrames) {
         const output = path.join(job.previewDir, `${id}.png`);
-        await renderStill({ serveUrl, composition, inputProps, frame, output, imageFormat: "png", puppeteerInstance: browser, overwrite: true, logLevel: "error", ...(job.cancelSignal ? { cancelSignal: job.cancelSignal } : {}) });
+        await renderStill({ serveUrl, composition, inputProps, frame, output, imageFormat: "png", puppeteerInstance: browser, port, overwrite: true, logLevel: "error", ...(job.cancelSignal ? { cancelSignal: job.cancelSignal } : {}) });
         previews.push({ id, frame, path: output });
       }
       log(`Saved ${previews.length} preview frames.`);
@@ -151,6 +178,7 @@ export async function renderExplainer(job: RenderJob): Promise<RenderReport> {
           jpegQuality: RENDER_SETTINGS.jpegQuality,
           scale: 0.5,
           puppeteerInstance: browser,
+          port,
           overwrite: true,
           logLevel: "error",
           ...(job.cancelSignal ? { cancelSignal: job.cancelSignal } : {}),

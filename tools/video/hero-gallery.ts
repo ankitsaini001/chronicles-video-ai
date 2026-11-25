@@ -5,7 +5,7 @@ import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { openBrowser, renderStill, selectComposition } from "@remotion/renderer";
 import { HERO_NAMES, isHeroName } from "@bytereel/pipeline/planning/hero-catalog";
-import { VIDEO_ENTRY } from "@bytereel/pipeline/pipeline/render";
+import { remotionServePort, VIDEO_ENTRY } from "@bytereel/pipeline/pipeline/render";
 
 /**
  * Review the hero object library (F22b): renders the HeroGallery composition (3 x 4 grid of heroes,
@@ -31,14 +31,16 @@ async function main() {
   await fs.mkdir(outDir, { recursive: true });
   const work = path.join(outDir, ".gallery-bundle");
   const serveUrl = await bundle({ entryPoint: VIDEO_ENTRY, outDir: work, enableCaching: true });
+  // Remotion's bundle server: never port 3000 (render.ts remotionServePort).
+  const port = remotionServePort();
   const browser = await openBrowser("chrome", { logLevel: "error" });
   try {
     const pages = names ? [{ page: 0, names }] : Array.from({ length: Math.ceil(HERO_NAMES.length / 12) }, (_, page) => ({ page }));
     for (const props of pages) {
-      const composition = await selectComposition({ serveUrl, id: "HeroGallery", inputProps: props, puppeteerInstance: browser, logLevel: "error" });
+      const composition = await selectComposition({ serveUrl, id: "HeroGallery", inputProps: props, puppeteerInstance: browser, logLevel: "error", port });
       for (const frame of frames) {
         const file = path.join(outDir, `${names ? "heroes" : `page-${props.page + 1}`}-f${frame}.png`);
-        await renderStill({ serveUrl, composition, inputProps: props, frame, output: file, imageFormat: "png", puppeteerInstance: browser, overwrite: true, logLevel: "error" });
+        await renderStill({ serveUrl, composition, inputProps: props, frame, output: file, imageFormat: "png", puppeteerInstance: browser, port, overwrite: true, logLevel: "error" });
         console.log(file);
       }
     }

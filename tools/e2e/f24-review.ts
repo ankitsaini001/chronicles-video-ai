@@ -22,7 +22,7 @@ import { ObjectId } from "mongodb";
  *
  *   1. in apps/web:  npx next build
  *   2. in apps/web:  MONGODB_DB=bytereel_test BETTER_AUTH_URL=http://localhost:3234 E2E_FAKE_GEMINI=1 E2E_FAKE_ELEVENLABS=1 \
- *        INNGEST_DEV=http://localhost:8299 npx next start -p 3234
+ *        INNGEST_DEV=http://localhost:8299 REMOTION_SERVE_PORT=3240 npx next start -p 3234
  *      (no Inngest is started: nothing listens on 8299, so even a mistaken job event could never reach
  *       the founder's Inngest on 8288)
  *   3. MONGODB_DB=bytereel_test E2E_BASE_URL=http://localhost:3234 npx tsx tools/e2e/f24-review.ts
@@ -30,7 +30,7 @@ import { ObjectId } from "mongodb";
  *
  * Before ANY request it reads the environment of the server process on the port (Linux /proc) and
  * stops unless it has MONGODB_DB=bytereel_test, E2E_FAKE_GEMINI=1, E2E_FAKE_ELEVENLABS=1 and
- * INNGEST_DEV on port 8299. Presigned links are never printed (they contain the token's key id).
+ * INNGEST_DEV on port 8299 and REMOTION_SERVE_PORT 3240–3249 (Remotion's render server; never 3000). Presigned links are never printed (they contain the token's key id).
  */
 
 const TEST_DB = "bytereel_test";
@@ -50,9 +50,9 @@ function serverSettings(port: string) {
   const pid = /pid=(\d+)/.exec(listing)?.[1];
   if (!pid) throw new Error(`No server process found on port ${port}.`);
   const env = new Map(readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)] as const));
-  return env.get("E2E_FAKE_GEMINI") === "1" && env.get("E2E_FAKE_ELEVENLABS") === "1" && env.get("MONGODB_DB") === TEST_DB && env.get("INNGEST_DEV") === "http://localhost:8299";
+  return env.get("E2E_FAKE_GEMINI") === "1" && env.get("E2E_FAKE_ELEVENLABS") === "1" && env.get("MONGODB_DB") === TEST_DB && env.get("INNGEST_DEV") === "http://localhost:8299" && /^324\d$/.test(env.get("REMOTION_SERVE_PORT") ?? "");
 }
-if (!serverSettings(new URL(base).port)) throw new Error("Stopping before any request: the server must run with MONGODB_DB=bytereel_test, E2E_FAKE_GEMINI=1, E2E_FAKE_ELEVENLABS=1 and INNGEST_DEV=http://localhost:8299.");
+if (!serverSettings(new URL(base).port)) throw new Error("Stopping before any request: the server must run with MONGODB_DB=bytereel_test, E2E_FAKE_GEMINI=1, E2E_FAKE_ELEVENLABS=1 and INNGEST_DEV=http://localhost:8299 and REMOTION_SERVE_PORT=3240–3249 (the render's own server: never port 3000).");
 
 /**
  * Two finished videos of ONE F23 e2e test user (dev bucket, from runs/f23-work/r2-keys-all.txt), the

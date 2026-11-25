@@ -16,12 +16,12 @@ import { ObjectId } from "mongodb";
  *   2. npx --yes inngest-cli@1.49.0 dev --no-discovery -u http://localhost:3237/api/inngest --port 8299 \
  *        --connect-gateway-port 8298 --connect-gateway-grpc-port 50062 --connect-executor-grpc-port 50063
  *   3. in apps/web:  MONGODB_DB=bytereel_test BETTER_AUTH_URL=http://localhost:3237 E2E_FAKE_GEMINI=1 \
- *        INNGEST_DEV=http://localhost:8299 npx next start -p 3237
+ *        INNGEST_DEV=http://localhost:8299 REMOTION_SERVE_PORT=3240 npx next start -p 3237
  *   4. MONGODB_DB=bytereel_test E2E_BASE_URL=http://localhost:3237 E2E_FAKE_GEMINI=1 npx tsx tools/e2e/f16-f20-storyboard.ts
  *   5. drop the bytereel_test database afterwards
  *
  * Before ANY request it reads the environment of the server process on the port (Linux /proc) and
- * stops unless it has E2E_FAKE_GEMINI=1, MONGODB_DB=bytereel_test and INNGEST_DEV on port 8299.
+ * stops unless it has E2E_FAKE_GEMINI=1, MONGODB_DB=bytereel_test and INNGEST_DEV on port 8299 and REMOTION_SERVE_PORT 3240–3249 (Remotion's render server; never 3000).
  *
  * F23 NOTE: the "F20: approve" checks below describe F20's approve-only answer (200, job null). Since
  * F23, D8 approves AND starts the video job (202), and on bytereel_test it needs the stand-in voice
@@ -44,9 +44,9 @@ function serverSettings(port: string) {
   const pid = /pid=(\d+)/.exec(listing)?.[1];
   if (!pid) throw new Error(`No server process found on port ${port}.`);
   const env = new Map(readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)] as const));
-  return env.get("E2E_FAKE_GEMINI") === "1" && env.get("MONGODB_DB") === TEST_DB && env.get("INNGEST_DEV") === "http://localhost:8299";
+  return env.get("E2E_FAKE_GEMINI") === "1" && env.get("MONGODB_DB") === TEST_DB && env.get("INNGEST_DEV") === "http://localhost:8299" && /^324\d$/.test(env.get("REMOTION_SERVE_PORT") ?? "");
 }
-if (!serverSettings(new URL(base).port)) throw new Error("Stopping before any request: the server must run with E2E_FAKE_GEMINI=1, MONGODB_DB=bytereel_test and INNGEST_DEV=http://localhost:8299.");
+if (!serverSettings(new URL(base).port)) throw new Error("Stopping before any request: the server must run with E2E_FAKE_GEMINI=1, MONGODB_DB=bytereel_test and INNGEST_DEV=http://localhost:8299 and REMOTION_SERVE_PORT=3240–3249 (the render's own server: never port 3000).");
 
 const tag = randomBytes(4).toString("hex");
 let failures = 0;

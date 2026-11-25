@@ -8,7 +8,7 @@ import { bundle } from "@remotion/bundler";
 import { openBrowser, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import { PlanSchema, SceneAlignmentSchema } from "@bytereel/pipeline/contracts";
 import { hashPlan } from "@bytereel/pipeline/planning";
-import { COMPOSITION_ID, renderExplainer, RENDER_SETTINGS, VIDEO_ENTRY } from "@bytereel/pipeline/pipeline/render";
+import { COMPOSITION_ID, remotionServePort, renderExplainer, RENDER_SETTINGS, VIDEO_ENTRY } from "@bytereel/pipeline/pipeline/render";
 import { MUSIC_FILE, musicInputFor, synthMusicBed } from "@bytereel/pipeline/pipeline/music";
 import { compileTimeline, DEFAULT_HOLDS, synthesizeSceneAlignment } from "@bytereel/pipeline/timing";
 
@@ -98,14 +98,16 @@ async function quick(o: { timeline: ReturnType<typeof compileTimeline>["timeline
   let t = Date.now();
   const serveUrl = await bundle({ entryPoint: VIDEO_ENTRY, outDir: path.join(o.work, "bundle"), enableCaching: true, publicDir: o.publicDir });
   console.log(`bundle: ${((Date.now() - t) / 1000).toFixed(1)} s`);
+  // Remotion's bundle server: never port 3000 (render.ts remotionServePort).
+  const port = remotionServePort();
   const browser = await openBrowser("chrome", { logLevel: "error" });
   try {
-    const composition = await selectComposition({ serveUrl, id: COMPOSITION_ID, inputProps, puppeteerInstance: browser, logLevel: "error" });
+    const composition = await selectComposition({ serveUrl, id: COMPOSITION_ID, inputProps, puppeteerInstance: browser, logLevel: "error", port });
     const stills = arg("stills");
     if (stills) {
       for (const frame of stills.split(",").map(Number)) {
         const file = o.out.replace(/\.mp4$/, "") + `-${String(frame).padStart(4, "0")}.png`;
-        await renderStill({ serveUrl, composition, inputProps, frame, output: file, imageFormat: "png", puppeteerInstance: browser, overwrite: true, logLevel: "error" });
+        await renderStill({ serveUrl, composition, inputProps, frame, output: file, imageFormat: "png", puppeteerInstance: browser, port, overwrite: true, logLevel: "error" });
         console.log(`still ${frame} -> ${path.relative(ROOT, file)}`);
       }
       return;
@@ -116,6 +118,7 @@ async function quick(o: { timeline: ReturnType<typeof compileTimeline>["timeline
       serveUrl,
       composition,
       inputProps,
+      port,
       codec: "h264",
       pixelFormat: "yuv420p",
       crf: RENDER_SETTINGS.crf,
