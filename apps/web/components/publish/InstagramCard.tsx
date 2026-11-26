@@ -42,7 +42,25 @@ function InstagramIcon() {
   );
 }
 
-export function InstagramCard({ projectId, connection, notice, children }: { projectId: string; connection: CardConnection | null; notice: InstagramNotice | null; children?: ReactNode }) {
+/** The warning before connecting while a post on `@old` isn't confirmed (re-review founder note). */
+export function switchWarning(oldUsername: string): string {
+  return `Your last post on @${oldUsername} hasn't been confirmed yet. If you switch accounts, we can't check it.`;
+}
+
+export function InstagramCard({
+  projectId,
+  connection,
+  notice,
+  unconfirmedOn = null,
+  children,
+}: {
+  projectId: string;
+  connection: CardConnection | null;
+  notice: InstagramNotice | null;
+  /** The account of the creator's unconfirmed post, if any: Connect warns first (a different account can't check it). */
+  unconfirmedOn?: string | null;
+  children?: ReactNode;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState<InstagramNotice | null>(notice);
@@ -123,7 +141,21 @@ export function InstagramCard({ projectId, connection, notice, children }: { pro
           </li>
         ))}
       </ul>
-      <PlainLinkButton href={connectHref} fullWidth className="mb-5 max-w-md" data-testid="instagram-connect-button">
+      {unconfirmedOn && (
+        <div role="status" data-testid="instagram-switch-warning" className="mb-5 w-full max-w-md text-left">
+          <Note tone="warning">{switchWarning(unconfirmedOn)}</Note>
+        </div>
+      )}
+      <PlainLinkButton
+        href={connectHref}
+        fullWidth
+        className="mb-5 max-w-md"
+        data-testid="instagram-connect-button"
+        onClick={(event) => {
+          // Connecting @old again is fine; another account can't check the old post, so the creator confirms first.
+          if (unconfirmedOn && !window.confirm(`${switchWarning(unconfirmedOn)}\n\nConnect anyway?`)) event.preventDefault();
+        }}
+      >
         Connect Instagram
       </PlainLinkButton>
       <p className="max-w-sm text-xs leading-normal text-muted">Have a personal account? Switch it to a Creator account in the Instagram app first. You can always download your video.</p>

@@ -47,7 +47,12 @@ import { ObjectId } from "mongodb";
  * ANOTHER account (G3) is refused. Then a caption edit and a narration edit cancel the approval, yet a
  * new approval (H2) is refused with "Tap Check again first"; the page shows Check again. (A) It went
  * live: Check again (H6, reads only) saves it as published, still ONE reel. (B) [e2e:dropped] (nothing
- * posted): Check again proves it, approving again works and posts exactly once.
+ * posted): after 30 minutes (simulated) Check again proves it, approving again works and posts exactly
+ * once. (C, re-review) [e2e:droprefuse]: the first send's answer is lost, reconcile releases the claim,
+ * the second send is refused: the post still blocks new approvals; Check again right away is "unknown";
+ * without a working token it asks to reconnect; the G3 warning shows; the founder's ops command
+ * (`npm run db -- clear-unconfirmed-post`) prints its plan, then with --apply settles it; approving
+ * again posts once.
  *
  * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
  *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
@@ -578,6 +583,12 @@ async function main(): Promise<void> {
     return postDoc(postId);
   }
   const projectRes = async (t: Tester, projectId: string) => (await send(t.cookie, "GET", `/api/v1/projects/${projectId}`)).json;
+  /** Moves a post's send times back by `minutes` (test database only), as if that much time had passed. */
+  const ageSends = async (postId: string, minutes: number) => {
+    const post = await postDoc(postId);
+    const back = (d: Date | null | undefined) => (d ? new Date(d.getTime() - minutes * 60_000) : null);
+    await posts().updateOne({ _id: new ObjectId(postId) }, { $set: { publishAttemptedAt: back(post?.publishAttemptedAt), firstPublishAttemptedAt: back(post?.firstPublishAttemptedAt) } });
+  };
 
   // (A) It went live, but Instagram's answer was lost and couldn't be read back.
   await outageOn(f);
@@ -653,6 +664,9 @@ async function main(): Promise<void> {
     `${endedB?.state} ${editedB.status} ${blockedB.status}`,
   );
   await outageOff(f);
+  // Re-review MUST 2: a FINISHED container proves "not posted" only 30 minutes after the latest send.
+  // Simulate the half hour passing (the test database only).
+  await ageSends(unBId, 31);
   const checkedB = await h6(f, unBId);
   const afterB = await postDoc(unBId);
   const formPage = await get(f.cookie, `/projects/${pn.projectId}/publish`);
@@ -661,6 +675,7 @@ async function main(): Promise<void> {
     checkedB.status === 200 &&
       checkedB.json.outcome === "not_posted" &&
       afterB?.publishAttemptedAt === null &&
+      afterB.firstPublishAttemptedAt === null &&
       afterB.state === "approval_invalidated" &&
       formPage.text.includes("Needs your approval") &&
       formPage.text.includes('data-testid="publish-now"') &&
@@ -673,6 +688,85 @@ async function main(): Promise<void> {
     "approving again now works and posts EXACTLY once (the dropped caption never went live)",
     again2.status === 202 && again2.post?.state === "published" && (await liveReels("Why thunder rumbles 🌩️ #Thunder")) === 1 && (await liveReels(droppedCaption)) === 0,
     `${again2.status} ${again2.post?.state}`,
+  );
+
+  // (C) Re-review MUST 1: the first send's answer is lost (nothing posted), reconcile sees FINISHED twice
+  // and releases the claim, the SECOND send is clearly refused. The post must STILL block new approvals.
+  // Then: Check again right away is "unknown" (FINISHED is too fresh); without a working token it asks
+  // to reconnect; the G3 warning; the founder's ops command settles it; approving again posts once. (User C.)
+  f = c;
+  const pr = await seedReadyProject(f.id, "Why the moon has phases / F30 e2e");
+  const refuseCaption = "Why the moon has phases [e2e:droprefuse] #Moon";
+  const unC = await publish(f, pr, refuseCaption);
+  const unCId = unC.post?._id.toHexString() ?? "";
+  check(
+    "lost first send → FINISHED twice → claim released → the second send refused → publish_failed; the FIRST send is still remembered; two sends, nothing live",
+    unC.post?.state === "publish_failed" &&
+      unC.post.publishAttemptedAt === null &&
+      unC.post.firstPublishAttemptedAt instanceof Date &&
+      (await containersFor(refuseCaption))[0]?.publishCalls === 2 &&
+      (await liveReels(refuseCaption)) === 0,
+    `${unC.post?.state} last ${unC.post?.publishAttemptedAt?.toISOString() ?? "null"} first ${unC.post?.firstPublishAttemptedAt?.toISOString() ?? "null"}`,
+  );
+  const editedC = await h7(f, pr.projectId, "Why the moon has phases 🌙 #Moon");
+  const blockedC = await h2(f, pr.projectId, await bodyFor(f, pr, "Why the moon has phases 🌙 #Moon"));
+  check(
+    "…a caption edit cancels the approval, and a NEW approval is still refused (retry_instead)",
+    editedC.status === 200 && (await postDoc(unCId))?.state === "approval_invalidated" && blockedC.status === 409 && blockedC.json.error?.details?.reason === "retry_instead",
+    `${editedC.status} ${blockedC.status} ${blockedC.json.error?.details?.reason}`,
+  );
+  const freshCheck = await h6(f, unCId);
+  check(
+    "Check again right away: FINISHED is too fresh → 200 unknown ('Instagram hasn't confirmed yet…'); nothing changes",
+    freshCheck.status === 200 && freshCheck.json.outcome === "unknown" && freshCheck.json.message === "Instagram hasn't confirmed yet. Please check again in a few minutes." && (await postDoc(unCId))?.firstPublishAttemptedAt instanceof Date,
+    `${freshCheck.status} ${freshCheck.json.outcome}`,
+  );
+  const offC = await send(f.cookie, "DELETE", "/api/v1/instagram/connection");
+  const needsAccount = await h6(f, unCId);
+  check(
+    "after Disconnect, Check again → 409 INSTAGRAM_NOT_CONNECTED (check_needs_account): reconnect the approved account first",
+    offC.status === 200 && needsAccount.status === 409 && needsAccount.json.error?.code === "INSTAGRAM_NOT_CONNECTED" && needsAccount.json.error.details?.reason === "check_needs_account",
+    `${offC.status} ${needsAccount.status} ${needsAccount.json.error?.details?.reason}`,
+  );
+  const otherProject = await seedReadyProject(f.id, "Why the sea is salty / F30 e2e");
+  const warnPage = await get(f.cookie, `/projects/${otherProject.projectId}/publish`);
+  check(
+    "G3 warning: before connecting, the page warns that the unconfirmed post on @old can't be checked from another account",
+    warnPage.text.includes('data-testid="instagram-switch-warning"') && warnPage.text.includes(`Your last post on @e2e_c${tag} hasn't been confirmed yet. If you switch accounts, we can't check it.`),
+    String(warnPage.status),
+  );
+  check("C reconnects the SAME Instagram account", await connect(f, otherProject.projectId));
+  // The founder's ops command (owner-agnostic; prints the plan; changes nothing without --apply).
+  const ops = (...args: string[]) => {
+    try {
+      return { code: 0, out: execFileSync("npx", ["tsx", "tools/cli/db.ts", "clear-unconfirmed-post", ...args], { encoding: "utf8", env: { ...process.env, MONGODB_DB: TEST_DB } }) };
+    } catch (error) {
+      const e = error as { status?: number; stdout?: string };
+      return { code: e.status ?? 1, out: e.stdout ?? "" };
+    }
+  };
+  const dry = ops(unCId, "--not-posted");
+  const stillThere = await postDoc(unCId);
+  check(
+    "ops command without --apply: prints the post and the plan, changes nothing",
+    dry.code === 0 && dry.out.includes(`Post ${unCId} in ${TEST_DB}`) && dry.out.includes("Plan: mark it NOT posted") && dry.out.includes("Nothing changed") && stillThere?.firstPublishAttemptedAt instanceof Date,
+    dry.out.split("\n").slice(-2).join(" | "),
+  );
+  const applied = ops(unCId, "--not-posted", "--apply");
+  const clearedC = await postDoc(unCId);
+  const auditOps = await db.collection("auditLogs").findOne({ action: "post.not_posted", "subject.id": new ObjectId(unCId) });
+  check(
+    "ops command with --apply: marked not posted (both send marks cleared, state kept, audit via ops_cli)",
+    applied.code === 0 && applied.out.includes("Done: marked not posted") && clearedC?.firstPublishAttemptedAt === null && clearedC.publishAttemptedAt === null && clearedC.state === "approval_invalidated" && auditOps?.data?.via === "ops_cli",
+    applied.out.split("\n").slice(-1).join(""),
+  );
+  const notUnconfirmed = ops(unCId, "--not-posted");
+  check("ops command on a settled post: 'not unconfirmed', exit 1, nothing changed", notUnconfirmed.code === 1 && notUnconfirmed.out.includes("is not unconfirmed"), String(notUnconfirmed.code));
+  const againC = await publish(f, pr, "Why the moon has phases 🌙 #Moon");
+  check(
+    "approving again now works and posts EXACTLY once; the refused caption never went live",
+    againC.status === 202 && againC.post?.state === "published" && (await liveReels("Why the moon has phases 🌙 #Moon")) === 1 && (await liveReels(refuseCaption)) === 0,
+    `${againC.status} ${againC.post?.state}`,
   );
 
   // ---------- overall: never twice ----------

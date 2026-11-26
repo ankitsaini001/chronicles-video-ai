@@ -8,9 +8,10 @@ import { findPublishedMedia, type PublisherSetup } from "./run-publish-job";
 //   - the container's status_code and the account's recent media (the same matcher as the job's
 //     reconcile: the same caption, posted at or after the first media_publish minus ~60 s);
 //   - found, or the container is PUBLISHED → the post is saved as published (project published);
-//   - the container is FINISHED / ERROR / EXPIRED (never PUBLISHED) and the recent media list was read
-//     and doesn't have it → proven NOT posted: the unconfirmed flag is cleared, the creator may
-//     approve again;
+//   - the recent media list was read and doesn't have it, AND the container is ERROR / EXPIRED (any
+//     time), or FINISHED (or gone) with the latest send at least 30 minutes old (re-review MUST 2: right
+//     after a send Instagram may still be publishing a FINISHED container) → proven NOT posted: the
+//     unconfirmed flags are cleared, the creator may approve again;
 //   - anything else (Instagram busy, no clear answer) → nothing changes, "check again later".
 // It NEVER creates a container and NEVER calls media_publish. It uses any working token of the account
 // the post was approved for (`approval.igUserId`). Kept free of the database and Inngest: the route
@@ -21,8 +22,11 @@ export type CheckAgainOutcome = "published" | "not_posted" | "unknown";
 export const CHECK_AGAIN_MESSAGES = {
   published: "Your reel is live on Instagram.",
   not_posted: "Your reel wasn't posted. You can approve it and publish it again.",
-  unknown: "Instagram didn't give a clear answer yet. Please tap Check again in a few minutes. Your reel is never posted twice.",
+  unknown: "Instagram hasn't confirmed yet. Please check again in a few minutes.",
 } as const satisfies Record<CheckAgainOutcome, string>;
+
+/** A FINISHED (never PUBLISHED) container proves "not posted" only this long after the latest send. */
+export const FINISHED_PROOF_AFTER_MS = 30 * 60_000;
 
 export interface CheckAgainDeps {
   /** A working connection for `approval.igUserId` (findReaderConnection), or null. */
@@ -36,6 +40,7 @@ export interface CheckAgainDeps {
   clear(): Promise<PostDocument | null>;
   log(entry: PublishAttemptLog): Promise<void>;
   logLine?(message: string): void;
+  now?: () => Date;
 }
 
 export type CheckAgainResult =
@@ -49,8 +54,8 @@ export type CheckAgainResult =
   /** The post was checked or published meanwhile. */
   | { outcome: "changed" };
 
-/** Statuses that prove Instagram never published this container. */
-const NEVER_PUBLISHED = ["FINISHED", "ERROR", "EXPIRED"];
+/** Statuses that prove at once that Instagram never published this container. */
+const NEVER_PUBLISHED = ["ERROR", "EXPIRED"];
 
 export async function checkPostAgain(post: PostDocument, deps: CheckAgainDeps): Promise<CheckAgainResult> {
   const reader = await deps.reader(post);
@@ -91,7 +96,9 @@ export async function checkPostAgain(post: PostDocument, deps: CheckAgainDeps): 
 
   const match = findPublishedMedia(post, media, statusCode);
   const live = match !== undefined || statusCode === "PUBLISHED";
-  const notPosted = !live && media !== null && statusRead && (statusCode === null || NEVER_PUBLISHED.includes(statusCode));
+  const latestSend = post.publishAttemptedAt ?? post.firstPublishAttemptedAt ?? post.updatedAt;
+  const sendIsOld = (deps.now?.() ?? new Date()).getTime() - latestSend.getTime() >= FINISHED_PROOF_AFTER_MS;
+  const notPosted = !live && media !== null && statusRead && ((statusCode !== null && NEVER_PUBLISHED.includes(statusCode)) || ((statusCode === null || statusCode === "FINISHED") && sendIsOld));
   const outcome: CheckAgainOutcome = live ? "published" : notPosted ? "not_posted" : "unknown";
   await deps
     .log({

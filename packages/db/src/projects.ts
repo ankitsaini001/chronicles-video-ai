@@ -274,7 +274,7 @@ export function allowedActionsFor(
     activeJob?: JobDocument | null;
     latestGenerateJob?: JobDocument | null;
     latestCaptionJob?: JobDocument | null;
-    latestPost?: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "publishAttemptedAt" | "igMediaId">>) | null;
+    latestPost?: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "firstPublishAttemptedAt" | "igMediaId">>) | null;
   } = {},
 ): AllowedAction[] {
   if (doc.state === "archived") return [];
@@ -294,9 +294,9 @@ export function allowedActionsFor(
  * An unconfirmed post (its publish may be live) blocks every new approval: only "Check again"
  * (`retry_post`, H6) is offered until it is confirmed or proven not posted (code review MUST 1).
  */
-function postActionsFor(doc: ProjectDocument, latestPost: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "publishAttemptedAt" | "igMediaId">>) | null): AllowedAction[] {
+function postActionsFor(doc: ProjectDocument, latestPost: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "firstPublishAttemptedAt" | "igMediaId">>) | null): AllowedAction[] {
   if (!doc.currentRenderId) return [];
-  if (latestPost && isCheckablePost({ state: latestPost.state, publishAttemptedAt: latestPost.publishAttemptedAt ?? null, igMediaId: latestPost.igMediaId ?? null })) return ["retry_post"];
+  if (latestPost && isCheckablePost({ state: latestPost.state, firstPublishAttemptedAt: latestPost.firstPublishAttemptedAt ?? null, igMediaId: latestPost.igMediaId ?? null })) return ["retry_post"];
   if (doc.state === "video_ready") return ["publish"];
   if ((doc.state === "publish_failed" || doc.state === "scheduled") && latestPost?.state === "approval_invalidated") return ["publish"];
   if (doc.state === "publish_failed" && latestPost?.state === "publish_failed") return ["retry_post"];

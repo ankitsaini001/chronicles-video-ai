@@ -1,4 +1,16 @@
-import { findProjectRender, getDb, getInstagramConnection, getJob, isCheckablePost, readDbConfig, toJobResource, type ProjectDocument, type RenderDocument } from "@bytereel/db";
+import {
+  findProjectRender,
+  findUnconfirmedPostOfOwner,
+  getDb,
+  getInstagramConnection,
+  getJob,
+  isCheckablePost,
+  postRetryMode,
+  readDbConfig,
+  toJobResource,
+  type ProjectDocument,
+  type RenderDocument,
+} from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -97,7 +109,8 @@ export default async function PublishPage({ params, searchParams }: { params: Pr
   // F30 code review MUST 1: a publish that may be live and can't simply be tried again (its approval
   // was cancelled by a change, or no longer matches) → only "Check again" (H6 reads Instagram; it
   // never posts). Approving again is blocked until the check confirms it or proves it wasn't posted.
-  if (latestPost && isCheckablePost(latestPost) && (latestPost.state !== "publish_failed" || latestPost.lastError?.code === "APPROVAL_STALE")) {
+  // The SAME rule as H6 (postRetryMode), so the button always matches what the server will do.
+  if (latestPost && isCheckablePost(latestPost) && (await postRetryMode(db, latestPost)) === "check") {
     return frame(
       <PublishStatusScreen
         projectId={projectId}
@@ -175,6 +188,8 @@ async function publishForm(input: {
   const { project, render } = input;
   const projectId = project._id.toHexString();
   const connectionDoc = await getInstagramConnection(input.db, input.user.id);
+  // Re-review founder note: an unconfirmed post (any project) → a plain warning before connecting.
+  const unconfirmed = await findUnconfirmedPostOfOwner(input.db, input.user.id);
   const connection: CardConnection | null =
     connectionDoc && connectionDoc.status !== "revoked" ? { username: connectionDoc.username, profilePictureUrl: connectionDoc.profilePictureUrl, status: connectionDoc.status } : null;
   const notice = instagramNotice(input.query);
@@ -212,7 +227,7 @@ async function publishForm(input: {
         </div>
 
         <div className="flex justify-center lg:col-span-8">
-          <InstagramCard projectId={projectId} connection={connection} notice={notice}>
+          <InstagramCard projectId={projectId} connection={connection} notice={notice} unconfirmedOn={unconfirmed?.destination.username ?? null}>
             {/* Rendered by the card only while Instagram is connected (F29 decision 5). */}
             {connectionDoc && (
               <PublishForm

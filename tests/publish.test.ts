@@ -397,15 +397,19 @@ class FakeStore implements PublishJobStore {
   });
   claim = vi.fn(async () => {
     if (this.post.state !== "publishing" || this.post.publishAttemptedAt !== null || this.post.igMediaId !== null) return false;
+    // Like the database: $set publishAttemptedAt, $min firstPublishAttemptedAt.
     this.post.publishAttemptedAt = this.clock();
+    this.post.firstPublishAttemptedAt ??= this.post.publishAttemptedAt;
     return true;
   });
   unknown = vi.fn(async () => {
     this.post.state = "outcome_unknown";
     return true;
   });
-  release = vi.fn(async () => {
-    Object.assign(this.post, { state: "publishing", publishAttemptedAt: null });
+  release = vi.fn(async (input: { refused?: boolean }) => {
+    // A clearly refused FIRST send also clears the "ever sent" mark (releasePublishClaim).
+    const firstRefused = input.refused === true && this.post.publishAttemptedAt !== null && this.post.publishAttemptedAt.getTime() === this.post.firstPublishAttemptedAt?.getTime();
+    Object.assign(this.post, { state: "publishing", publishAttemptedAt: null, ...(firstRefused ? { firstPublishAttemptedAt: null } : {}) });
     return true;
   });
   complete = vi.fn(async (input: { mediaId: string | null; permalink: string | null }) => {
@@ -712,15 +716,15 @@ describe("code review MUST 1: an unconfirmed attempt blocks every new approval",
   const T = new Date("2026-11-25T06:00:00Z");
   it("isUnconfirmedPost: a sent media_publish without a media id, in any state but published; checkable only when settled", () => {
     for (const state of ["publish_failed", "approval_invalidated", "cancelled"] as const) {
-      expect(isUnconfirmedPost({ state, publishAttemptedAt: T, igMediaId: null })).toBe(true);
-      expect(isCheckablePost({ state, publishAttemptedAt: T, igMediaId: null })).toBe(true);
+      expect(isUnconfirmedPost({ state, firstPublishAttemptedAt: T, igMediaId: null })).toBe(true);
+      expect(isCheckablePost({ state, firstPublishAttemptedAt: T, igMediaId: null })).toBe(true);
     }
     // A job is still working on it: unconfirmed (blocks H2) but not yet "Check again".
-    expect(isUnconfirmedPost({ state: "outcome_unknown", publishAttemptedAt: T, igMediaId: null })).toBe(true);
-    expect(isCheckablePost({ state: "outcome_unknown", publishAttemptedAt: T, igMediaId: null })).toBe(false);
-    expect(isUnconfirmedPost({ state: "published", publishAttemptedAt: T, igMediaId: null })).toBe(false);
-    expect(isUnconfirmedPost({ state: "publish_failed", publishAttemptedAt: null, igMediaId: null })).toBe(false);
-    expect(isUnconfirmedPost({ state: "cancelled", publishAttemptedAt: T, igMediaId: "17910000000000001" })).toBe(false);
+    expect(isUnconfirmedPost({ state: "outcome_unknown", firstPublishAttemptedAt: T, igMediaId: null })).toBe(true);
+    expect(isCheckablePost({ state: "outcome_unknown", firstPublishAttemptedAt: T, igMediaId: null })).toBe(false);
+    expect(isUnconfirmedPost({ state: "published", firstPublishAttemptedAt: T, igMediaId: null })).toBe(false);
+    expect(isUnconfirmedPost({ state: "publish_failed", firstPublishAttemptedAt: null, igMediaId: null })).toBe(false);
+    expect(isUnconfirmedPost({ state: "cancelled", firstPublishAttemptedAt: T, igMediaId: "17910000000000001" })).toBe(false);
   });
 
   it("allowedActions: only retry_post (Check again), never publish, while such a post exists, whatever the project's step", () => {
@@ -737,14 +741,46 @@ describe("code review MUST 1: an unconfirmed attempt blocks every new approval",
         approvedPlanVersionId: state === "storyboard_ready" ? null : plan,
         planRequestCount: 1,
       }) as unknown as ProjectDocument;
-    const unconfirmed = { state: "approval_invalidated" as const, publishAttemptedAt: T, igMediaId: null };
+    const unconfirmed = { state: "approval_invalidated" as const, firstPublishAttemptedAt: T, igMediaId: null };
     for (const state of ["video_ready", "publish_failed", "storyboard_ready"] as const) {
       const actions = allowedActionsFor(project(state), null, null, { latestPost: unconfirmed });
       expect(actions).toContain("retry_post");
       expect(actions).not.toContain("publish");
     }
     // Once settled (the flag cleared), approving again is offered.
-    expect(allowedActionsFor(project("publish_failed"), null, null, { latestPost: { ...unconfirmed, publishAttemptedAt: null } })).toContain("publish");
+    expect(allowedActionsFor(project("publish_failed"), null, null, { latestPost: { ...unconfirmed, firstPublishAttemptedAt: null } })).toContain("publish");
+  });
+});
+
+describe("re-review MUST 1: the 'ever sent' mark survives a released claim", () => {
+  it("lost first send → FINISHED twice → release → the second send refused → caption edit: still unconfirmed (H2 refused, only Check again)", async () => {
+    const s = jobSetup();
+    s.ig.publishes = ["timeout", new InstagramPublishError("media_publish", "rejected", 400, 100, 2207026)];
+    expect(await s.run()).toBe("failed");
+    expect(s.store.ended).toMatchObject([{ failure: "rejected", stage: "publish" }]);
+    expect(s.store.release).toHaveBeenCalledTimes(2); // reconcile's release, then the refusal's
+    expect(s.ig.calls.publish).toBe(2);
+    // The second send's claim is gone, but the FIRST send (whose answer was lost) is remembered.
+    expect(s.store.post.publishAttemptedAt).toBeNull();
+    expect(s.store.post.firstPublishAttemptedAt).toBeInstanceOf(Date);
+    // A caption edit cancels the approval: the post must still block a new approval (H2 → retry_instead).
+    s.store.post.state = "approval_invalidated";
+    expect(isUnconfirmedPost(s.store.post)).toBe(true);
+    expect(isCheckablePost(s.store.post)).toBe(true);
+    const project = { _id: new ObjectId(), state: "publish_failed", language: "en", activeJobId: null, currentRenderId: new ObjectId(), currentPlanVersionId: new ObjectId(), approvedPlanVersionId: new ObjectId(), planRequestCount: 1 } as unknown as ProjectDocument;
+    const actions = allowedActionsFor(project, null, null, { latestPost: s.store.post });
+    expect(actions).toContain("retry_post");
+    expect(actions).not.toContain("publish");
+  });
+
+  it("a clearly refused FIRST send (daily limit) clears the mark: nothing ever went out, approving again is allowed", async () => {
+    const s = jobSetup();
+    s.ig.publishes = [new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042)];
+    expect(await s.run()).toBe("failed");
+    expect(s.store.release).toHaveBeenCalledWith(expect.objectContaining({ refused: true }));
+    expect(s.store.post.firstPublishAttemptedAt).toBeNull();
+    s.store.post.state = "approval_invalidated";
+    expect(isUnconfirmedPost(s.store.post)).toBe(false);
   });
 });
 
@@ -817,12 +853,14 @@ describe("Check again (H6 reconcile-only mode): reads Instagram, never posts", (
   const T = new Date("2026-11-25T06:00:00Z");
   const CONTAINER = "17900000000000020";
 
-  function checkSetup(options: { container?: string | null; containerStatus?: string; media?: boolean; post?: Partial<PostDocument> } = {}) {
+  /** `now`: when Check again runs (default 31 min after the send, so a FINISHED container is proof). */
+  function checkSetup(options: { container?: string | null; containerStatus?: string; media?: boolean; post?: Partial<PostDocument>; now?: Date } = {}) {
     const ig = new ScriptedInstagram(() => new Date(T.getTime() + 5000));
     const container = options.container === undefined ? CONTAINER : options.container;
     const post = postDoc({ state: "approval_invalidated", igContainerId: container, publishAttemptedAt: T, firstPublishAttemptedAt: T, ...options.post });
     if (container) ig.containers.set(container, { id: container, caption: post.caption, status: options.containerStatus ?? "FINISHED" });
-    ig.statuses = [];
+    // The scripted Instagram answers each status check from this queue (PUBLISHED containers stay PUBLISHED).
+    ig.statuses = options.containerStatus && options.containerStatus !== "PUBLISHED" ? [options.containerStatus] : [];
     if (options.media) ig.media.push({ id: "17910000000000020", caption: post.caption, timestamp: new Date(T.getTime() + 5000).toISOString(), permalink: "https://www.instagram.com/reel/T0020/", containerId: container ?? "" });
     const logs: PublishAttemptLog[] = [];
     const deps = {
@@ -830,11 +868,25 @@ describe("Check again (H6 reconcile-only mode): reads Instagram, never posts", (
       publisher: vi.fn(() => ({ ok: true as const, publisher: ig as InstagramPublisher })),
       token: vi.fn(() => TOKEN),
       confirm: vi.fn(async (input: { mediaId: string | null; permalink: string | null }): Promise<CheckedPost | null> => ({ post: { ...post, state: "published", igMediaId: input.mediaId, permalink: input.permalink }, project: null })),
-      clear: vi.fn(async (): Promise<PostDocument | null> => ({ ...post, publishAttemptedAt: null })),
+      clear: vi.fn(async (): Promise<PostDocument | null> => ({ ...post, publishAttemptedAt: null, firstPublishAttemptedAt: null })),
       log: vi.fn(async (entry: PublishAttemptLog) => void logs.push(entry)),
+      now: () => options.now ?? new Date(T.getTime() + 31 * 60_000),
     } satisfies CheckAgainDeps;
     return { ig, post, deps, logs, run: () => checkPostAgain(post, deps) };
   }
+
+  it("re-review MUST 2: a FINISHED container right after the send is NOT proof (unknown); ERROR / EXPIRED are proof at any time", async () => {
+    const fresh = new Date(T.getTime() + 5000);
+    const finished = checkSetup({ containerStatus: "FINISHED", now: fresh });
+    expect((await finished.run()).outcome).toBe("unknown");
+    expect(finished.deps.clear).not.toHaveBeenCalled();
+    const almost = checkSetup({ containerStatus: "FINISHED", now: new Date(T.getTime() + 29 * 60_000) });
+    expect((await almost.run()).outcome).toBe("unknown");
+    // The LATEST send counts: an old first send with a fresh second one is still too early.
+    const resent = checkSetup({ containerStatus: "FINISHED", post: { publishAttemptedAt: new Date(T.getTime() + 30 * 60_000) } });
+    expect((await resent.run()).outcome).toBe("unknown");
+    for (const status of ["ERROR", "EXPIRED"]) expect((await checkSetup({ containerStatus: status, now: fresh }).run()).outcome).toBe("not_posted");
+  });
 
   it("the reel is in the recent media → published with its id and link; no container, no media_publish", async () => {
     const c = checkSetup({ containerStatus: "PUBLISHED", media: true });
@@ -878,7 +930,7 @@ describe("Check again (H6 reconcile-only mode): reads Instagram, never posts", (
       expect(c.deps.confirm).not.toHaveBeenCalled();
       expect(c.deps.clear).not.toHaveBeenCalled();
     }
-    expect(CHECK_AGAIN_MESSAGES.unknown).toContain("never posted twice");
+    expect(CHECK_AGAIN_MESSAGES.unknown).toBe("Instagram hasn't confirmed yet. Please check again in a few minutes.");
   });
 
   it("no working token for the approved account → not_connected; Instagram not set up → not_set_up; no call to Instagram", async () => {

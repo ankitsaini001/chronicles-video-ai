@@ -208,6 +208,25 @@ describe("npm run db (command)", () => {
     expect(out.join("\n")).toContain("Unknown feature F99");
   });
 
+  it("F30 ops clear-unconfirmed-post: refuses bad input before connecting (id, exactly one outcome, an instagram.com link)", async () => {
+    const run = async (argv: string[]) => {
+      const out: string[] = [];
+      return { code: await runDbCommand(["clear-unconfirmed-post", ...argv], (l) => out.push(...l), { MONGODB_URI: GOOD }), text: out.join("\n") };
+    };
+    const id = "67330f109f1e4b2a7c0d6f01";
+    expect((await run(["not-an-id", "--not-posted"])).text).toContain("needs exactly one post id");
+    expect((await run([id])).text).toContain("Give exactly one of --published <link> or --not-posted");
+    expect((await run([id, "--not-posted", "--published", "https://www.instagram.com/reel/abc/"])).code).toBe(2);
+    const badLink = await run([id, "--published", "https://evil.example/reel/abc/"]);
+    expect(badLink.code).toBe(2);
+    expect(badLink.text).toContain("instagram.com");
+    expect((await run([id, "--not-posted", "--force"])).code).toBe(2);
+    // Valid input reaches the database step (here: no settings → explained, nothing sent).
+    const out: string[] = [];
+    expect(await runDbCommand(["clear-unconfirmed-post", id, "--not-posted"], (l) => out.push(...l), {})).toBe(1);
+    expect(out.join("\n")).toContain("nothing was sent to MongoDB");
+  });
+
   it("rejects an unknown option with the usage text (no crash)", async () => {
     const out: string[] = [];
     expect(await runDbCommand(["indexes", "--features", "F08"], (l) => out.push(...l), {})).toBe(2);

@@ -4,7 +4,7 @@ import type { JobResource } from "@bytereel/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { apiSend, newIdempotencyKey } from "@/components/storyboard/client";
-import { Button, cn } from "@/components/ui";
+import { Button, cn, PlainLinkButton } from "@/components/ui";
 
 // ④ Publish while the reel is sent to Instagram, and after it failed (F30; the video page's progress
 // and failure style, MakingVideoScreen). Three steps: Sending your video to Instagram → Instagram is
@@ -65,6 +65,8 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(props.showFormFirst === true);
+  // Check again needs a working token for the approved account (re-review SHOULD 4): offer Connect.
+  const [needsAccount, setNeedsAccount] = useState(false);
   const retryKey = useRef<string | null>(null);
   const publishing = props.mode === "publishing";
 
@@ -126,7 +128,7 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
       if (answer.json?.outcome === "unknown") {
         retryKey.current = null;
         setBusy(false);
-        setProblem(answer.json.message ?? "Instagram didn't give a clear answer yet. Please try again in a few minutes.");
+        setProblem(answer.json.message ?? "Instagram hasn't confirmed yet. Please check again in a few minutes.");
         return;
       }
       return router.refresh();
@@ -134,6 +136,7 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
     if (answer.status > 0 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") retryKey.current = null;
     setBusy(false);
     setProblem(answer.message);
+    setNeedsAccount(answer.code === "INSTAGRAM_NOT_CONNECTED" && answer.details?.reason === "check_needs_account");
     // Something changed since the approval: the creator checks and approves again.
     if (answer.code === "APPROVAL_STALE" && props.children) setShowForm(true);
   }
@@ -200,7 +203,13 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
           )}
 
           <div className="flex flex-wrap items-center gap-5">
-            {check && (
+            {check && needsAccount && (
+              // Back to this page after Instagram's login (G2 returnTo publish:<projectId>).
+              <PlainLinkButton href={`/api/v1/instagram/connect?returnTo=${encodeURIComponent(`publish:${props.projectId}`)}`} data-testid="publish-check-connect">
+                Connect Instagram
+              </PlainLinkButton>
+            )}
+            {check && !needsAccount && (
               <Button type="button" onClick={() => void retry()} disabled={busy} data-testid="publish-check-again">
                 {busy ? "Checking…" : "Check again"}
               </Button>

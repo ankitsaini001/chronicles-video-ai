@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ClientSession, Db, Filter, ObjectId } from "mongodb";
+import { type ClientSession, type Db, type Filter, ObjectId } from "mongodb";
 import { insertNotifications, newNotification, POST_NOTIFICATIONS } from "./notifications";
 
 // Approval #2 (F30; API.md §9, DATABASE.md §4.22 `posts`, §7.2; PRD §7): the post document and the
@@ -28,25 +28,28 @@ export const OPEN_POST_STATES: readonly PostState[] = ["scheduled", "publish_fai
 export const IN_FLIGHT_POST_STATES: readonly PostState[] = ["publishing", "outcome_unknown"];
 
 /**
- * F30 code review (MUST 1): "an unconfirmed attempt blocks every new approval". A post whose
- * `media_publish` was sent (`publishAttemptedAt`) but never confirmed (`igMediaId` null) and that is
- * not `published` may be live on Instagram. While such a post exists, H2 is refused (RETRY_INSTEAD)
+ * F30 code review (MUST 1): "an unconfirmed attempt blocks every new approval". A post for which
+ * `media_publish` was EVER sent (`firstPublishAttemptedAt`) and never confirmed (`igMediaId` null), that
+ * is not `published`, may be live on Instagram. While such a post exists, H2 is refused (RETRY_INSTEAD)
  * whatever the post's state, so a change + a new approval can never post the reel a second time.
+ * Re-review: based on the FIRST send, not `publishAttemptedAt`, which a released claim sets back to
+ * null (a lost first send followed by a refused second one must still count). Only a clear refusal of
+ * the first send itself, or "Check again" proving it wasn't posted, clears `firstPublishAttemptedAt`.
  */
-export function isUnconfirmedPost(post: Pick<PostDocument, "state" | "publishAttemptedAt" | "igMediaId">): boolean {
-  return post.publishAttemptedAt != null && post.igMediaId == null && post.state !== "published";
+export function isUnconfirmedPost(post: Pick<PostDocument, "state" | "igMediaId"> & { firstPublishAttemptedAt?: Date | null }): boolean {
+  return post.firstPublishAttemptedAt != null && post.igMediaId == null && post.state !== "published";
 }
 
 /** The settled states in which an unconfirmed post waits for "Check again" (H6). */
 export const CHECKABLE_POST_STATES: readonly PostState[] = ["publish_failed", "approval_invalidated", "cancelled"];
 
 /** An unconfirmed post that no job is working on: "Check again" (H6) is offered for it. */
-export function isCheckablePost(post: Pick<PostDocument, "state" | "publishAttemptedAt" | "igMediaId">): boolean {
+export function isCheckablePost(post: Pick<PostDocument, "state" | "igMediaId"> & { firstPublishAttemptedAt?: Date | null }): boolean {
   return isUnconfirmedPost(post) && CHECKABLE_POST_STATES.includes(post.state);
 }
 
-/** MongoDB filter for unconfirmed posts (the same rule as isUnconfirmedPost). */
-export const UNCONFIRMED_POST_FILTER = { publishAttemptedAt: { $ne: null }, igMediaId: null, state: { $ne: "published" } } as const;
+/** MongoDB filter for unconfirmed posts (the same rule as isUnconfirmedPost; `$ne: null` also skips a missing field). */
+export const UNCONFIRMED_POST_FILTER = { firstPublishAttemptedAt: { $ne: null }, igMediaId: null, state: { $ne: "published" } } as const;
 
 /** The project's unconfirmed post, if any (at most one: H2 creates no post while one exists). */
 export async function findUnconfirmedPost(db: Db, input: { ownerId: ObjectId; projectId: ObjectId }, session?: ClientSession): Promise<PostDocument | null> {
@@ -54,6 +57,16 @@ export async function findUnconfirmedPost(db: Db, input: { ownerId: ObjectId; pr
     ...(session ? { session } : {}),
     sort: { createdAt: -1, _id: -1 },
   });
+}
+
+/**
+ * The owner's newest unconfirmed post on ANY project, or null (re-review founder note: before
+ * connecting an Instagram account, the page warns that a different account can't check it).
+ */
+export async function findUnconfirmedPostOfOwner(db: Db, ownerId: ObjectId | string): Promise<PostDocument | null> {
+  const owner = typeof ownerId === "string" ? (/^[0-9a-f]{24}$/.test(ownerId) ? new ObjectId(ownerId) : null) : ownerId;
+  if (!owner) return null;
+  return posts(db).findOne({ ownerId: owner, ...UNCONFIRMED_POST_FILTER } as Filter<PostDocument>, { sort: { createdAt: -1, _id: -1 } });
 }
 
 /** Why an approval was cancelled (stored on the post; plain words come from the notification). */

@@ -91,6 +91,8 @@ export function fakeAuthorizePage(callbackUrl: string, state: string): string {
 //   [e2e:limit]     the FIRST media_publish of a container is refused with Instagram's daily-limit
 //                   error (code 9 / 2207042); a later one works (the limit "lifted": Try again)
 //   [e2e:dropped]   the FIRST media_publish gets no answer (a timeout) and did NOT post anything
+//   [e2e:droprefuse] the FIRST media_publish gets no answer (nothing posted); after reconcile releases the
+//                   claim, the SECOND is clearly refused (code 100 / 2207026)
 // An "outage" for one account (a document `{ _id: "outage:<igUserId>" }` that the e2e check adds and
 // removes): reading the recent media and the status of an already PUBLISHED container fail with 503,
 // so reconcile can't tell what happened (the job then ends "unconfirmed" → Check again).
@@ -113,7 +115,7 @@ type FakeDoc = {
   count?: number;
 };
 
-const scenarioOf = (caption: string) => /\[e2e:(slow|error|busy|lost|limit|dropped)\]/.exec(caption)?.[1] ?? "ok";
+const scenarioOf = (caption: string) => /\[e2e:(slow|error|busy|lost|limit|dropped|droprefuse)\]/.exec(caption)?.[1] ?? "ok";
 /** The e2e check's "Instagram can't be read for this account" switch. */
 export const fakeOutageId = (igUserId: string) => `outage:${igUserId}`;
 const TOKEN_OK = /^e2e-long\./;
@@ -168,6 +170,10 @@ export class FakeInstagramPublisher implements InstagramPublisher {
     if (scenario === "limit" && (container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042);
     // The first publish of a "dropped" post never reaches Instagram's posting, and its answer is lost.
     if (scenario === "dropped" && (container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "timeout");
+    if (scenario === "droprefuse") {
+      if ((container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "timeout");
+      throw new InstagramPublishError("media_publish", "rejected", 400, 100, 2207026);
+    }
     const mediaId = `1791${digits(13)}`;
     // Instagram's own rule: a container is published once; it is PUBLISHED from now on.
     const claimed = await this.docs.updateOne({ _id: container._id, status: "FINISHED" }, { $set: { status: "PUBLISHED" } });

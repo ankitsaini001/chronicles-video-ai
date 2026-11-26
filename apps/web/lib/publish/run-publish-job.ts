@@ -50,7 +50,8 @@ export interface PublishJobStore {
   saveContainer(input: { postId: ObjectId; jobId: ObjectId; containerId?: string | null; status?: string | null }): Promise<boolean>;
   claim(input: { postId: ObjectId; jobId: ObjectId; attempt: number }): Promise<boolean>;
   unknown(input: { postId: ObjectId; jobId: ObjectId }): Promise<boolean>;
-  release(input: { postId: ObjectId; jobId: ObjectId }): Promise<boolean>;
+  /** `refused`: Instagram clearly refused this send (a refused FIRST send also clears the "ever sent" mark). */
+  release(input: { postId: ObjectId; jobId: ObjectId; refused?: boolean }): Promise<boolean>;
   complete(input: { jobId: ObjectId; attempt: number; mediaId: string | null; permalink: string | null }): Promise<boolean>;
   /** Ends the job with the fixed plain reason (no detail is stored; it goes only to the server log). */
   end(input: { jobId: ObjectId; attempt: number; failure: PublishFailure; stage: PublishStage }): Promise<boolean>;
@@ -296,8 +297,9 @@ export async function runPublishJob(input: { event: { jobId: string; attempt: nu
         await store.progress({ jobId, attempt, stage: "reconcile", percent: 90, message: PUBLISH_MESSAGES.CHECKING });
         return { next: "reconcile", waitMs: deps.delays.reconcileMs };
       }
-      // A clear refusal: nothing was published, so the claim is released.
-      await store.release({ postId, jobId });
+      // A clear refusal: nothing was published by THIS send, so the claim is released (an earlier send
+      // whose answer was lost still keeps the post "unconfirmed").
+      await store.release({ postId, jobId, refused: true });
       if (meaning === "not_ready") return { next: "poll", waitMs: deps.delays.checkMs };
       return refusal(error, "publish");
     }

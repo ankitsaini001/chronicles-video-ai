@@ -699,15 +699,28 @@ export async function markOutcomeUnknown(db: Db, input: { postId: ObjectId; jobI
 }
 
 /**
- * Reconcile proved the reel is NOT on Instagram and its container is still unpublished: the claim is
- * released, so the same container may be published (Instagram publishes a container only once).
+ * The claim is released, so the same container may be published again (Instagram publishes a
+ * container only once): reconcile proved the reel is not live yet, or Instagram clearly refused the send.
+ * `firstPublishAttemptedAt` is KEPT (an earlier send whose answer was lost may still go live), except
+ * when `refused` and this was the FIRST send (`publishAttemptedAt` = `firstPublishAttemptedAt`): then
+ * nothing ever went out and the post is no longer "unconfirmed" (re-review MUST 1).
  */
-export async function releasePublishClaim(db: Db, input: { postId: ObjectId; jobId: ObjectId; now?: Date }): Promise<boolean> {
+export async function releasePublishClaim(db: Db, input: { postId: ObjectId; jobId: ObjectId; refused?: boolean; now?: Date }): Promise<boolean> {
   const now = input.now ?? new Date();
-  const result = await posts(db).updateOne(
-    { _id: input.postId, jobId: input.jobId, state: { $in: ["publishing", "outcome_unknown"] }, igMediaId: null },
-    { $set: { state: "publishing", publishAttemptedAt: null, updatedAt: now } },
-  );
+  const filter = { _id: input.postId, jobId: input.jobId, state: { $in: ["publishing", "outcome_unknown"] as PostState[] }, igMediaId: null };
+  if (input.refused) {
+    const current = await posts(db).findOne(filter, { projection: { publishAttemptedAt: 1, firstPublishAttemptedAt: 1 } });
+    const sent = current?.publishAttemptedAt ?? null;
+    if (sent && current?.firstPublishAttemptedAt && sent.getTime() === current.firstPublishAttemptedAt.getTime()) {
+      // Conditional on both times still being this send: a concurrent new claim can't be cleared.
+      const first = await posts(db).updateOne(
+        { ...filter, publishAttemptedAt: sent, firstPublishAttemptedAt: sent },
+        { $set: { state: "publishing", publishAttemptedAt: null, firstPublishAttemptedAt: null, updatedAt: now } },
+      );
+      if (first.matchedCount === 1) return true;
+    }
+  }
+  const result = await posts(db).updateOne(filter, { $set: { state: "publishing", publishAttemptedAt: null, updatedAt: now } });
   return result.matchedCount === 1;
 }
 
@@ -883,22 +896,29 @@ export async function postRetryMode(db: Db, post: PostDocument, now: Date = new 
 const CHECKABLE_FILTER = (post: { _id: ObjectId; ownerId: ObjectId }) => ({
   _id: post._id,
   ownerId: post.ownerId,
-  publishAttemptedAt: { $ne: null },
+  firstPublishAttemptedAt: { $ne: null },
   igMediaId: null,
   state: { $in: [...CHECKABLE_POST_STATES] },
 });
+
+/** Who settled an unconfirmed post: the creator's "Check again" (H6) or the founder's ops command. */
+export type CheckVia = "check_again" | "ops_cli";
 
 export type CheckedPost = { post: PostDocument; project: ProjectDocument | null };
 
 /**
  * "Check again" found the reel live, ONE transaction: post → `published` (media id and permalink,
- * both null when Instagram said PUBLISHED but the media wasn't in the list), the project → `published`
- * (+1 stateVersion; an archived project stays archived), notification `post_published`, audit
- * `post.published` (`via: check_again`). Refused (409 JOB_ALREADY_RUNNING, nothing saved) while
- * another job runs on the project: the flag stays and blocks new approvals until it is saved.
- * Null when the post is no longer unconfirmed (checked or published meanwhile).
+ * both null when Instagram said PUBLISHED but the media wasn't in the list), notification
+ * `post_published`, audit `post.published` (`via`). The project → `published` (+1 stateVersion) only
+ * while its current video is still the one approved (`currentRenderId` = `approval.renderId`) and it
+ * isn't archived; otherwise only the post is saved (re-review SHOULD 5: a newer video stays publishable).
+ * Refused (409 JOB_ALREADY_RUNNING, nothing saved) while another job runs on the project: the flag stays
+ * and blocks new approvals until it is saved. Null when the post is no longer unconfirmed.
  */
-export async function confirmCheckedPost(db: Db, input: { ownerId: string; postId: string; mediaId: string | null; permalink: string | null; now?: Date }): Promise<CheckedPost | null> {
+export async function confirmCheckedPost(
+  db: Db,
+  input: { ownerId: string; postId: string; mediaId: string | null; permalink: string | null; via?: CheckVia; now?: Date },
+): Promise<CheckedPost | null> {
   const now = input.now ?? new Date();
   if (!isHex(input.ownerId) || !isHex(input.postId)) return null;
   const ids = { _id: new ObjectId(input.postId), ownerId: new ObjectId(input.ownerId) };
@@ -918,18 +938,24 @@ export async function confirmCheckedPost(db: Db, input: { ownerId: string; postI
         { session, returnDocument: "after" },
       );
       if (!post) return;
-      const moved =
-        project && project.state !== "archived"
-          ? await projects.findOneAndUpdate(
-              { _id: project._id, ownerId: ids.ownerId, activeJobId: null, stateVersion: project.stateVersion },
-              { $set: { state: "published", lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
-              { session, returnDocument: "after" },
-            )
-          : project;
-      if (project && project.state !== "archived" && !moved) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.");
+      const sameVideo = project !== null && project.state !== "archived" && project.currentRenderId?.equals(post.approval.renderId) === true;
+      const moved = sameVideo && project
+        ? await projects.findOneAndUpdate(
+            { _id: project._id, ownerId: ids.ownerId, activeJobId: null, stateVersion: project.stateVersion, currentRenderId: post.approval.renderId },
+            { $set: { state: "published", lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
+            { session, returnDocument: "after" },
+          )
+        : project;
+      if (sameVideo && !moved) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.");
       const words = POST_NOTIFICATIONS.post_published(project?.title ?? "Your video", post.destination.username);
       await insertNotifications(db, session, [newNotification({ ownerId: ids.ownerId, type: "post_published", projectId: post.projectId, postId: post._id, ...words, now })]);
-      await audit(db, session, { actorId: ids.ownerId, action: "post.published", postId: post._id, data: { projectId: post.projectId, igMediaId: input.mediaId, igUserId: post.approval.igUserId, via: "check_again" }, now });
+      await audit(db, session, {
+        actorId: ids.ownerId,
+        action: "post.published",
+        postId: post._id,
+        data: { projectId: post.projectId, igMediaId: input.mediaId, igUserId: post.approval.igUserId, via: input.via ?? "check_again", projectPublished: sameVideo },
+        now,
+      });
       result = { post, project: moved };
     });
   } finally {
@@ -940,11 +966,12 @@ export async function confirmCheckedPost(db: Db, input: { ownerId: string; postI
 
 /**
  * "Check again" proved the reel was NOT posted (the container never reached PUBLISHED and the media is
- * not in the account's recent list): the unconfirmed flag is cleared, ONE transaction with audit
- * `post.not_posted`. The post keeps its state: a valid `publish_failed` post can be tried again, any
- * other lets the creator approve again (H2). Null when the post is no longer unconfirmed.
+ * not in the account's recent list): the unconfirmed flags (`publishAttemptedAt`,
+ * `firstPublishAttemptedAt`) are cleared, ONE transaction with audit `post.not_posted` (`via`). The post
+ * keeps its state: a valid `publish_failed` post can be tried again, any other lets the creator approve
+ * again (H2). Null when the post is no longer unconfirmed.
  */
-export async function clearCheckedPost(db: Db, input: { ownerId: string; postId: string; now?: Date }): Promise<PostDocument | null> {
+export async function clearCheckedPost(db: Db, input: { ownerId: string; postId: string; via?: CheckVia; now?: Date }): Promise<PostDocument | null> {
   const now = input.now ?? new Date();
   if (!isHex(input.ownerId) || !isHex(input.postId)) return null;
   const ids = { _id: new ObjectId(input.postId), ownerId: new ObjectId(input.ownerId) };
@@ -953,9 +980,9 @@ export async function clearCheckedPost(db: Db, input: { ownerId: string; postId:
   try {
     await session.withTransaction(async () => {
       result = null;
-      const post = await posts(db).findOneAndUpdate(CHECKABLE_FILTER(ids), { $set: { publishAttemptedAt: null, updatedAt: now } }, { session, returnDocument: "after" });
+      const post = await posts(db).findOneAndUpdate(CHECKABLE_FILTER(ids), { $set: { publishAttemptedAt: null, firstPublishAttemptedAt: null, updatedAt: now } }, { session, returnDocument: "after" });
       if (!post) return;
-      await audit(db, session, { actorId: ids.ownerId, action: "post.not_posted", postId: post._id, data: { projectId: post.projectId, igUserId: post.approval.igUserId, via: "check_again" }, now });
+      await audit(db, session, { actorId: ids.ownerId, action: "post.not_posted", postId: post._id, data: { projectId: post.projectId, igUserId: post.approval.igUserId, via: input.via ?? "check_again" }, now });
       result = post;
     });
   } finally {
