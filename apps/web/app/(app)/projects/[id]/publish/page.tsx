@@ -5,6 +5,7 @@ import {
   getInstagramConnection,
   getJob,
   isCheckablePost,
+  isUnconfirmedPost,
   postRetryMode,
   readDbConfig,
   toJobResource,
@@ -146,7 +147,7 @@ export default async function PublishPage({ params, searchParams }: { params: Pr
         showFormFirst={mustApprove}
       >
         {/* A publish that may have gone out is only ever tried again (it checks Instagram first); never a new approval. */}
-        {!latestPost.publishAttemptedAt ? await form(mustApprove ? failure.message : null) : null}
+        {!isUnconfirmedPost(latestPost) ? await form(mustApprove ? failure.message : null) : null}
       </PublishStatusScreen>,
       true,
     );

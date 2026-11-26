@@ -125,6 +125,11 @@ export interface PostDocument {
    * Reconcile only accepts media posted at or after this minus about a minute (clock allowance).
    */
   firstPublishAttemptedAt?: Date | null;
+  /**
+   * When `media_publish` was LAST sent (every claim sets it; a released claim keeps it). Cleared ($unset)
+   * only together with `firstPublishAttemptedAt`. Check again's 30-minute rule counts from here.
+   */
+  lastPublishSentAt?: Date | null;
   attempts: number;
   nextAttemptAt: Date | null;
   lastError: { code: string; message: string; at: Date } | null;

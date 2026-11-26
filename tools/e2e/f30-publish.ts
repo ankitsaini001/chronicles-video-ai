@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   addInvite,
+  claimPublishCall,
   closeMongoClient,
   endPublishJob,
   ensureIndexes,
@@ -587,7 +588,10 @@ async function main(): Promise<void> {
   const ageSends = async (postId: string, minutes: number) => {
     const post = await postDoc(postId);
     const back = (d: Date | null | undefined) => (d ? new Date(d.getTime() - minutes * 60_000) : null);
-    await posts().updateOne({ _id: new ObjectId(postId) }, { $set: { publishAttemptedAt: back(post?.publishAttemptedAt), firstPublishAttemptedAt: back(post?.firstPublishAttemptedAt) } });
+    await posts().updateOne(
+      { _id: new ObjectId(postId) },
+      { $set: { publishAttemptedAt: back(post?.publishAttemptedAt), firstPublishAttemptedAt: back(post?.firstPublishAttemptedAt), lastPublishSentAt: back(post?.lastPublishSentAt) } },
+    );
   };
 
   // (A) It went live, but Instagram's answer was lost and couldn't be read back.
@@ -675,7 +679,9 @@ async function main(): Promise<void> {
     checkedB.status === 200 &&
       checkedB.json.outcome === "not_posted" &&
       afterB?.publishAttemptedAt === null &&
-      afterB.firstPublishAttemptedAt === null &&
+      // $unset: the "ever sent" marks are gone (not null), so a later send sets them again.
+      !("firstPublishAttemptedAt" in afterB) &&
+      !("lastPublishSentAt" in afterB) &&
       afterB.state === "approval_invalidated" &&
       formPage.text.includes("Needs your approval") &&
       formPage.text.includes('data-testid="publish-now"') &&
@@ -757,7 +763,14 @@ async function main(): Promise<void> {
   const auditOps = await db.collection("auditLogs").findOne({ action: "post.not_posted", "subject.id": new ObjectId(unCId) });
   check(
     "ops command with --apply: marked not posted (both send marks cleared, state kept, audit via ops_cli)",
-    applied.code === 0 && applied.out.includes("Done: marked not posted") && clearedC?.firstPublishAttemptedAt === null && clearedC.publishAttemptedAt === null && clearedC.state === "approval_invalidated" && auditOps?.data?.via === "ops_cli",
+    applied.code === 0 &&
+      applied.out.includes("Done: marked not posted") &&
+      clearedC !== null &&
+      !("firstPublishAttemptedAt" in clearedC) &&
+      !("lastPublishSentAt" in clearedC) &&
+      clearedC.publishAttemptedAt === null &&
+      clearedC.state === "approval_invalidated" &&
+      auditOps?.data?.via === "ops_cli",
     applied.out.split("\n").slice(-1).join(""),
   );
   const notUnconfirmed = ops(unCId, "--not-posted");
@@ -768,6 +781,67 @@ async function main(): Promise<void> {
     againC.status === 202 && againC.post?.state === "published" && (await liveReels("Why the moon has phases 🌙 #Moon")) === 1 && (await liveReels(refuseCaption)) === 0,
     `${againC.status} ${againC.post?.state}`,
   );
+
+  // (D) Final review MUST 1, on real MongoDB: a refused FIRST send clears the "ever sent" mark ($unset);
+  // the next claim must set it again ($ifNull also fills an explicit null). [e2e:notreadylost]: the first
+  // send is refused "not ready", the second goes live but its answer is lost and Instagram can't be read
+  // → unconfirmed → H2 refused; Check again then finds the live reel (still ONE). (User E.)
+  f = e;
+  const pq = await seedReadyProject(f.id, "How rainbows end / F30 e2e");
+  check("E reconnects Instagram (stand-in)", await connect(f, pq.projectId));
+  await outageOn(f);
+  const nrCaption = "How rainbows end [e2e:notreadylost] #Rainbow";
+  const unD = await h2(f, pq.projectId, await bodyFor(f, pq, nrCaption));
+  const unDId: string = unD.json.post?.id ?? "";
+  const endedD = await endUnconfirmed(unDId);
+  check(
+    "first send refused (9007) → mark cleared → re-claim sets it AGAIN on MongoDB → the reel went live, answer lost → unconfirmed (first + last send kept)",
+    unD.status === 202 &&
+      endedD?.state === "publish_failed" &&
+      endedD.firstPublishAttemptedAt instanceof Date &&
+      endedD.lastPublishSentAt instanceof Date &&
+      (await containersFor(nrCaption))[0]?.publishCalls === 2 &&
+      (await liveReels(nrCaption)) === 1,
+    `${endedD?.state} first ${endedD?.firstPublishAttemptedAt?.toISOString?.() ?? String(endedD?.firstPublishAttemptedAt)}`,
+  );
+  const editedD = await h7(f, pq.projectId, "How rainbows end 🌈 #Rainbow");
+  const blockedD = await h2(f, pq.projectId, await bodyFor(f, pq, "How rainbows end 🌈 #Rainbow"));
+  check(
+    "…a caption edit cancels the approval and a NEW approval is refused (retry_instead): no double post",
+    editedD.status === 200 && (await postDoc(unDId))?.state === "approval_invalidated" && blockedD.status === 409 && blockedD.json.error?.details?.reason === "retry_instead",
+    `${editedD.status} ${blockedD.status} ${blockedD.json.error?.details?.reason}`,
+  );
+  await outageOff(f);
+  const checkedD = await h6(f, unDId);
+  check(
+    "Check again finds the live reel → published, STILL one reel",
+    checkedD.status === 200 && checkedD.json.outcome === "published" && (await postDoc(unDId))?.state === "published" && (await liveReels(nrCaption)) === 1,
+    `${checkedD.status} ${checkedD.json.outcome}`,
+  );
+  // The claim itself on MongoDB: an explicit null AND a missing field are both filled by the next send.
+  const claimSet: string[] = [];
+  for (const kind of ["null", "missing"] as const) {
+    const jobId = new ObjectId();
+    const postId = new ObjectId();
+    await db.collection("jobs").insertOne({ _id: jobId, type: "publish", attempt: 1, state: "running", note: "F30 e2e claim check" });
+    await db.collection("posts").insertOne({
+      _id: postId,
+      ownerId: e.id,
+      projectId: new ObjectId(),
+      jobId,
+      state: "publishing",
+      publishAttemptedAt: null,
+      igMediaId: null,
+      createdAt: new Date(),
+      ...(kind === "null" ? { firstPublishAttemptedAt: null, lastPublishSentAt: null } : {}),
+    });
+    const claimed = await claimPublishCall(db, { postId, jobId, attempt: 1 });
+    const after = await posts().findOne({ _id: postId });
+    if (claimed && after?.firstPublishAttemptedAt instanceof Date && after.lastPublishSentAt instanceof Date) claimSet.push(kind);
+    await db.collection("posts").deleteOne({ _id: postId });
+    await db.collection("jobs").deleteOne({ _id: jobId });
+  }
+  check("claimPublishCall on MongoDB sets the first/last send time when the field is null AND when it is missing", claimSet.join(",") === "null,missing", claimSet.join(","));
 
   // ---------- overall: never twice ----------
   const dupes = await db

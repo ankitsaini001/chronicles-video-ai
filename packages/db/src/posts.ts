@@ -679,8 +679,11 @@ export async function claimPublishCall(db: Db, input: { postId: ObjectId; jobId:
       if (!job) return;
       const result = await posts(db).updateOne(
         { _id: input.postId, jobId: input.jobId, state: "publishing", publishAttemptedAt: null, igMediaId: null },
-        // `firstPublishAttemptedAt` keeps the FIRST send (reconcile's time window starts there).
-        { $set: { publishAttemptedAt: now, updatedAt: now }, $min: { firstPublishAttemptedAt: now } },
+        // `firstPublishAttemptedAt` keeps the FIRST send (reconcile's time window starts there). An
+        // update PIPELINE with $ifNull: it fills the field when it is missing OR null (final review MUST
+        // 1: `$min` leaves an explicit null as it is, because null ranks below every date).
+        // `lastPublishSentAt`: every send (Check again's 30-minute rule), kept when the claim is released.
+        [{ $set: { publishAttemptedAt: now, lastPublishSentAt: now, updatedAt: now, firstPublishAttemptedAt: { $ifNull: ["$firstPublishAttemptedAt", now] } } }],
         { session },
       );
       claimed = result.modifiedCount === 1;
@@ -715,7 +718,8 @@ export async function releasePublishClaim(db: Db, input: { postId: ObjectId; job
       // Conditional on both times still being this send: a concurrent new claim can't be cleared.
       const first = await posts(db).updateOne(
         { ...filter, publishAttemptedAt: sent, firstPublishAttemptedAt: sent },
-        { $set: { state: "publishing", publishAttemptedAt: null, firstPublishAttemptedAt: null, updatedAt: now } },
+        // $unset (not null): the "ever sent" marks are gone, and the next claim sets them again.
+        { $set: { state: "publishing", publishAttemptedAt: null, updatedAt: now }, $unset: { firstPublishAttemptedAt: "", lastPublishSentAt: "" } },
       );
       if (first.matchedCount === 1) return true;
     }
@@ -980,7 +984,12 @@ export async function clearCheckedPost(db: Db, input: { ownerId: string; postId:
   try {
     await session.withTransaction(async () => {
       result = null;
-      const post = await posts(db).findOneAndUpdate(CHECKABLE_FILTER(ids), { $set: { publishAttemptedAt: null, firstPublishAttemptedAt: null, updatedAt: now } }, { session, returnDocument: "after" });
+      // $unset (not null), so a later Try again's claim sets the "ever sent" marks again (final review MUST 1).
+      const post = await posts(db).findOneAndUpdate(
+        CHECKABLE_FILTER(ids),
+        { $set: { publishAttemptedAt: null, updatedAt: now }, $unset: { firstPublishAttemptedAt: "", lastPublishSentAt: "" } },
+        { session, returnDocument: "after" },
+      );
       if (!post) return;
       await audit(db, session, { actorId: ids.ownerId, action: "post.not_posted", postId: post._id, data: { projectId: post.projectId, igUserId: post.approval.igUserId, via: input.via ?? "check_again" }, now });
       result = post;

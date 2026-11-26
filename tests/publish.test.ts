@@ -23,7 +23,8 @@ import {
   type PublishStart,
   type RecheckResult,
 } from "@bytereel/db";
-import { ObjectId } from "mongodb";
+import { confirmCheckedPost } from "@bytereel/db";
+import { type Db, ObjectId } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
 import { InstagramPublishError, meaningOf, MetaInstagramPublisher, type ContainerStatus, type InstagramPublisher, type RecentMedia } from "../apps/web/lib/instagram/publish-client";
 import { CHECK_AGAIN_MESSAGES, checkPostAgain, type CheckAgainDeps } from "../apps/web/lib/publish/check-again";
@@ -397,8 +398,10 @@ class FakeStore implements PublishJobStore {
   });
   claim = vi.fn(async () => {
     if (this.post.state !== "publishing" || this.post.publishAttemptedAt !== null || this.post.igMediaId !== null) return false;
-    // Like the database: $set publishAttemptedAt, $min firstPublishAttemptedAt.
+    // Like the database's update pipeline: publishAttemptedAt and lastPublishSentAt = now;
+    // firstPublishAttemptedAt = $ifNull(field, now), which fills it when it is missing OR null.
     this.post.publishAttemptedAt = this.clock();
+    this.post.lastPublishSentAt = this.post.publishAttemptedAt;
     this.post.firstPublishAttemptedAt ??= this.post.publishAttemptedAt;
     return true;
   });
@@ -409,7 +412,12 @@ class FakeStore implements PublishJobStore {
   release = vi.fn(async (input: { refused?: boolean }) => {
     // A clearly refused FIRST send also clears the "ever sent" mark (releasePublishClaim).
     const firstRefused = input.refused === true && this.post.publishAttemptedAt !== null && this.post.publishAttemptedAt.getTime() === this.post.firstPublishAttemptedAt?.getTime();
-    Object.assign(this.post, { state: "publishing", publishAttemptedAt: null, ...(firstRefused ? { firstPublishAttemptedAt: null } : {}) });
+    Object.assign(this.post, { state: "publishing", publishAttemptedAt: null });
+    // Like the database's $unset: the fields are gone (not null).
+    if (firstRefused) {
+      delete this.post.firstPublishAttemptedAt;
+      delete this.post.lastPublishSentAt;
+    }
     return true;
   });
   complete = vi.fn(async (input: { mediaId: string | null; permalink: string | null }) => {
@@ -778,9 +786,40 @@ describe("re-review MUST 1: the 'ever sent' mark survives a released claim", () 
     s.ig.publishes = [new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042)];
     expect(await s.run()).toBe("failed");
     expect(s.store.release).toHaveBeenCalledWith(expect.objectContaining({ refused: true }));
-    expect(s.store.post.firstPublishAttemptedAt).toBeNull();
+    expect(s.store.post.firstPublishAttemptedAt).toBeUndefined();
     s.store.post.state = "approval_invalidated";
     expect(isUnconfirmedPost(s.store.post)).toBe(false);
+  });
+});
+
+describe("final review MUST 1: a cleared 'ever sent' mark is set again by the next send", () => {
+  it("(a) first send refused (not ready, 9007) → re-claim → the answer is lost and can't be read back → unconfirmed: H2 would be refused", async () => {
+    const s = jobSetup();
+    s.ig.publishes = [new InstagramPublishError("media_publish", "rejected", 400, 9007, 2207027), "lost"];
+    s.store.readerOk = false; // reconcile can't confirm
+    expect(await s.run()).toBe("failed");
+    expect(s.store.ended).toMatchObject([{ failure: "unconfirmed", stage: "reconcile" }]);
+    expect(s.ig.media).toHaveLength(1); // the second send went live
+    expect(s.store.post.firstPublishAttemptedAt).toBeInstanceOf(Date);
+    expect(s.store.post.lastPublishSentAt).toBeInstanceOf(Date);
+    s.store.post.state = "approval_invalidated";
+    expect(isUnconfirmedPost(s.store.post)).toBe(true);
+  });
+
+  it("(b) after Check again cleared the marks (explicit null or missing), Try again → lost answer → unconfirmed again", async () => {
+    for (const cleared of ["null", "missing"] as const) {
+      const s = jobSetup({ post: { firstPublishAttemptedAt: null, lastPublishSentAt: null, publishAttemptedAt: null } });
+      if (cleared === "missing") {
+        delete s.store.post.firstPublishAttemptedAt;
+        delete s.store.post.lastPublishSentAt;
+      }
+      s.ig.publishes = ["lost"];
+      s.store.readerOk = false;
+      expect(await s.run()).toBe("failed");
+      expect(s.store.post.firstPublishAttemptedAt).toBeInstanceOf(Date);
+      s.store.post.state = "publish_failed";
+      expect(isUnconfirmedPost(s.store.post)).toBe(true);
+    }
   });
 });
 
@@ -875,6 +914,14 @@ describe("Check again (H6 reconcile-only mode): reads Instagram, never posts", (
     return { ig, post, deps, logs, run: () => checkPostAgain(post, deps) };
   }
 
+  it("final review NICE 3: the 30 minutes count from the LAST send even after its claim was released", async () => {
+    // First send long ago, its claim released (publishAttemptedAt null), a second send 1 minute ago.
+    const c = checkSetup({ containerStatus: "FINISHED", post: { publishAttemptedAt: null, lastPublishSentAt: new Date(T.getTime() + 30 * 60_000) } });
+    expect((await c.run()).outcome).toBe("unknown");
+    const old = checkSetup({ containerStatus: "FINISHED", post: { publishAttemptedAt: null, lastPublishSentAt: T } });
+    expect((await old.run()).outcome).toBe("not_posted");
+  });
+
   it("re-review MUST 2: a FINISHED container right after the send is NOT proof (unknown); ERROR / EXPIRED are proof at any time", async () => {
     const fresh = new Date(T.getTime() + 5000);
     const finished = checkSetup({ containerStatus: "FINISHED", now: fresh });
@@ -955,5 +1002,56 @@ describe("Check again (H6 reconcile-only mode): reads Instagram, never posts", (
     expect(c.logs).toHaveLength(1);
     expect(c.logs[0]).toMatchObject({ step: "reconcile", jobAttempt: 0, outcome: "published" });
     expect(JSON.stringify(c.logs)).not.toContain(TOKEN);
+  });
+});
+
+describe("re-review SHOULD 5: confirmCheckedPost publishes the project only for the approved video (fake database)", () => {
+  function confirmDb(project: Record<string, unknown>, post: PostDocument) {
+    const calls: { name: string; args: any[] }[] = [];
+    const handlers: Record<string, (...args: any[]) => unknown> = {
+      "posts.findOne": () => post,
+      "projects.findOne": () => project,
+      "posts.findOneAndUpdate": (_f: unknown, update: { $set: Record<string, unknown> }) => ({ ...post, ...update.$set }),
+      "projects.findOneAndUpdate": (_f: unknown, update: { $set: Record<string, unknown> }) => ({ ...project, ...update.$set }),
+      "notifications.insertMany": () => ({}),
+      "auditLogs.insertOne": () => ({}),
+    };
+    const collection = (name: string) =>
+      new Proxy(
+        {},
+        {
+          get: (_t, method: string) => (...args: any[]) => {
+            calls.push({ name: `${name}.${method}`, args });
+            const handler = handlers[`${name}.${method}`];
+            if (!handler) throw new Error(`unexpected ${name}.${method}`);
+            return Promise.resolve(handler(...args));
+          },
+        },
+      );
+    const session = { withTransaction: async (fn: () => Promise<void>) => fn(), endSession: async () => undefined };
+    return { db: { client: { startSession: () => session }, collection } as unknown as Db, calls };
+  }
+  const unconfirmed = () => postDoc({ state: "approval_invalidated", publishAttemptedAt: new Date(), firstPublishAttemptedAt: new Date() });
+
+  it("the project has a NEWER video: the post is saved as published, the project is left as it is", async () => {
+    const post = unconfirmed();
+    const project = { _id: post.projectId, ownerId: post.ownerId, title: "The water cycle", state: "video_ready", activeJobId: null, stateVersion: 7, currentRenderId: new ObjectId() };
+    const { db, calls } = confirmDb(project, post);
+    const out = await confirmCheckedPost(db, { ownerId: post.ownerId.toHexString(), postId: post._id.toHexString(), mediaId: "17910000000000099", permalink: "https://www.instagram.com/reel/X/" });
+    expect(out?.post.state).toBe("published");
+    expect(calls.map((c) => c.name)).not.toContain("projects.findOneAndUpdate");
+    expect(out?.project).toMatchObject({ state: "video_ready" });
+    expect(calls.find((c) => c.name === "auditLogs.insertOne")!.args[0].data).toMatchObject({ projectPublished: false, via: "check_again" });
+  });
+
+  it("the project still has the approved video: post AND project published (conditional on that video)", async () => {
+    const post = unconfirmed();
+    const project = { _id: post.projectId, ownerId: post.ownerId, title: "The water cycle", state: "publish_failed", activeJobId: null, stateVersion: 7, currentRenderId: post.approval.renderId };
+    const { db, calls } = confirmDb(project, post);
+    const out = await confirmCheckedPost(db, { ownerId: post.ownerId.toHexString(), postId: post._id.toHexString(), mediaId: null, permalink: null, via: "ops_cli" });
+    expect(out?.project).toMatchObject({ state: "published" });
+    const [filter] = calls.find((c) => c.name === "projects.findOneAndUpdate")!.args as [Record<string, unknown>];
+    expect(filter).toMatchObject({ currentRenderId: post.approval.renderId, activeJobId: null, stateVersion: 7 });
+    expect(calls.find((c) => c.name === "auditLogs.insertOne")!.args[0].data).toMatchObject({ projectPublished: true, via: "ops_cli" });
   });
 });

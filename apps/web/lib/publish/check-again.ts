@@ -96,7 +96,8 @@ export async function checkPostAgain(post: PostDocument, deps: CheckAgainDeps): 
 
   const match = findPublishedMedia(post, media, statusCode);
   const live = match !== undefined || statusCode === "PUBLISHED";
-  const latestSend = post.publishAttemptedAt ?? post.firstPublishAttemptedAt ?? post.updatedAt;
+  // The LATEST send, even when its claim was released afterwards (final review NICE 3).
+  const latestSend = post.lastPublishSentAt ?? post.publishAttemptedAt ?? post.firstPublishAttemptedAt ?? post.updatedAt;
   const sendIsOld = (deps.now?.() ?? new Date()).getTime() - latestSend.getTime() >= FINISHED_PROOF_AFTER_MS;
   const notPosted = !live && media !== null && statusRead && ((statusCode !== null && NEVER_PUBLISHED.includes(statusCode)) || ((statusCode === null || statusCode === "FINISHED") && sendIsOld));
   const outcome: CheckAgainOutcome = live ? "published" : notPosted ? "not_posted" : "unknown";
