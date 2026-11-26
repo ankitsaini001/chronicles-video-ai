@@ -670,7 +670,8 @@ If `media_publish` times out or the network fails, the outcome is **unknown**: w
 - **Poll:** first check after ~10 s, then every ~20 s; Meta hiccups (5xx, 429, timeouts, 2207001, 2207003, "not ready" 9007/2207027) are retried until a deadline about 10 minutes after the attempt started, then `publish_failed` with Try again. `EXPIRED` → a new container; `ERROR` → `publish_failed`.
 - **Never twice (§17.4):** `media_publish` is claimed in the database (`posts.publishAttemptedAt`, set only while null) before it is sent. No clear answer → `outcome_unknown` → reconcile (a step of the same run, not a separate function): reads the container's `status_code` and the account's recent media (`id,caption,timestamp,permalink`); a media with the same caption posted after the claim (−5 min slack) → published. The container still `FINISHED` and no such media twice in a row → the claim is released and the SAME container is published (Instagram publishes a container only once, so this cannot double post). After ~10 min without a clear answer → `publish_failed` ("We couldn't confirm…"); Try again (H6) starts with reconcile. A crash in the middle of `media_publish` marks the post `outcome_unknown` before Inngest's retry.
 - **Video link:** a private R2 presigned GET link valid 1 hour, made right before the container; never logged or stored.
-- **Stand-in Instagram for tests** (`apps/web/lib/instagram/fake-instagram.ts`, `E2E_FAKE_INSTAGRAM=1`, only with `bytereel_test` on a local test port): the caption picks the case (`[e2e:slow]`, `[e2e:busy]`, `[e2e:error]`, `[e2e:lost]`, `[e2e:limit]`); ZERO calls to Meta.
+- **Stand-in Instagram for tests** (`apps/web/lib/instagram/fake-instagram.ts`, `E2E_FAKE_INSTAGRAM=1`, only with `bytereel_test` on a local test port): the caption picks the case (`[e2e:slow]`, `[e2e:busy]`, `[e2e:error]`, `[e2e:lost]`, `[e2e:limit]`, `[e2e:dropped]`) and an `outage:<igUserId>` document makes reading the account fail; ZERO calls to Meta.
+- **Code review fixes (2026-11-26):** reconcile reads with any working token for `approval.igUserId` (not the full re-check); its window starts at the FIRST `media_publish` minus 60 s. **An unconfirmed attempt blocks every new approval**: H2 is refused while any post of the project may be live, whatever its state; H6 then runs **Check again** (`apps/web/lib/publish/check-again.ts`), which only reads Instagram and either saves the post as published or proves it wasn't posted (the flag is cleared and the creator may approve again). It never creates a container or calls `media_publish`. G3 to another account is refused while a post is in flight. Plain stage errors only.
 
 ### 17.5 Scheduling races
 | Race | Handling |
@@ -679,7 +680,7 @@ If `media_publish` times out or the network fails, the outcome is **unknown**: w
 | Revision, narration edit, voice switch, undo or caption fix requested while a post is `scheduled` or `publish_failed` | The request itself moves the post to `approval_invalidated` in the same transaction (before any job runs) and notifies the creator; the post never waits for the job's result |
 | Instagram disconnected/reconnected to another account | `igUserId` mismatch → invalidated |
 | User cancels while the job sleeps | `cancelOn` + state check → no publish |
-| Double-click "Publish now" | The `Idempotency-Key` replays the first answer; a separate second approval is blocked by the one-live-post index; the unique `publishKey` (per approval) means one approval can publish at most once |
+| Double-click "Publish now" | The `Idempotency-Key` replays the first answer; a separate second approval is blocked by the one-live-post index; the unique `publishKey` keeps one post document per approval. *(As built, F30 code review: what stops a second reel is the post's state, the `media_publish` claim and the rule that an unconfirmed attempt blocks every new approval; see §17.4.)* |
 | Token expires before the slot | Refresh cron; if it fails → post `publish_failed` (reason: reconnect) + banner |
 | Two scheduled posts for the same project | Partial unique index (one live post per project) |
 
@@ -721,7 +722,7 @@ Long-lived tokens (~60 days) are refreshed by cron when < 10 days remain (and th
 | Generate | `gen:{planVersionId}` |
 | Speech per scene | `speechArtifacts (ownerId, cacheKey)` unique |
 | Render | `renderInputHash` (reuse) + `render:{jobId}` |
-| Publish | `posts.publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (a re-approval after a failure or suspend/reactivate gets a new key; the same approval never publishes twice) |
+| Publish | `posts.publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (a re-approval after a failure or suspend/reactivate gets a new key; one post document per approval. Never-twice itself comes from the post's state, the `media_publish` claim and the unconfirmed-attempt rule, §17.4) |
 | Inngest events | event `id` = the idempotency key (Inngest dedupes) |
 
 ### 20.2 Retry matrix

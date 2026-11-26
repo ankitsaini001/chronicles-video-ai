@@ -1052,7 +1052,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `mode` | `now` \| `scheduled` | Publish now or later | Yes |
 | `scheduledAt` | date? (UTC) | 10 min to 75 days ahead; shown in the user's timezone | When scheduled |
 | `approval` | `{ id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` | **Approval #2 snapshot.** `id` is a new approval id for **every** approval | Yes |
-| `publishKey` | string, unique | `pub:{projectId}:{renderId}:{connectionId}:{approvalId}`: one approval can publish **at most once** | Yes |
+| `publishKey` | string, unique | `pub:{projectId}:{renderId}:{connectionId}:{approvalId}`: at most **one post document per approval**. *(Corrected 2026-11-26, F30 code review: the key alone does not stop a second reel; the post's state, the `media_publish` claim and the unconfirmed-attempt rule do, see "As built (F30)".)* | Yes |
 | `state` | `draft` (reserved) \| `scheduled` \| `publishing` \| `outcome_unknown` \| `published` \| `publish_failed` \| `approval_invalidated` \| `cancelled` | Post status (ARCHITECTURE §7.4) | Yes |
 | `jobId` | ObjectId? → `jobs` | The `publish` job | No |
 | `igContainerId`, `igMediaId`, `permalink` | string? | Instagram's ids and the public link once posted | No |
@@ -1068,7 +1068,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 - `captionHash` is computed by the server; `igUserId` is copied from the connection.
 
 **Indexes**
-- unique `publishKey`: the same approval can never post twice.
+- unique `publishKey`: one post document per approval (not, by itself, "never posts twice": see "As built (F30)").
 - `{ ownerId: 1, createdAt: -1 }`: the user's posts, newest first.
 - `{ state: 1, scheduledAt: 1 }`: find scheduled posts that are due. **Open item for F30/F31:** a post can be scheduled up to 75 days ahead, and the publish job waits with Inngest's `sleepUntil`. Check the Inngest **free plan's maximum sleep** before F31. If it is shorter than 75 days, a small cron uses this index to start posts that are due.
 - unique partial `projectId` where `state` is `scheduled`, `publishing` or `outcome_unknown`: **one live post per project** (API A-14; see Q5).
@@ -1108,7 +1108,14 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 - **Indexes (feature F30):** `publishKey_unique`; the unique partial one-live-post index on `projectId` (`scheduled`/`publishing`/`outcome_unknown`); `ownerId_createdAt`; `state_scheduledAt`; `publishAttempts.postId`; `notifications.ownerId_createdAt`. The two unique ones are part of "never posts twice": **apply them before the first real post** (`npm run db -- indexes --feature F30 --apply`). The project's newest post is read with `{ ownerId, projectId }` sorted by `createdAt` (covered well enough by the one-project filter at V1 sizes).
 - **`publishAttempts` as built:** extra field `jobAttempt`; `step` also `permalink`; `request`/`response` hold only ids, counts, the HTTP status and Meta's numeric `code`/`subcode` (never the token, the video link or Meta's own text); `outcome`: `ok`, `error`, `unknown` (no clear answer from `media_publish`), the container's status in lower case for `poll` (`in_progress`, `finished`, `error`, …), and for `reconcile` `published` or the status seen.
 - **`notifications`:** F30 saves `post_published`, `post_failed` and `approval_invalidated` (the bell that shows them comes in F32).
-- **Test only:** the e2e stand-in Instagram keeps its pretend containers and media in `e2eFakeInstagram`, which exists only in `bytereel_test`.
+- **Test only:** the e2e stand-in Instagram keeps its pretend containers and media in `e2eFakeInstagram`, which exists only in `bytereel_test` (plus its `outage:<igUserId>` switch for the Check again test).
+- **Code review fixes (2026-11-26):**
+  - New field **`firstPublishAttemptedAt`** (date?, set with `$min` by the claim, kept when the claim is released and taken again): reconcile and Check again only accept media posted at or after it minus 60 s.
+  - **Unconfirmed post** = `publishAttemptedAt` set, `igMediaId` null, `state` not `published` (`isUnconfirmedPost`, `UNCONFIRMED_POST_FILTER`). While one exists for a project, H2 inserts nothing (`retry_instead`), so there is at most one; the project's newest post is that one (the `ownerId + createdAt` index serves the read).
+  - **Check again** (H6 reconcile-only) writes in ONE transaction either: post → `published` (+ media id/permalink, `publishedAt`), project → `published` (+1 `stateVersion`, not when archived), notification `post_published`, audit `post.published` (`data.via: "check_again"`); or `publishAttemptedAt` → null with audit `post.not_posted` (post state kept). Both are conditional on the post still being unconfirmed and in `publish_failed`/`approval_invalidated`/`cancelled`.
+  - `publishAttempts` rows from Check again have `jobAttempt: 0`, `step: "reconcile"`, `request.via: "check_again"`.
+  - `lastError` and `jobs.stages[].error` hold only the fixed plain line of `PUBLISH_FAILURES` (no technical detail).
+  - G3 to another `igUserId` reads `posts` for an in-flight post inside its transaction and is refused (nothing written) while one exists.
 
 #### 4.24 `notifications`
 **Purpose:** in-app messages for the bell and the banners on your next visit ("Your video is ready", "Post published", "Instagram needs reconnecting"). V1 sends no emails, so this is how ByteReel tells you things.
@@ -1421,7 +1428,7 @@ Long work runs in background steps (Inngest), each saved as it finishes: making 
 | `instagramConnections` | `ownerId` | Yes | One connection per user | ARCH §8.11 |
 | `instagramConnections` | `igUserId` where `status = active` (partial) | Yes | One ByteReel user per Instagram account | ARCH §8.11 |
 | `instagramConnections` | `{ status, tokenExpiresAt }` | No | Daily token refresh | ARCH §8.11 |
-| `posts` | `publishKey` | Yes | One approval publishes at most once | ARCH §8.12 |
+| `posts` | `publishKey` | Yes | One post document per approval (never-twice itself: post state, publish claim, unconfirmed rule) | ARCH §8.12 |
 | `posts` | `{ ownerId, createdAt: -1 }` | No | A user's posts | ARCH §8.12 |
 | `posts` | `{ state, scheduledAt }` | No | Find posts that are due | ARCH §8.12 |
 | `posts` | `projectId` where `state` ∈ {`scheduled`, `publishing`, `outcome_unknown`} (partial) | Yes | One live post per project | ARCH §8.12 + API A-14 (Q5) |

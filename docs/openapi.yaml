@@ -1956,7 +1956,9 @@ paths:
         409: STALE_VERSION, APPROVAL_STALE (render_not_current, mp4_hash_mismatch, connection_changed),
         INSTAGRAM_NOT_CONNECTED, INSTAGRAM_TOKEN_EXPIRED, INVALID_STATE, JOB_ALREADY_RUNNING.
         Each approval gets a new approval.id; publishKey = pub:{projectId}:{renderId}:{connectionId}:{approvalId}
-        (unique), so a re-approval makes a new post while the same approval can never publish twice.
+        (unique): one post document per approval. What stops a second reel is the post's state, the media_publish
+        claim and the unconfirmed-attempt rule (409 INVALID_STATE retry_instead: "We're still checking whether your
+        last post went live. Tap Check again first." while ANY earlier publish of the project may be live).
         As built (F30): only mode=now; mode=scheduled → 400 ("Scheduling is coming soon. Please choose Publish now.")
         until F31. The caption is cleaned like H7 (NFC), then 1–2,200 code points, not only spaces, ≤ 30 hashtags.
         Rate limit `publish` 10/hour shared with H6. INVALID_STATE details.reason: video_not_ready, already_published,
@@ -2147,7 +2149,7 @@ paths:
     post:
       operationId: retryPost
       summary: Retry a failed publish
-      description: H6. Only publish_failed. Re-checks the publish approval, including project not archived, user active, and the project's current render and current/approved plan still the approved ones (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED. As built (F30) — an approval_invalidated post → 409 APPROVAL_STALE (reason approval_invalidated, approve again with H2); the same job is queued again (attempt + 1); a good container (not ERROR/EXPIRED, under 23 h) is reused; a post whose media_publish may have gone out is checked on Instagram first (reconcile), so Try again never posts twice. Rate limit shared with H2.
+      description: H6. Check again (F30 code review) — for an unconfirmed post (media_publish sent, no media id) that is approval_invalidated, cancelled, or publish_failed with an approval that no longer matches, H6 only READS Instagram with a working token of the approved account (never a container, never media_publish) and answers 200 { outcome (published | not_posted | unknown), message, post }; no such token → 409 INSTAGRAM_NOT_CONNECTED. Otherwise Try again — only publish_failed. Re-checks the publish approval, including project not archived, user active, and the project's current render and current/approved plan still the approved ones (409 APPROVAL_STALE if anything changed). **Idempotency-Key required.** Rate limit 10/hour. 409 INVALID_STATE, INSTAGRAM_TOKEN_EXPIRED, INSTAGRAM_NOT_CONNECTED. As built (F30) — an approval_invalidated post → 409 APPROVAL_STALE (reason approval_invalidated, approve again with H2); the same job is queued again (attempt + 1); a good container (not ERROR/EXPIRED, under 23 h) is reused; a post whose media_publish may have gone out is checked on Instagram first (reconcile), so Try again never posts twice. Rate limit shared with H2.
       tags: [Publish]
       security:
         - sessionCookie: []
