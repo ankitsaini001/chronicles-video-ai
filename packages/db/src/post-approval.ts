@@ -27,6 +27,35 @@ export const OPEN_POST_STATES: readonly PostState[] = ["scheduled", "publish_fai
 /** A post being published right now: archive (C5), disconnect (G4) and account deletion (B3) wait. */
 export const IN_FLIGHT_POST_STATES: readonly PostState[] = ["publishing", "outcome_unknown"];
 
+/**
+ * F30 code review (MUST 1): "an unconfirmed attempt blocks every new approval". A post whose
+ * `media_publish` was sent (`publishAttemptedAt`) but never confirmed (`igMediaId` null) and that is
+ * not `published` may be live on Instagram. While such a post exists, H2 is refused (RETRY_INSTEAD)
+ * whatever the post's state, so a change + a new approval can never post the reel a second time.
+ */
+export function isUnconfirmedPost(post: Pick<PostDocument, "state" | "publishAttemptedAt" | "igMediaId">): boolean {
+  return post.publishAttemptedAt != null && post.igMediaId == null && post.state !== "published";
+}
+
+/** The settled states in which an unconfirmed post waits for "Check again" (H6). */
+export const CHECKABLE_POST_STATES: readonly PostState[] = ["publish_failed", "approval_invalidated", "cancelled"];
+
+/** An unconfirmed post that no job is working on: "Check again" (H6) is offered for it. */
+export function isCheckablePost(post: Pick<PostDocument, "state" | "publishAttemptedAt" | "igMediaId">): boolean {
+  return isUnconfirmedPost(post) && CHECKABLE_POST_STATES.includes(post.state);
+}
+
+/** MongoDB filter for unconfirmed posts (the same rule as isUnconfirmedPost). */
+export const UNCONFIRMED_POST_FILTER = { publishAttemptedAt: { $ne: null }, igMediaId: null, state: { $ne: "published" } } as const;
+
+/** The project's unconfirmed post, if any (at most one: H2 creates no post while one exists). */
+export async function findUnconfirmedPost(db: Db, input: { ownerId: ObjectId; projectId: ObjectId }, session?: ClientSession): Promise<PostDocument | null> {
+  return posts(db).findOne({ ownerId: input.ownerId, projectId: input.projectId, ...UNCONFIRMED_POST_FILTER } as Filter<PostDocument>, {
+    ...(session ? { session } : {}),
+    sort: { createdAt: -1, _id: -1 },
+  });
+}
+
 /** Why an approval was cancelled (stored on the post; plain words come from the notification). */
 export type InvalidationReason = "narration_edit" | "voice_switch" | "revision" | "restore" | "caption_fix" | "caption_edit" | "instagram_disconnected" | "instagram_account_changed";
 
@@ -54,7 +83,12 @@ export interface PostDocument {
   mode: PostMode;
   scheduledAt: Date | null;
   approval: PostApproval;
-  /** `pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (unique): one approval publishes at most once. */
+  /**
+   * `pub:{projectId}:{renderId}:{connectionId}:{approvalId}` (unique): at most ONE post document per
+   * approval. It does NOT by itself stop a second reel on Instagram: that is the post's state (conditional
+   * updates), the media_publish claim (`publishAttemptedAt`) and the unconfirmed-attempt rule (H2 refused
+   * while an earlier publish may be live).
+   */
   publishKey: string;
   state: PostState;
   jobId: ObjectId | null;
@@ -73,6 +107,11 @@ export interface PostDocument {
    * reconcile has checked Instagram (never twice).
    */
   publishAttemptedAt: Date | null;
+  /**
+   * When `media_publish` was FIRST sent for this post (kept when a claim is released and taken again).
+   * Reconcile only accepts media posted at or after this minus about a minute (clock allowance).
+   */
+  firstPublishAttemptedAt?: Date | null;
   attempts: number;
   nextAttemptAt: Date | null;
   lastError: { code: string; message: string; at: Date } | null;

@@ -69,7 +69,7 @@ export const INDEXES: readonly IndexDefinition[] = [
   },
   { collection: "instagramConnections", name: "status_tokenExpiresAt", keys: { status: 1, tokenExpiresAt: 1 }, options: {}, feature: "F28", why: "Find tokens about to expire (daily refresh, F32)" },
   // F30. The two unique ones are part of "never posts twice": apply them before the first real post.
-  { collection: "posts", name: "publishKey_unique", keys: { publishKey: 1 }, options: { unique: true }, feature: "F30", why: "One approval publishes at most once" },
+  { collection: "posts", name: "publishKey_unique", keys: { publishKey: 1 }, options: { unique: true }, feature: "F30", why: "One post document per approval (never-twice itself: post state, publish claim, unconfirmed rule)" },
   {
     collection: "posts",
     name: "projectId_live_unique",

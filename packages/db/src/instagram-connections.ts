@@ -11,8 +11,8 @@ import type { EncryptedToken } from "./token-crypto";
 //
 // F30: connecting a DIFFERENT account and disconnecting turn the user's `scheduled` and
 // `publish_failed` posts into `approval_invalidated` (+ a notification) inside the SAME transactions
-// below (DATABASE.md §7.2 rows 13 and 14). Disconnect is refused (InstagramBusyError → 409
-// INVALID_STATE) while one of the user's posts is being published (`publishing` / `outcome_unknown`).
+// below (DATABASE.md §7.2 rows 13 and 14). Disconnect, and connecting ANOTHER account, are refused
+// (InstagramBusyError) while one of the user's posts is being published (`publishing` / `outcome_unknown`).
 
 export const INSTAGRAM_CONNECTIONS_COLLECTION = "instagramConnections";
 export const INSTAGRAM_CONNECTION_SCHEMA_VERSION = 1;
@@ -77,11 +77,19 @@ export function eligibleAccountType(value: unknown): InstagramAccountType | null
   return INSTAGRAM_ACCOUNT_TYPES.find((t) => t === upper) ?? null;
 }
 
-/** G4 while a post is being published (`publishing` / `outcome_unknown`): 409 INVALID_STATE, try again in a few minutes. */
+/**
+ * G4 (and, since the F30 code review, G3 with ANOTHER account) while a post is being published
+ * (`publishing` / `outcome_unknown`): refused, try again in a few minutes. G4 answers 409
+ * INVALID_STATE; G3 goes back with `?instagram_error=INSTAGRAM_BUSY` (nothing saved).
+ */
 export class InstagramBusyError extends Error {
   override name = "InstagramBusyError";
-  constructor() {
-    super("A post is being published to Instagram right now. You can disconnect in a few minutes.");
+  constructor(action: "disconnect" | "switch" = "disconnect") {
+    super(
+      action === "switch"
+        ? "A post is being published to Instagram right now. You can connect another account in a few minutes."
+        : "A post is being published to Instagram right now. You can disconnect in a few minutes.",
+    );
   }
 }
 
@@ -150,6 +158,9 @@ async function saveOnce(db: Db, owner: ObjectId, input: InstagramConnectionToSav
       const taken = await connections(db).findOne({ igUserId: input.igUserId, status: "active", ownerId: { $ne: owner } }, { session, projection: { _id: 1 } });
       if (taken) throw new InstagramAccountInUseError();
       const existing = await connections(db).findOne({ ownerId: owner }, { session });
+      // F30 code review SHOULD 4: another account while a post is being published → refused (the
+      // running job reads Instagram with the approved account's token; switching would strand it).
+      if (existing && existing.igUserId !== input.igUserId && (await hasPostInFlight(db, { ownerId: owner }, session))) throw new InstagramBusyError("switch");
       const doc: InstagramConnectionDocument = {
         _id: existing?._id ?? new ObjectId(),
         ownerId: owner,

@@ -525,7 +525,9 @@ function memoryDb(docs: Doc[]) {
       return { matchedCount: doc ? 1 : 0 };
     },
   };
-  return { db: { collection: () => collection } as unknown as Db, docs, counts };
+  // A transaction here just runs its body (each call above is already atomic in this store).
+  const session = { withTransaction: async (fn: () => Promise<void>) => fn(), endSession: async () => undefined };
+  return { db: { collection: () => collection, client: { startSession: () => session } } as unknown as Db, docs, counts };
 }
 
 const OWNER_ID = new ObjectId(user.id);

@@ -1,27 +1,25 @@
 import {
   claimPublishCall,
   completePublishJob,
-  decryptToken,
   endPublishJob,
+  findReaderConnection,
   getDb,
   loadPublishContext,
   logPublishAttempt,
   markOutcomeUnknown,
   readDbConfig,
-  readTokenKeys,
   recheckPublishApproval,
   releasePublishClaim,
   savePublishContainer,
   setPublishProgress,
   startPublishAttempt,
-  tokenAad,
-  type InstagramConnectionDocument,
 } from "@bytereel/db";
 import { isStorageKey } from "@bytereel/storage";
 import type { Inngest } from "inngest";
 import { z } from "zod";
 import { instagramPublisherFromEnv, isFakeInstagram } from "@/lib/instagram/provider";
 import { FAKE_DELAYS, REAL_DELAYS, runPublishJob, type PublishJobStore } from "@/lib/publish/run-publish-job";
+import { connectionToken } from "@/lib/publish/token";
 import { storageFromEnv } from "@/lib/video/storage";
 import { POST_PUBLISH_REQUESTED } from "../client";
 
@@ -29,7 +27,10 @@ import { POST_PUBLISH_REQUESTED } from "../client";
 // video goes to Instagram as a Reel. The work itself is lib/publish/run-publish-job.ts; this file
 // connects it to Inngest, MongoDB, R2 (a private 1-hour link to the MP4) and Instagram (the real API,
 // or the stand-in on the test server).
-// - Concurrency: one run per post at a time (a Try again never overlaps an older run of the same post).
+// - Concurrency: one run per post at a time, which keeps runs tidy but is NOT what makes publishing
+//   safe: every write checks "this job, this attempt, still running", and media_publish is sent only
+//   after the post's claim (publishAttemptedAt, taken only while null, by the current attempt) succeeds.
+//   An older run that wakes up late finds its attempt gone and changes nothing.
 // - Retries: 3 per step (Inngest). A step that may have sent media_publish is never re-sent blindly:
 //   the post's claim makes the repeat go to reconcile.
 // - Events carry ids only: { jobId, projectId, ownerId, attempt, postId }.
@@ -63,15 +64,8 @@ function store(db: ReturnType<typeof getDb>): PublishJobStore {
     complete: (input) => completePublishJob(db, input),
     end: (input) => endPublishJob(db, input),
     log: (entry) => logPublishAttempt(db, entry),
+    reader: (post, now) => findReaderConnection(db, post, now),
   };
-}
-
-/** The creator's token, decrypted with its record binding (`${ownerId}:${igUserId}`). Never logged. */
-function token(connection: InstagramConnectionDocument): string {
-  const keys = readTokenKeys(process.env);
-  if (!keys.ok) throw new Error("The token keys are not set up.");
-  if (!connection.accessToken) throw new Error("The connection has no token.");
-  return decryptToken(connection.accessToken, keys.keys, tokenAad(connection.ownerId, connection.igUserId));
 }
 
 async function videoUrl(mp4Key: string): Promise<string> {
@@ -87,6 +81,7 @@ export function createPublishPostFunction(inngest: Inngest) {
       id: "publish-post",
       name: "Publish to Instagram",
       triggers: [{ event: POST_PUBLISH_REQUESTED }],
+      // Tidiness only: the safety comes from the claim's attempt check (claimPublishCall), not from this.
       concurrency: [{ key: "event.data.postId", limit: 1 }],
       retries: 3,
       timeouts: { start: "30m", finish: "1h" },
@@ -103,7 +98,7 @@ export function createPublishPostFunction(inngest: Inngest) {
             const setup = instagramPublisherFromEnv(db, process.env);
             return setup.ok ? { ok: true, publisher: setup.publisher } : { ok: false, problems: setup.problems };
           },
-          token,
+          token: connectionToken,
           videoUrl,
           delays: isFakeInstagram(process.env) ? FAKE_DELAYS : REAL_DELAYS,
         },

@@ -584,6 +584,21 @@ describe("saveInstagramConnection: one transaction, one account per user both wa
     expect(fake.calls.find((c) => c.name === "auditLogs.insertOne")!.args[0].data).toMatchObject({ reconnected: true, sameAccount: true });
   });
 
+  it("F30 review: ANOTHER account while a post is being published → InstagramBusyError, nothing written; the same account still reconnects", async () => {
+    const other = existingDoc({ igUserId: "17841499999999999" });
+    const busy = fakeDb({ "instagramConnections.findOne": (f: any) => (f.ownerId?.$ne ? null : other), "posts.findOne": () => ({ _id: new ObjectId() }) });
+    const error = await saveInstagramConnection(busy.db, OWNER, toSave(), NOW).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InstagramBusyError);
+    expect((error as Error).message).toContain("connect another account in a few minutes");
+    expect(busy.calls.find((c) => c.name === "posts.findOne")!.args[0]).toEqual({ ownerId: OWNER, state: { $in: ["publishing", "outcome_unknown"] } });
+    expect(busy.names().filter((n) => !n.endsWith("findOne"))).toEqual([]);
+    // The same account: no in-flight check, nothing refused (the running job keeps its reader token).
+    const same = fakeDb({ "instagramConnections.findOne": (f: any) => (f.ownerId?.$ne ? null : existingDoc()), "instagramConnections.replaceOne": () => ({}), "auditLogs.insertOne": () => ({}) });
+    await saveInstagramConnection(same.db, OWNER, toSave(), NOW);
+    expect(same.names()).not.toContain("posts.findOne");
+    expect(instagramNotice({ instagram_error: "INSTAGRAM_BUSY" })?.text).toBe("Your reel is being posted right now. Please connect the other account in a few minutes.");
+  });
+
   it("another user has it active → InstagramAccountInUseError, nothing written", async () => {
     const fake = fakeDb({ "instagramConnections.findOne": (f: any) => (f.ownerId?.$ne ? { _id: new ObjectId() } : null) });
     await expect(saveInstagramConnection(fake.db, OWNER, toSave(), NOW)).rejects.toBeInstanceOf(InstagramAccountInUseError);

@@ -11,6 +11,7 @@ export const INSTAGRAM_MESSAGES = {
   connected: "Instagram connected.",
   ineligible: "This Instagram account is personal. Switch it to a Creator or Business account in Instagram settings, then connect again. Download still works.",
   inUse: `This Instagram account is already connected to another ${SITE.name} account.`,
+  busy: "Your reel is being posted right now. Please connect the other account in a few minutes.",
   denied: "You cancelled on Instagram, so nothing was connected. You can connect any time.",
   invalidState: "That Instagram login took too long or was started somewhere else. Please connect again.",
   exchangeFailed: "Instagram didn't finish connecting. Please try again in a few minutes.",
@@ -34,6 +35,8 @@ export function instagramNotice(query: Query): InstagramNotice | null {
       return { tone: "problem", text: INSTAGRAM_MESSAGES.ineligible };
     case "INSTAGRAM_ACCOUNT_IN_USE":
       return { tone: "problem", text: INSTAGRAM_MESSAGES.inUse };
+    case "INSTAGRAM_BUSY":
+      return { tone: "problem", text: INSTAGRAM_MESSAGES.busy };
     case "RATE_LIMITED":
       return { tone: "problem", text: INSTAGRAM_MESSAGES.rateLimited };
     case "INSTAGRAM_OAUTH_FAILED":

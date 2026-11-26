@@ -3,6 +3,7 @@ import {
   eligibleAccountType,
   encryptToken,
   InstagramAccountInUseError,
+  InstagramBusyError,
   tokenAad,
   type InstagramConnectionDocument,
   type InstagramConnectionToSave,
@@ -29,7 +30,8 @@ import { parseReturnTo, signState, verifyState, type ReturnTo } from "./state";
 // Instagram; a token without the publishing permission is not saved (`reason=missing_permission`);
 // the token is encrypted bound to `${ownerId}:${igUserId}`.
 
-export type InstagramErrorCode = "INSTAGRAM_ACCOUNT_INELIGIBLE" | "INSTAGRAM_ACCOUNT_IN_USE" | "INSTAGRAM_OAUTH_FAILED" | "RATE_LIMITED";
+// F30 review: INSTAGRAM_BUSY = another account while a post is being published (nothing saved).
+export type InstagramErrorCode = "INSTAGRAM_ACCOUNT_INELIGIBLE" | "INSTAGRAM_ACCOUNT_IN_USE" | "INSTAGRAM_BUSY" | "INSTAGRAM_OAUTH_FAILED" | "RATE_LIMITED";
 export type OAuthFailReason = "access_denied" | "invalid_state" | "exchange_failed" | "not_set_up" | "missing_permission";
 
 /** Where `settings` goes until F33 builds the Settings page. */
@@ -207,6 +209,7 @@ export async function finishConnect(request: Request, deps: InstagramFlowDeps): 
         scopes: granted ?? [],
       });
     } catch (error) {
+      if (error instanceof InstagramBusyError) return redirect(withQuery(back, errorQuery("INSTAGRAM_BUSY")), requestId);
       if (!(error instanceof InstagramAccountInUseError)) throw error;
       return redirect(withQuery(back, errorQuery("INSTAGRAM_ACCOUNT_IN_USE")), requestId);
     }

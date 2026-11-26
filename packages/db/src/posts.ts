@@ -9,6 +9,9 @@ import { insertNotifications, newNotification, POST_NOTIFICATIONS } from "./noti
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./plan-versions";
 import {
   captionHash,
+  CHECKABLE_POST_STATES,
+  findUnconfirmedPost,
+  isCheckablePost,
   LIVE_POST_STATES,
   latestPostOf,
   POST_SCHEMA_VERSION,
@@ -88,7 +91,9 @@ export const POST_MESSAGES = {
   ALREADY_PUBLISHED: "This video is already on Instagram.",
   PUBLISHING: "This video is being published right now.",
   LIVE_POST: "This video already has a post on its way.",
-  RETRY_INSTEAD: "Please use Try again: it checks Instagram first, so your reel is never posted twice.",
+  RETRY_INSTEAD: "We're still checking whether your last post went live. Tap Check again first.",
+  CHECK_NOT_NEEDED: "This post doesn't need checking.",
+  CHECK_RECONNECT: "Please connect the Instagram account you approved this post for, then tap Check again.",
   VIDEO_CHANGED: "The video changed after you approved it. Please review and approve again.",
   ACCOUNT_CHANGED: "Your Instagram account changed. Please review and approve again.",
   NOT_CONNECTED: "Please connect your Instagram first.",
@@ -318,8 +323,9 @@ export type ApprovePostResult = { post: PostDocument; job: JobDocument; project:
 /**
  * H2 "Publish now" (approval #2; API.md H2, §9; DATABASE.md §7.2 row 9), ONE transaction. Refusals,
  * in order: 404 · archived / published / publishing (409 INVALID_STATE) · a job running (409
- * JOB_ALREADY_RUNNING) · another tab (409 STALE_VERSION) · not on the publish step (409) · a post
- * already on its way (409) · a failed post whose publish may have gone out (409: use Try again) ·
+ * JOB_ALREADY_RUNNING) · ANY post of the project whose publish may have gone out and isn't confirmed
+ * (409 INVALID_STATE `retry_instead`: Check again first, whatever that post's state) · another tab
+ * (409 STALE_VERSION) · not on the publish step (409) · a post already on its way (409) ·
  * the video isn't the current, ready one made from the approved storyboard (409 APPROVAL_STALE
  * render_not_current) · another MP4 (mp4_hash_mismatch) · no active Instagram connection (409
  * INSTAGRAM_NOT_CONNECTED) · another connection (APPROVAL_STALE connection_changed) · an expired
@@ -354,6 +360,12 @@ export async function approvePost(
       if (project.state === "published") throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.ALREADY_PUBLISHED, { state: project.state, reason: "already_published" });
       if (project.state === "publishing") throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.PUBLISHING, { state: project.state });
       if (project.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step.", { activeJobId: project.activeJobId.toHexString() });
+      // Code review MUST 1: an earlier publish that may be live blocks EVERY new approval, whatever
+      // that post's state (publish_failed, approval_invalidated, cancelled): "Check again" (H6) first.
+      const unconfirmed = await findUnconfirmedPost(db, { ownerId, projectId: project._id }, session);
+      if (unconfirmed && !LIVE_POST_STATES.includes(unconfirmed.state)) {
+        throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.RETRY_INSTEAD, { reason: "retry_instead", postId: unconfirmed._id.toHexString() });
+      }
       if (project.stateVersion !== body.expectedStateVersion) {
         throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", { expectedStateVersion: body.expectedStateVersion, currentStateVersion: project.stateVersion });
       }
@@ -362,9 +374,6 @@ export async function approvePost(
       }
       const latest = await latestPostOf(db, { ownerId, projectId: project._id }, session);
       if (latest && LIVE_POST_STATES.includes(latest.state)) throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.LIVE_POST, { postState: latest.state });
-      if (latest?.state === "publish_failed" && latest.publishAttemptedAt) {
-        throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.RETRY_INSTEAD, { reason: "retry_instead", postId: latest._id.toHexString() });
-      }
 
       const renderId = new ObjectId(body.renderId);
       const render = await db.collection<RenderDocument>(RENDERS_COLLECTION).findOne({ _id: renderId, ownerId, projectId: project._id }, { session });
@@ -452,7 +461,8 @@ export async function approvePost(
       }
     });
   } catch (error) {
-    // Two separate approvals at the same moment: the one-live-post index (or the publish key) stops the second.
+    // Two separate approvals at the same moment: the one-live-post index stops the second (the publish
+    // key only keeps one post document per approval).
     if (isDuplicateKey(error)) throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.LIVE_POST, { reason: "live_post" });
     throw error;
   } finally {
@@ -669,7 +679,8 @@ export async function claimPublishCall(db: Db, input: { postId: ObjectId; jobId:
       if (!job) return;
       const result = await posts(db).updateOne(
         { _id: input.postId, jobId: input.jobId, state: "publishing", publishAttemptedAt: null, igMediaId: null },
-        { $set: { publishAttemptedAt: now, updatedAt: now } },
+        // `firstPublishAttemptedAt` keeps the FIRST send (reconcile's time window starts there).
+        { $set: { publishAttemptedAt: now, updatedAt: now }, $min: { firstPublishAttemptedAt: now } },
         { session },
       );
       claimed = result.modifiedCount === 1;
@@ -776,7 +787,7 @@ export async function completePublishJob(db: Db, input: { jobId: ObjectId; attem
  */
 export async function endPublishJob(
   db: Db,
-  input: { jobId: ObjectId; attempt?: number; failure: PublishFailure; stage?: PublishStage; detail?: string; staleBefore?: Date; queuedBefore?: Date; now?: Date },
+  input: { jobId: ObjectId; attempt?: number; failure: PublishFailure; stage?: PublishStage; staleBefore?: Date; queuedBefore?: Date; now?: Date },
 ): Promise<boolean> {
   const now = input.now ?? new Date();
   const { code, message, retryable } = PUBLISH_FAILURES[input.failure];
@@ -799,7 +810,9 @@ export async function endPublishJob(
       );
       if (!job) return;
       const stageName = input.stage ?? (job.stages.find((s) => s.status === "running")?.name as PublishStage | undefined) ?? "approve";
-      const stageError = { code, message: (input.detail ?? message).slice(0, 300) };
+      // Code review SHOULD 3: the stage error and lastError are the fixed plain line. Technical detail
+      // goes only to the server log and publishAttempts (never env names, never Meta's own text).
+      const stageError = { code, message };
       await jobs.updateOne(
         { _id: job._id, attempt: job.attempt, state: job.state },
         {
@@ -834,4 +847,119 @@ export async function endPublishJob(
     await session.endSession();
   }
   return ended;
+}
+
+// ---------- reading Instagram for an unconfirmed post (reconcile and "Check again") ----------
+
+/**
+ * Code review SHOULD 4: reconcile only READS Instagram, so it needs a working token for the account
+ * the post was approved for (`approval.igUserId`), not the full approval re-check (which still guards
+ * create_container and media_publish). Null when there is none (disconnected, expired, another account).
+ */
+export async function findReaderConnection(db: Db, post: Pick<PostDocument, "ownerId" | "approval">, now: Date = new Date()): Promise<InstagramConnectionDocument | null> {
+  return db.collection<InstagramConnectionDocument>(INSTAGRAM_CONNECTIONS_COLLECTION).findOne({
+    ownerId: post.ownerId,
+    igUserId: post.approval.igUserId,
+    status: "active",
+    accessToken: { $exists: true },
+    tokenExpiresAt: { $gt: now },
+  });
+}
+
+/**
+ * H6's mode for this post (code review MUST 1). `check`: the post is unconfirmed (its publish may be
+ * live) and can't simply be tried again — it is `approval_invalidated` / `cancelled`, or `publish_failed`
+ * with an approval that no longer matches — so H6 ONLY looks at Instagram ("Check again"): it never
+ * creates a container or calls media_publish. `retry`: the normal Try again (a valid `publish_failed`
+ * post; its job reconciles first when a publish may have gone out).
+ */
+export async function postRetryMode(db: Db, post: PostDocument, now: Date = new Date()): Promise<"check" | "retry"> {
+  if (!isCheckablePost(post)) return "retry";
+  if (post.state !== "publish_failed") return "check";
+  const recheck = await recheckPublishApproval(db, post, now);
+  return !recheck.ok && recheck.failure === "approval_stale" ? "check" : "retry";
+}
+
+const CHECKABLE_FILTER = (post: { _id: ObjectId; ownerId: ObjectId }) => ({
+  _id: post._id,
+  ownerId: post.ownerId,
+  publishAttemptedAt: { $ne: null },
+  igMediaId: null,
+  state: { $in: [...CHECKABLE_POST_STATES] },
+});
+
+export type CheckedPost = { post: PostDocument; project: ProjectDocument | null };
+
+/**
+ * "Check again" found the reel live, ONE transaction: post → `published` (media id and permalink,
+ * both null when Instagram said PUBLISHED but the media wasn't in the list), the project → `published`
+ * (+1 stateVersion; an archived project stays archived), notification `post_published`, audit
+ * `post.published` (`via: check_again`). Refused (409 JOB_ALREADY_RUNNING, nothing saved) while
+ * another job runs on the project: the flag stays and blocks new approvals until it is saved.
+ * Null when the post is no longer unconfirmed (checked or published meanwhile).
+ */
+export async function confirmCheckedPost(db: Db, input: { ownerId: string; postId: string; mediaId: string | null; permalink: string | null; now?: Date }): Promise<CheckedPost | null> {
+  const now = input.now ?? new Date();
+  if (!isHex(input.ownerId) || !isHex(input.postId)) return null;
+  const ids = { _id: new ObjectId(input.postId), ownerId: new ObjectId(input.ownerId) };
+  const session = db.client.startSession();
+  let result: CheckedPost | null = null;
+  try {
+    await session.withTransaction(async () => {
+      result = null;
+      const current = await posts(db).findOne(CHECKABLE_FILTER(ids), { session });
+      if (!current) return;
+      const projects = db.collection<ProjectDocument>(PROJECTS_COLLECTION);
+      const project = await projects.findOne({ _id: current.projectId, ownerId: ids.ownerId }, { session });
+      if (project?.activeJobId) throw new ProjectActionError("JOB_ALREADY_RUNNING", "We're still working on the previous step. Please tap Check again in a minute.");
+      const post = await posts(db).findOneAndUpdate(
+        CHECKABLE_FILTER(ids),
+        { $set: { state: "published", igMediaId: input.mediaId, permalink: input.permalink, publishedAt: now, lastError: null, nextAttemptAt: null, updatedAt: now } },
+        { session, returnDocument: "after" },
+      );
+      if (!post) return;
+      const moved =
+        project && project.state !== "archived"
+          ? await projects.findOneAndUpdate(
+              { _id: project._id, ownerId: ids.ownerId, activeJobId: null, stateVersion: project.stateVersion },
+              { $set: { state: "published", lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
+              { session, returnDocument: "after" },
+            )
+          : project;
+      if (project && project.state !== "archived" && !moved) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.");
+      const words = POST_NOTIFICATIONS.post_published(project?.title ?? "Your video", post.destination.username);
+      await insertNotifications(db, session, [newNotification({ ownerId: ids.ownerId, type: "post_published", projectId: post.projectId, postId: post._id, ...words, now })]);
+      await audit(db, session, { actorId: ids.ownerId, action: "post.published", postId: post._id, data: { projectId: post.projectId, igMediaId: input.mediaId, igUserId: post.approval.igUserId, via: "check_again" }, now });
+      result = { post, project: moved };
+    });
+  } finally {
+    await session.endSession();
+  }
+  return result;
+}
+
+/**
+ * "Check again" proved the reel was NOT posted (the container never reached PUBLISHED and the media is
+ * not in the account's recent list): the unconfirmed flag is cleared, ONE transaction with audit
+ * `post.not_posted`. The post keeps its state: a valid `publish_failed` post can be tried again, any
+ * other lets the creator approve again (H2). Null when the post is no longer unconfirmed.
+ */
+export async function clearCheckedPost(db: Db, input: { ownerId: string; postId: string; now?: Date }): Promise<PostDocument | null> {
+  const now = input.now ?? new Date();
+  if (!isHex(input.ownerId) || !isHex(input.postId)) return null;
+  const ids = { _id: new ObjectId(input.postId), ownerId: new ObjectId(input.ownerId) };
+  const session = db.client.startSession();
+  let result: PostDocument | null = null;
+  try {
+    await session.withTransaction(async () => {
+      result = null;
+      const post = await posts(db).findOneAndUpdate(CHECKABLE_FILTER(ids), { $set: { publishAttemptedAt: null, updatedAt: now } }, { session, returnDocument: "after" });
+      if (!post) return;
+      await audit(db, session, { actorId: ids.ownerId, action: "post.not_posted", postId: post._id, data: { projectId: post.projectId, igUserId: post.approval.igUserId, via: "check_again" }, now });
+      result = post;
+    });
+  } finally {
+    await session.endSession();
+  }
+  return result;
 }

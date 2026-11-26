@@ -4,7 +4,7 @@ import { cleanIdeaText, IDEA_MAX_CHARS, IDEA_MIN_CHARS, IDEA_TOPIC_MAX_CHARS } f
 import { finishIdempotencyInTransaction, type IdempotencyLock } from "./idempotency";
 import { isLanguageEnabled, LANGUAGES, languageUnavailableMessage, type Language } from "./languages";
 import { canRetryPlanJob, JOBS_COLLECTION, newPlanJob, planInputHash, toJobResource, type JobDocument, type JobResource, type JobType } from "./jobs";
-import { toPostSummary, type PostDocument, type PostSummaryResource } from "./post-approval";
+import { isCheckablePost, toPostSummary, type PostDocument, type PostSummaryResource } from "./post-approval";
 import { addUsageWithinLimit } from "./usage-counters";
 import { USAGE_LIMITS } from "./usage";
 
@@ -270,7 +270,12 @@ export function allowedActionsFor(
   doc: ProjectDocument,
   latestPlanJob: JobDocument | null | undefined,
   latestReviseJob?: JobDocument | null,
-  more: { activeJob?: JobDocument | null; latestGenerateJob?: JobDocument | null; latestCaptionJob?: JobDocument | null; latestPost?: Pick<PostDocument, "state"> | null } = {},
+  more: {
+    activeJob?: JobDocument | null;
+    latestGenerateJob?: JobDocument | null;
+    latestCaptionJob?: JobDocument | null;
+    latestPost?: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "publishAttemptedAt" | "igMediaId">>) | null;
+  } = {},
 ): AllowedAction[] {
   if (doc.state === "archived") return [];
   if (doc.activeJobId) {
@@ -284,9 +289,14 @@ export function allowedActionsFor(
   return actions;
 }
 
-/** F30: publishing actions (they cost no AI or voice, so the language switch doesn't remove them). */
-function postActionsFor(doc: ProjectDocument, latestPost: Pick<PostDocument, "state"> | null): AllowedAction[] {
+/**
+ * F30: publishing actions (they cost no AI or voice, so the language switch doesn't remove them).
+ * An unconfirmed post (its publish may be live) blocks every new approval: only "Check again"
+ * (`retry_post`, H6) is offered until it is confirmed or proven not posted (code review MUST 1).
+ */
+function postActionsFor(doc: ProjectDocument, latestPost: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "publishAttemptedAt" | "igMediaId">>) | null): AllowedAction[] {
   if (!doc.currentRenderId) return [];
+  if (latestPost && isCheckablePost({ state: latestPost.state, publishAttemptedAt: latestPost.publishAttemptedAt ?? null, igMediaId: latestPost.igMediaId ?? null })) return ["retry_post"];
   if (doc.state === "video_ready") return ["publish"];
   if ((doc.state === "publish_failed" || doc.state === "scheduled") && latestPost?.state === "approval_invalidated") return ["publish"];
   if (doc.state === "publish_failed" && latestPost?.state === "publish_failed") return ["retry_post"];

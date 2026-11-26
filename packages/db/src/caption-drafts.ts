@@ -182,9 +182,10 @@ export async function saveCaptionDraft(
 }
 
 /**
- * The one conditional save of a caption draft (H1, H7). In `video_ready` a single atomic update. In
- * `publish_failed` (F30) ONE transaction: the same conditional update, then, when the saved text (NFC)
- * differs from the failed post's approved caption, that post → `approval_invalidated` + notification.
+ * The one conditional save of a caption draft (H1, H7), ONE transaction: the project's state is read,
+ * then the conditional update on that state (`video_ready` or `publish_failed`). In `publish_failed`
+ * (F30), when the saved text (NFC) differs from the failed post's approved caption, that post →
+ * `approval_invalidated` + notification in the same transaction.
  * True when the draft was saved.
  */
 async function saveDraftWhere(
@@ -192,18 +193,21 @@ async function saveDraftWhere(
   input: { ownerId: ObjectId; projectId: ObjectId; draft: CaptionDraftDocument; filter: Filter<ProjectDocument>; update: UpdateFilter<ProjectDocument> },
 ): Promise<boolean> {
   const projects = db.collection<ProjectDocument>(PROJECTS_COLLECTION);
-  const current = await projects.findOne({ _id: input.projectId, ownerId: input.ownerId }, { projection: { state: 1 } });
-  if (current?.state !== "publish_failed") {
-    const result = await projects.updateOne({ _id: input.projectId, ownerId: input.ownerId, state: "video_ready", ...input.filter }, input.update);
-    return result.matchedCount === 1;
-  }
+  // F30 code review (nit 7): the state is read INSIDE the transaction, so the save and the approval
+  // cancel can never act on a state that changed in between.
   const session = db.client.startSession();
   let saved = false;
   try {
     await session.withTransaction(async () => {
       saved = false;
-      const result = await projects.updateOne({ _id: input.projectId, ownerId: input.ownerId, state: "publish_failed", ...input.filter }, input.update, { session });
+      const current = await projects.findOne({ _id: input.projectId, ownerId: input.ownerId }, { session, projection: { state: 1 } });
+      if (current?.state !== "video_ready" && current?.state !== "publish_failed") return;
+      const result = await projects.updateOne({ _id: input.projectId, ownerId: input.ownerId, state: current.state, ...input.filter }, input.update, { session });
       if (result.matchedCount !== 1) return;
+      if (current.state === "video_ready") {
+        saved = true;
+        return;
+      }
       await invalidateOpenPosts(db, session, {
         ownerId: input.ownerId,
         projectId: input.projectId,

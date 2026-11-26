@@ -80,11 +80,13 @@ export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Da
     }
   } else if (job.type === "publish") {
     if (job.state === "running" && at - job.updatedAt.getTime() >= STUCK_JOB_RULES.runningStaleMs) {
-      await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", detail: "No progress for 10 minutes (stuck-job rule)", staleBefore: new Date(at - STUCK_JOB_RULES.runningStaleMs), now });
+      // No progress for 10 minutes (stuck-job rule): the plain "Something went wrong" line, retryable.
+      await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", staleBefore: new Date(at - STUCK_JOB_RULES.runningStaleMs), now });
       return { job: await reload(), resendEventId: null };
     }
     if (job.state === "queued" && at - job.queuedAt.getTime() >= STUCK_JOB_RULES.queuedGiveUpMs) {
-      await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", stage: "approve", detail: "Never started (stuck-job rule)", queuedBefore: new Date(at - STUCK_JOB_RULES.queuedGiveUpMs), now });
+      // Never started (stuck-job rule).
+      await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", stage: "approve", queuedBefore: new Date(at - STUCK_JOB_RULES.queuedGiveUpMs), now });
       return { job: await reload(), resendEventId: null };
     }
   } else {

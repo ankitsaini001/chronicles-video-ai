@@ -17,6 +17,8 @@ import { CaptionBox, type CaptionDraftView } from "./CaptionBox";
 // Publish now (H2) first saves the caption (H7), then sends the exact video (renderId + its MP4
 // fingerprint), the account (connectionId) and the caption with a new Idempotency-Key (kept for a
 // repeat of the same click, like Try again elsewhere). Success → the page shows the progress view.
+// F30 code review: the page mounts a new form (React `key`) when the video or the account changes, so
+// the tick can't carry over; a refused Publish and any caption change untick it.
 // `again`: the earlier approval was cancelled (or the post must be approved again): a note says so.
 
 export type PublishFormProps = {
@@ -46,8 +48,10 @@ export function PublishForm(props: PublishFormProps) {
     if (shownCaption.current === text) return;
     shownCaption.current = text;
     setCaption(text);
-    // The creator approves exactly what is on screen: a different caption needs a new tick.
+    // The creator approves exactly what is on screen: a different caption needs a new tick (and is a
+    // new request, so a new Idempotency-Key).
     setApproved(false);
+    key.current = null;
   }, []);
 
   const length = postCaptionLength(caption);
@@ -58,17 +62,23 @@ export function PublishForm(props: PublishFormProps) {
     if (!canPublish) return;
     setBusy(true);
     setProblem(null);
-    await flushRef.current?.();
+    // The key is made for THIS click before anything is awaited (code review nit), so a second click
+    // during the caption save reuses it, and the request is sent with exactly the caption ticked.
     key.current ??= newIdempotencyKey();
+    const idempotencyKey = key.current;
+    const approvedCaption = caption;
+    await flushRef.current?.();
     const answer = await apiSend(
       "POST",
       `/api/v1/projects/${props.projectId}/posts`,
-      { mode: "now", renderId: props.renderId, mp4Sha256: props.mp4Sha256, connectionId: props.connectionId, caption, expectedStateVersion: props.stateVersion },
-      { "Idempotency-Key": key.current },
+      { mode: "now", renderId: props.renderId, mp4Sha256: props.mp4Sha256, connectionId: props.connectionId, caption: approvedCaption, expectedStateVersion: props.stateVersion },
+      { "Idempotency-Key": idempotencyKey },
     );
     if (answer.ok) return router.refresh();
     // A refused click may be tried again with a new key; a lost answer keeps the same one.
     if (answer.status > 0 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") key.current = null;
+    // Any refused Publish needs a new, deliberate tick (code review MUST 2).
+    setApproved(false);
     setBusy(false);
     setProblem({ text: answer.message, refresh: answer.code === "STALE_VERSION" || answer.code === "APPROVAL_STALE" || answer.code === "INVALID_STATE" });
   }

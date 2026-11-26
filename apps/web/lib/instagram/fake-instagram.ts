@@ -90,6 +90,10 @@ export function fakeAuthorizePage(callbackUrl: string, state: string): string {
 //                   time: the job must find it by reconciling and must never publish again
 //   [e2e:limit]     the FIRST media_publish of a container is refused with Instagram's daily-limit
 //                   error (code 9 / 2207042); a later one works (the limit "lifted": Try again)
+//   [e2e:dropped]   the FIRST media_publish gets no answer (a timeout) and did NOT post anything
+// An "outage" for one account (a document `{ _id: "outage:<igUserId>" }` that the e2e check adds and
+// removes): reading the recent media and the status of an already PUBLISHED container fail with 503,
+// so reconcile can't tell what happened (the job then ends "unconfirmed" → Check again).
 // Its "Instagram" lives in the TEST database's `e2eFakeInstagram` collection (containers and posted
 // media), so the e2e check can count the reels that went live. It only ever runs on bytereel_test
 // (provider.ts). The video link is never fetched, stored or printed.
@@ -109,7 +113,9 @@ type FakeDoc = {
   count?: number;
 };
 
-const scenarioOf = (caption: string) => /\[e2e:(slow|error|busy|lost|limit)\]/.exec(caption)?.[1] ?? "ok";
+const scenarioOf = (caption: string) => /\[e2e:(slow|error|busy|lost|limit|dropped)\]/.exec(caption)?.[1] ?? "ok";
+/** The e2e check's "Instagram can't be read for this account" switch. */
+export const fakeOutageId = (igUserId: string) => `outage:${igUserId}`;
 const TOKEN_OK = /^e2e-long\./;
 const digits = (n: number) => Array.from(randomBytes(n), (b) => String(b % 10)).join("");
 
@@ -141,7 +147,10 @@ export class FakeInstagramPublisher implements InstagramPublisher {
     this.checkToken("container_status", input.accessToken);
     const container = await this.docs.findOneAndUpdate({ _id: `container:${input.containerId}`, kind: "container" }, { $inc: { checks: 1 } }, { returnDocument: "after" });
     if (!container) throw new InstagramPublishError("container_status", "rejected", 400, 24, 2207008);
-    if (container.status === "PUBLISHED") return { statusCode: "PUBLISHED", status: null };
+    if (container.status === "PUBLISHED") {
+      if (await this.outage(container.igUserId)) throw new InstagramPublishError("container_status", "unavailable", 503, 2, null);
+      return { statusCode: "PUBLISHED", status: null };
+    }
     const scenario = scenarioOf(container.caption ?? "");
     const checks = container.checks ?? 1;
     const statusCode = scenario === "error" ? "ERROR" : checks <= (scenario === "slow" ? 3 : 1) ? "IN_PROGRESS" : "FINISHED";
@@ -157,6 +166,8 @@ export class FakeInstagramPublisher implements InstagramPublisher {
     if (container.status !== "FINISHED") throw new InstagramPublishError("media_publish", "rejected", 400, 9007, 2207027);
     const scenario = scenarioOf(container.caption ?? "");
     if (scenario === "limit" && (container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "rejected", 400, 9, 2207042);
+    // The first publish of a "dropped" post never reaches Instagram's posting, and its answer is lost.
+    if (scenario === "dropped" && (container.publishCalls ?? 1) === 1) throw new InstagramPublishError("media_publish", "timeout");
     const mediaId = `1791${digits(13)}`;
     // Instagram's own rule: a container is published once; it is PUBLISHED from now on.
     const claimed = await this.docs.updateOne({ _id: container._id, status: "FINISHED" }, { $set: { status: "PUBLISHED" } });
@@ -180,8 +191,13 @@ export class FakeInstagramPublisher implements InstagramPublisher {
     return (await this.docs.findOne({ _id: `media:${input.mediaId}`, kind: "media" }))?.permalink ?? null;
   }
 
+  private async outage(igUserId: string | undefined): Promise<boolean> {
+    return igUserId !== undefined && (await this.docs.countDocuments({ _id: fakeOutageId(igUserId) })) > 0;
+  }
+
   async recentMedia(input: { igUserId: string; accessToken: string }): Promise<RecentMedia[]> {
     this.checkToken("recent_media", input.accessToken);
+    if (await this.outage(input.igUserId)) throw new InstagramPublishError("recent_media", "unavailable", 503, 2, null);
     const media = await this.docs.find({ kind: "media", igUserId: input.igUserId }).sort({ timestamp: -1 }).limit(25).toArray();
     return media.map((m) => ({ id: m._id.slice("media:".length), caption: m.caption ?? null, timestamp: m.timestamp ?? null, permalink: m.permalink ?? null }));
   }

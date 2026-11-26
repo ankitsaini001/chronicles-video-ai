@@ -1,7 +1,20 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { addInvite, closeMongoClient, ensureIndexes, getDb, indexesForFeatures, PUBLISH_FAILURES, readDbConfig, type PostDocument, type ProjectDocument, type RenderDocument } from "@bytereel/db";
+import {
+  addInvite,
+  closeMongoClient,
+  endPublishJob,
+  ensureIndexes,
+  getDb,
+  indexesForFeatures,
+  POST_MESSAGES,
+  PUBLISH_FAILURES,
+  readDbConfig,
+  type PostDocument,
+  type ProjectDocument,
+  type RenderDocument,
+} from "@bytereel/db";
 import { ObjectId } from "mongodb";
 
 /**
@@ -28,6 +41,13 @@ import { ObjectId } from "mongodb";
  * again → published (same container, ONE reel; a replayed Try again changes nothing); a change during
  * processing → the re-check stops it (nothing posted, approve again); a narration edit (D3), archive
  * (C5) and Disconnect (G4) cancel a failed post's approval.
+ * F30 code review (MUST 1, "an unconfirmed attempt blocks every new approval"): with an "outage" on the
+ * stand-in (Instagram can't be read after the publish) the job can't confirm; the check ends it
+ * "unconfirmed" exactly like the stuck-job rule would (endPublishJob). While it is in flight, connecting
+ * ANOTHER account (G3) is refused. Then a caption edit and a narration edit cancel the approval, yet a
+ * new approval (H2) is refused with "Tap Check again first"; the page shows Check again. (A) It went
+ * live: Check again (H6, reads only) saves it as published, still ONE reel. (B) [e2e:dropped] (nothing
+ * posted): Check again proves it, approving again works and posts exactly once.
  *
  * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
  *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
@@ -194,10 +214,14 @@ async function seedReadyProject(ownerId: ObjectId, title: string): Promise<Seede
 
 /** Connect a Creator account through the Instagram stand-in (G2 → stand-in → G3). */
 async function connect(t: Tester, projectId: string): Promise<boolean> {
+  return (await connectAs(t, projectId, `${t.label}${tag}`)).includes("instagram=connected");
+}
+/** G2 → stand-in → G3 with a chosen account name; returns where the callback sends the creator. */
+async function connectAs(t: Tester, projectId: string, account: string): Promise<string> {
   const start = await get(t.cookie, `/api/v1/instagram/connect?returnTo=${encodeURIComponent(`publish:${projectId}`)}`);
   const state = start.location ? (new URL(start.location, base).searchParams.get("state") ?? "") : "";
-  const done = await get(t.cookie, `/api/v1/instagram/callback?${new URLSearchParams({ code: `e2e.creator.${t.label}${tag}`, state }).toString()}`);
-  return done.location.includes("instagram=connected");
+  const done = await get(t.cookie, `/api/v1/instagram/callback?${new URLSearchParams({ code: `e2e.creator.${account}`, state }).toString()}`);
+  return done.location;
 }
 
 const projects = () => db.collection<ProjectDocument>("projects");
@@ -526,6 +550,129 @@ async function main(): Promise<void> {
     "Disconnect (G4) with a failed post → 200 and its approval is cancelled (instagram_disconnected) + notification",
     g4Post.post?.state === "publish_failed" && off.status === 200 && g4After?.state === "approval_invalidated" && g4After.invalidatedReason === "instagram_disconnected" && (await notes(e, "approval_invalidated", g4Id)) === 1,
     `${g4Post.post?.state} ${off.status} ${g4After?.state}`,
+  );
+
+  // ---------- code review MUST 1: an unconfirmed attempt blocks every new approval ----------
+  // (A) as user D, (B) as user A: both are connected and stay under 10 publish requests an hour (a
+  // sixth test account would hit the sign-up limit for this computer).
+  const fake = () => db.collection<{ _id: string; kind: string }>("e2eFakeInstagram");
+  const igUserOf = async (t: Tester): Promise<string> => (await db.collection("instagramConnections").findOne({ ownerId: t.id }))!.igUserId;
+  // The stand-in's "outage" for one account (apps/web/lib/instagram/fake-instagram.ts fakeOutageId).
+  const outageOn = async (t: Tester) => fake().updateOne({ _id: `outage:${await igUserOf(t)}` }, { $set: { kind: "counter" } }, { upsert: true });
+  const outageOff = async (t: Tester) => fake().deleteOne({ _id: `outage:${await igUserOf(t)}` });
+  let f = d;
+  const pl = await seedReadyProject(f.id, "How lightning works / F30 e2e");
+  const fIgUser = await igUserOf(f);
+  /** Waits until the job has sent media_publish and is reconciling, then ends it "unconfirmed" (as the stuck-job rule would). */
+  async function endUnconfirmed(postId: string): Promise<PostDocument | null> {
+    for (let i = 0; i < 120; i++) {
+      const post = await postDoc(postId);
+      if (post?.state === "outcome_unknown" && post.publishAttemptedAt) {
+        const job = await jobDoc(post.jobId!);
+        await endPublishJob(db, { jobId: post.jobId!, attempt: job!.attempt as number, failure: "unconfirmed", stage: "reconcile" });
+        return postDoc(postId);
+      }
+      if (post && post.state !== "publishing") return post;
+      await sleep(250);
+    }
+    return postDoc(postId);
+  }
+  const projectRes = async (t: Tester, projectId: string) => (await send(t.cookie, "GET", `/api/v1/projects/${projectId}`)).json;
+
+  // (A) It went live, but Instagram's answer was lost and couldn't be read back.
+  await outageOn(f);
+  const liveCaption = "How lightning works [e2e:lost] #Lightning";
+  const unA = await h2(f, pl.projectId, await bodyFor(f, pl, liveCaption));
+  const unAId: string = unA.json.post?.id ?? "";
+  for (let i = 0; i < 120 && (await postDoc(unAId))?.state !== "outcome_unknown"; i++) await sleep(250);
+  const switchWhile = await connectAs(f, pl.projectId, `other${tag}`);
+  check("while a post is in flight, connecting ANOTHER Instagram account (G3) is refused (INSTAGRAM_BUSY), the old one stays", switchWhile.includes("instagram_error=INSTAGRAM_BUSY") && (await db.collection("instagramConnections").findOne({ ownerId: f.id }))?.igUserId === fIgUser, switchWhile);
+  const ended = await endUnconfirmed(unAId);
+  check(
+    "lost answer + Instagram unreadable → publish_failed 'couldn't confirm' with the publish flag kept; the reel IS live (1)",
+    unA.status === 202 && ended?.state === "publish_failed" && ended.publishAttemptedAt !== null && ended.lastError?.message === PUBLISH_FAILURES.unconfirmed.message && (await liveReels(liveCaption)) === 1,
+    `${unA.status} ${ended?.state} ${ended?.lastError?.code}`,
+  );
+  const editedA = await h7(f, pl.projectId, "How lightning works ⚡ #Lightning");
+  const afterEdit = await postDoc(unAId);
+  const d3A = await send(f.cookie, "POST", `/api/v1/projects/${pl.projectId}/narration-edits`, {
+    basePlanVersionId: pl.planVersionId.toHexString(),
+    sceneId: "scene-hook",
+    blocks: [{ narrationId: "line-hook-question", text: "Where does lightning come from, and why does it flash?" }],
+    expectedStateVersion: (await projectDoc(pl.projectId))!.stateVersion,
+  });
+  check(
+    "a caption edit cancels the approval (approval_invalidated) and a narration edit is saved; the publish flag stays",
+    editedA.status === 200 && afterEdit?.state === "approval_invalidated" && afterEdit.publishAttemptedAt !== null && d3A.status === 201,
+    `${editedA.status} ${afterEdit?.state} ${d3A.status}`,
+  );
+  const blockedA = await h2(f, pl.projectId, { ...(await bodyFor(f, pl, "How lightning works ⚡ #Lightning")) });
+  const resA = await projectRes(f, pl.projectId);
+  check(
+    "a NEW approval (H2) is refused: 409 'Tap Check again first' (retry_instead); no new post; allowedActions offers retry_post, not publish",
+    blockedA.status === 409 &&
+      blockedA.json.error?.details?.reason === "retry_instead" &&
+      blockedA.json.error.message === POST_MESSAGES.RETRY_INSTEAD &&
+      (await postsOf(pl.projectId)).length === 1 &&
+      resA.allowedActions?.includes("retry_post") &&
+      !resA.allowedActions?.includes("publish"),
+    `${blockedA.status} ${blockedA.json.error?.details?.reason} ${JSON.stringify(resA.allowedActions)}`,
+  );
+  const checkPage = await get(f.cookie, `/projects/${pl.projectId}/publish`);
+  check("the publish page shows Check again (no publish form)", checkPage.text.includes('data-testid="publish-check"') && checkPage.text.includes("Check again") && !checkPage.text.includes('data-testid="publish-now"'), String(checkPage.status));
+  await outageOff(f);
+  const checkedA = await h6(f, unAId);
+  const afterA = await postDoc(unAId);
+  check(
+    "Check again (H6) finds the live reel → 200 published: media id + link saved, project published, notification; STILL ONE reel, no new container",
+    checkedA.status === 200 &&
+      checkedA.json.outcome === "published" &&
+      afterA?.state === "published" &&
+      afterA.igMediaId !== null &&
+      (await projectDoc(pl.projectId))?.state === "published" &&
+      (await notes(f, "post_published", unAId)) === 1 &&
+      (await liveReels(liveCaption)) === 1 &&
+      (await containersFor(liveCaption)).length === 1 &&
+      (await containersFor(liveCaption))[0]!.publishCalls === 1,
+    `${checkedA.status} ${checkedA.json.outcome} ${afterA?.state}`,
+  );
+
+  // (B) Instagram's answer was lost and NOTHING was posted.
+  f = a;
+  const pn = await seedReadyProject(f.id, "Why thunder rumbles / F30 e2e");
+  await outageOn(f);
+  const droppedCaption = "Why thunder rumbles [e2e:dropped] #Thunder";
+  const unB = await h2(f, pn.projectId, await bodyFor(f, pn, droppedCaption));
+  const unBId: string = unB.json.post?.id ?? "";
+  const endedB = await endUnconfirmed(unBId);
+  const editedB = await h7(f, pn.projectId, "Why thunder rumbles 🌩️ #Thunder");
+  const blockedB = await h2(f, pn.projectId, await bodyFor(f, pn, "Why thunder rumbles 🌩️ #Thunder"));
+  check(
+    "dropped answer → unconfirmed; caption edit cancels the approval; a new approval is refused (retry_instead); nothing posted",
+    endedB?.state === "publish_failed" && endedB.publishAttemptedAt !== null && editedB.status === 200 && blockedB.status === 409 && blockedB.json.error?.details?.reason === "retry_instead" && (await liveReels(droppedCaption)) === 0,
+    `${endedB?.state} ${editedB.status} ${blockedB.status}`,
+  );
+  await outageOff(f);
+  const checkedB = await h6(f, unBId);
+  const afterB = await postDoc(unBId);
+  const formPage = await get(f.cookie, `/projects/${pn.projectId}/publish`);
+  check(
+    "Check again proves it wasn't posted → 200 not_posted, the flag cleared (state kept); the page asks to approve again; nothing posted, no media_publish sent again",
+    checkedB.status === 200 &&
+      checkedB.json.outcome === "not_posted" &&
+      afterB?.publishAttemptedAt === null &&
+      afterB.state === "approval_invalidated" &&
+      formPage.text.includes("Needs your approval") &&
+      formPage.text.includes('data-testid="publish-now"') &&
+      (await liveReels(droppedCaption)) === 0 &&
+      (await containersFor(droppedCaption))[0]?.publishCalls === 1,
+    `${checkedB.status} ${checkedB.json.outcome} ${afterB?.state}`,
+  );
+  const again2 = await publish(f, pn, "Why thunder rumbles 🌩️ #Thunder");
+  check(
+    "approving again now works and posts EXACTLY once (the dropped caption never went live)",
+    again2.status === 202 && again2.post?.state === "published" && (await liveReels("Why thunder rumbles 🌩️ #Thunder")) === 1 && (await liveReels(droppedCaption)) === 0,
+    `${again2.status} ${again2.post?.state}`,
   );
 
   // ---------- overall: never twice ----------

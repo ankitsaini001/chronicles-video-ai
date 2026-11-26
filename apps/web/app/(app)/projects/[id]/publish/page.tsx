@@ -1,4 +1,4 @@
-import { findProjectRender, getDb, getInstagramConnection, getJob, readDbConfig, toJobResource, type ProjectDocument, type RenderDocument } from "@bytereel/db";
+import { findProjectRender, getDb, getInstagramConnection, getJob, isCheckablePost, readDbConfig, toJobResource, type ProjectDocument, type RenderDocument } from "@bytereel/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -25,6 +25,8 @@ import { thumbnailLink } from "@/lib/video/storage";
 //   Publishing; "Checking whether your post went live…" after a lost answer), polling C6.
 // - `publish_failed`: the plain reason with Try again (H6); when the approval was cancelled by a change
 //   (or can't be used any more) the publish form again, with a note to approve again (a new H2).
+// - A publish that may be live but can't be tried again (code review MUST 1): only "Check again" (H6
+//   in its reconcile-only mode), whatever the project's step; no new approval until it is settled.
 // - `published`: "Your reel is live!" with View on Instagram ↗.
 // Only the owner sees it (another user's project, a missing one, a bad id → the same 404 page). An
 // archived project, a video that isn't ready, or one made from an older storyboard go back to
@@ -33,6 +35,7 @@ import { thumbnailLink } from "@/lib/video/storage";
 export const metadata: Metadata = { title: "Publish" };
 
 const AGAIN_NOTE = "Something changed after you approved this post, so it wasn't posted. Check it and approve it again.";
+const CHECK_NOTE = "We couldn't confirm whether your last post went live. Check again looks at Instagram first; your reel is never posted twice.";
 
 export default async function PublishPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const user = await requireUser();
@@ -91,6 +94,25 @@ export default async function PublishPage({ params, searchParams }: { params: Pr
     );
   }
 
+  // F30 code review MUST 1: a publish that may be live and can't simply be tried again (its approval
+  // was cancelled by a change, or no longer matches) → only "Check again" (H6 reads Instagram; it
+  // never posts). Approving again is blocked until the check confirms it or proves it wasn't posted.
+  if (latestPost && isCheckablePost(latestPost) && (latestPost.state !== "publish_failed" || latestPost.lastError?.code === "APPROVAL_STALE")) {
+    return frame(
+      <PublishStatusScreen
+        projectId={projectId}
+        postId={latestPost._id.toHexString()}
+        title={project.title}
+        thumbnailUrl={thumbnailUrl}
+        username={latestPost.destination.username}
+        mode="check"
+        job={null}
+        failure={{ message: CHECK_NOTE, retryable: true }}
+      />,
+      true,
+    );
+  }
+
   const query = await searchParams;
   const form = (again: string | null) => publishForm({ db, user, project, render, thumbnailUrl, again, query });
 
@@ -110,8 +132,8 @@ export default async function PublishPage({ params, searchParams }: { params: Pr
         failure={{ message: failure.message, retryable: !mustApprove }}
         showFormFirst={mustApprove}
       >
-        {/* A publish that may have gone out is only ever tried again (it checks Instagram first). */}
-        {!latestPost.publishAttemptedAt || mustApprove ? await form(mustApprove ? failure.message : null) : null}
+        {/* A publish that may have gone out is only ever tried again (it checks Instagram first); never a new approval. */}
+        {!latestPost.publishAttemptedAt ? await form(mustApprove ? failure.message : null) : null}
       </PublishStatusScreen>,
       true,
     );
@@ -194,6 +216,8 @@ async function publishForm(input: {
             {/* Rendered by the card only while Instagram is connected (F29 decision 5). */}
             {connectionDoc && (
               <PublishForm
+                // A new video or another account mounts a NEW form: the approval tick can never carry over.
+                key={`${render._id.toHexString()}:${render.mp4Sha256}:${connectionDoc._id.toHexString()}`}
                 projectId={projectId}
                 renderId={render._id.toHexString()}
                 mp4Sha256={render.mp4Sha256}

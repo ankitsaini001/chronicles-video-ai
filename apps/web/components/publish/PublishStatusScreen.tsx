@@ -13,6 +13,9 @@ import { Button, cn } from "@/components/ui";
 // when the post is done or the page is left); the work continues on the server, so leaving is fine.
 // Failed: the plain reason, Try again (H6: the same approval, re-checked; it never posts twice) when it
 // can help, and "approve again" (the publish form, `children`) when something must change first.
+// Check (F30 code review MUST 1): an earlier publish may be live and can't be tried again; the only
+// button is "Check again" (H6 reads Instagram and never posts). Published or proven not posted → the
+// page reloads (Published screen, or the form to approve again); no clear answer → a plain line.
 
 export type PublishStatusScreenProps = {
   projectId: string;
@@ -20,7 +23,7 @@ export type PublishStatusScreenProps = {
   title: string;
   thumbnailUrl: string | null;
   username: string;
-  mode: "publishing" | "failed";
+  mode: "publishing" | "failed" | "check";
   job: JobResource | null;
   /** The failure shown after a failed post. */
   failure: { message: string; retryable: boolean } | null;
@@ -117,8 +120,17 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
     setBusy(true);
     setProblem(null);
     retryKey.current ??= newIdempotencyKey();
-    const answer = await apiSend("POST", `/api/v1/posts/${props.postId}/retry`, {}, { "Idempotency-Key": retryKey.current });
-    if (answer.ok) return router.refresh();
+    const answer = await apiSend<{ outcome?: string; message?: string }>("POST", `/api/v1/posts/${props.postId}/retry`, {}, { "Idempotency-Key": retryKey.current });
+    if (answer.ok) {
+      // Check again without a clear answer: nothing changed; say so (a new key for the next tap).
+      if (answer.json?.outcome === "unknown") {
+        retryKey.current = null;
+        setBusy(false);
+        setProblem(answer.json.message ?? "Instagram didn't give a clear answer yet. Please try again in a few minutes.");
+        return;
+      }
+      return router.refresh();
+    }
     if (answer.status > 0 && answer.status < 500 && answer.code !== "IDEMPOTENCY_IN_PROGRESS") retryKey.current = null;
     setBusy(false);
     setProblem(answer.message);
@@ -128,7 +140,9 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
 
   const steps = publishSteps(job);
   const checking = job?.progress.stage === "reconcile";
-  const failed = props.mode === "failed";
+  const check = props.mode === "check";
+  // The check view looks like the failed one (the reason box, one button), with "Check again".
+  const failed = props.mode === "failed" || check;
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
       <div className="grid grid-cols-1 items-center gap-10 md:grid-cols-12 lg:gap-14">
@@ -142,20 +156,26 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
             )}
           </div>
         </div>
-        <section aria-labelledby="publish-status-heading" data-testid={failed ? "publish-failed" : "publish-progress"} className="rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-10 md:col-span-7">
+        <section
+          aria-labelledby="publish-status-heading"
+          data-testid={check ? "publish-check" : failed ? "publish-failed" : "publish-progress"}
+          className="rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-10 md:col-span-7"
+        >
           <p className="mb-2 text-sm font-medium break-words text-muted">{props.title}</p>
           <h1 id="publish-status-heading" className="mb-3 font-display text-3xl font-bold tracking-tight text-text sm:text-4xl">
-            {failed ? "Your reel wasn't posted" : "Publishing your reel"}
+            {check ? "Did your reel go live?" : failed ? "Your reel wasn't posted" : "Publishing your reel"}
           </h1>
           <p role="status" aria-live="polite" data-testid="publish-status-line" className="mb-8 text-[15px] leading-relaxed break-words text-muted">
-            {failed
-              ? "Your video and caption are saved."
-              : checking
-                ? "Checking whether your post went live… We never post it twice."
-                : `To @${props.username}. You can leave this page; we'll keep going.`}
+            {check
+              ? `We sent it to @${props.username}, but Instagram's answer got lost.`
+              : failed
+                ? "Your video and caption are saved."
+                : checking
+                  ? "Checking whether your post went live… We never post it twice."
+                  : `To @${props.username}. You can leave this page; we'll keep going.`}
           </p>
 
-          <ol aria-label="Steps" className="mb-9 flex flex-col gap-4">
+          <ol aria-label="Steps" className={cn("mb-9 flex flex-col gap-4", check && "hidden")}>
             {steps.map((step) => (
               <li key={step.label} className="flex items-center gap-3.5">
                 <StepIcon status={step.status} />
@@ -180,7 +200,12 @@ export function PublishStatusScreen(props: PublishStatusScreenProps) {
           )}
 
           <div className="flex flex-wrap items-center gap-5">
-            {failed && props.failure?.retryable && !showForm && (
+            {check && (
+              <Button type="button" onClick={() => void retry()} disabled={busy} data-testid="publish-check-again">
+                {busy ? "Checking…" : "Check again"}
+              </Button>
+            )}
+            {!check && failed && props.failure?.retryable && !showForm && (
               <Button type="button" onClick={() => void retry()} disabled={busy} data-testid="publish-retry">
                 {busy ? "Starting…" : "Try again"}
               </Button>

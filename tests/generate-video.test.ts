@@ -1099,9 +1099,9 @@ describe("paid narration is never paid for again (code review, finding 1)", () =
       expect(sha(working.objects.get(scene1.audioKey)!)).toBe(scene1.audioSha256);
       // Try again counted nothing for scene 1: it already had its paid answer.
       expect(bundle.state.sends.filter((k) => k === scene1.cacheKey)).toHaveLength(1);
-      // Several upload retries with backoff: 5 s is too tight when the machine is busy (2026-11-25).
-    }, 20_000);
-  });
+    });
+    // Several upload retries with backoff: 5 s is too tight when the machine is busy (2026-11-25).
+  }, 20_000);
 
   it("R2 refuses the upload (access denied) → the job ends at once (no step retries); Try again later uploads the saved bytes", async () => {
     await withTempDir(async (root) => {

@@ -52,8 +52,11 @@ export interface PublishJobStore {
   unknown(input: { postId: ObjectId; jobId: ObjectId }): Promise<boolean>;
   release(input: { postId: ObjectId; jobId: ObjectId }): Promise<boolean>;
   complete(input: { jobId: ObjectId; attempt: number; mediaId: string | null; permalink: string | null }): Promise<boolean>;
-  end(input: { jobId: ObjectId; attempt: number; failure: PublishFailure; stage: PublishStage; detail?: string }): Promise<boolean>;
+  /** Ends the job with the fixed plain reason (no detail is stored; it goes only to the server log). */
+  end(input: { jobId: ObjectId; attempt: number; failure: PublishFailure; stage: PublishStage }): Promise<boolean>;
   log(entry: PublishAttemptLog): Promise<void>;
+  /** An active connection for `approval.igUserId` with a valid token (reconcile only reads), or null. */
+  reader(post: PostDocument, now: Date): Promise<InstagramConnectionDocument | null>;
 }
 
 export type PublisherSetup = { ok: true; publisher: InstagramPublisher } | { ok: false; problems: string[] };
@@ -77,8 +80,11 @@ export const FAKE_DELAYS: PublishDelays = { firstCheckMs: 1000, checkMs: 1000, r
 
 /** Reconcile: the container still unpublished this many times in a row → safe to publish it again. */
 const NOT_PUBLISHED_CHECKS = 2;
-/** Media posted up to this long before the publish was sent still counts as ours (clocks differ a little). */
-const RECONCILE_SLACK_MS = 5 * 60_000;
+/**
+ * Media posted up to this long before the FIRST media_publish still counts as ours (Instagram's clock
+ * and ours differ a little). Anything older can't be this post (F30 code review nit 8: was 5 minutes).
+ */
+export const RECONCILE_SLACK_MS = 60_000;
 /** Safety net for the step loop (well above 10 minutes of checks). */
 const MAX_STEPS = 120;
 
@@ -88,6 +94,23 @@ type Phase = "container" | "poll" | "publish" | "reconcile";
 type StepAnswer = { next: Phase; waitMs: number; notPublished?: number } | { done: "published" | "failed" | "stale" };
 
 const sameCaption = (a: string | null, b: string) => a !== null && a.normalize("NFC").trim() === b.normalize("NFC").trim();
+
+/**
+ * Our reel among the account's recent media (reconcile and "Check again"): the same caption, posted at
+ * or after the FIRST media_publish minus RECONCILE_SLACK_MS. When Instagram leaves captions out of the
+ * list but says the container is PUBLISHED, the newest recent media in the window is ours.
+ */
+export function findPublishedMedia(
+  post: Pick<PostDocument, "caption" | "createdAt" | "publishAttemptedAt" | "firstPublishAttemptedAt">,
+  media: readonly RecentMedia[] | null,
+  statusCode: string | null,
+): RecentMedia | undefined {
+  const first = post.firstPublishAttemptedAt ?? post.publishAttemptedAt ?? post.createdAt;
+  const since = first.getTime() - RECONCILE_SLACK_MS;
+  const recent = (media ?? []).filter((m) => m.timestamp !== null && new Date(m.timestamp).getTime() >= since);
+  const captionsKnown = recent.some((m) => m.caption !== null);
+  return recent.find((m) => sameCaption(m.caption, post.caption)) ?? (statusCode === "PUBLISHED" && !captionsKnown ? recent[0] : undefined);
+}
 
 export async function runPublishJob(input: { event: { jobId: string; attempt: number }; runId: string | null; step: PublishStepRunner }, deps: PublishJobDeps): Promise<PublishJobOutcome> {
   const { event, step } = input;
@@ -105,8 +128,9 @@ export async function runPublishJob(input: { event: { jobId: string; attempt: nu
   const deadline = new Date(start.deadline).getTime();
   const late = () => now().getTime() > deadline;
 
+  // The creator sees only the fixed plain line (PUBLISH_FAILURES); `detail` goes to the server log only.
   const end = async (failure: PublishFailure, stage: PublishStage, detail?: string): Promise<StepAnswer> => {
-    await store.end({ jobId, attempt, failure, stage, ...(detail ? { detail } : {}) });
+    await store.end({ jobId, attempt, failure, stage });
     log("warn", `${label}: ended (${failure}) at ${stage}${detail ? `: ${detail}` : ""}.`);
     return { done: "failed" };
   };
@@ -285,20 +309,18 @@ export async function runPublishJob(input: { event: { jobId: string; attempt: nu
     const { ctx, api } = ready;
     const { post } = ctx;
     await store.progress({ jobId, attempt, stage: "reconcile", percent: 92, message: PUBLISH_MESSAGES.CHECKING });
-    // Reconcile only reads (it never publishes): the connection must still work, the approval
-    // itself was checked before the publish was sent.
-    const check = await store.recheck(post, now());
+    // Reconcile only READS (it never publishes): any working token of the account the post was approved
+    // for will do, even if something else changed since (F30 code review SHOULD 4). The full approval
+    // re-check still guards create_container and media_publish.
+    const reader = await store.reader(post, now());
+    if (!reader) return end("unconfirmed", "reconcile", "No working token for the approved Instagram account");
     let token: string;
-    if (check.ok) {
-      try {
-        token = deps.token(check.connection);
-      } catch {
-        return end("unconfirmed", "reconcile", "The Instagram token could not be read");
-      }
-    } else {
-      return end("unconfirmed", "reconcile", `Approval re-check: ${check.reason}`);
+    try {
+      token = deps.token(reader);
+    } catch {
+      return end("unconfirmed", "reconcile", "The Instagram token could not be read");
     }
-    const igUserId = check.connection.igUserId;
+    const igUserId = post.approval.igUserId;
     let statusCode: string | null = null;
     let media: RecentMedia[] | null = null;
     if (post.igContainerId) {
@@ -313,12 +335,7 @@ export async function runPublishJob(input: { event: { jobId: string; attempt: nu
     } catch (error) {
       if (!(error instanceof InstagramPublishError)) throw error;
     }
-    const since = (post.publishAttemptedAt?.getTime() ?? post.createdAt.getTime()) - RECONCILE_SLACK_MS;
-    const recent = (media ?? []).filter((m) => m.timestamp !== null && new Date(m.timestamp).getTime() >= since);
-    // Our caption, posted after we sent the publish. When Instagram leaves captions out of the list
-    // but says the container is PUBLISHED, the newest recent media is ours.
-    const captionsKnown = recent.some((m) => m.caption !== null);
-    const match = recent.find((m) => sameCaption(m.caption, post.caption)) ?? (statusCode === "PUBLISHED" && !captionsKnown ? recent[0] : undefined);
+    const match = findPublishedMedia(post, media, statusCode);
     await record(
       { step: "reconcile", request: { containerId: post.igContainerId }, response: { statusCode, recentMedia: media?.length ?? null, matched: match !== undefined }, outcome: match ? "published" : statusCode ?? "unknown" },
       post.ownerId,

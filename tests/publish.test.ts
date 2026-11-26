@@ -1,7 +1,12 @@
 import {
+  allowedActionsFor,
   captionHash,
   CreatePostBodySchema,
   hashtagCount,
+  isCheckablePost,
+  isUnconfirmedPost,
+  type CheckedPost,
+  type ProjectDocument,
   POST_MESSAGES,
   PUBLISH_FAILURES,
   PUBLISH_MESSAGES,
@@ -21,8 +26,9 @@ import {
 import { ObjectId } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
 import { InstagramPublishError, meaningOf, MetaInstagramPublisher, type ContainerStatus, type InstagramPublisher, type RecentMedia } from "../apps/web/lib/instagram/publish-client";
+import { CHECK_AGAIN_MESSAGES, checkPostAgain, type CheckAgainDeps } from "../apps/web/lib/publish/check-again";
 import { postedAtLabel, viewOnInstagramHref } from "../apps/web/lib/publish/labels";
-import { FAKE_DELAYS, REAL_DELAYS, runPublishJob, type PublishDelays, type PublishJobStore } from "../apps/web/lib/publish/run-publish-job";
+import { FAKE_DELAYS, findPublishedMedia, REAL_DELAYS, RECONCILE_SLACK_MS, runPublishJob, type PublishDelays, type PublishJobStore } from "../apps/web/lib/publish/run-publish-job";
 
 // F30 "Publish now (approval #2)": the H2 body rules, the caption hash and the publish key, the Post
 // resource, the Published screen's words, what Instagram's errors mean, the real Meta client against a
@@ -299,6 +305,8 @@ class ScriptedInstagram implements InstagramPublisher {
   calls = { create: 0, status: 0, publish: 0, permalink: 0, recent: 0 };
   tokens = new Set<string>();
   onFinished: (() => void) | null = null;
+  /** Called right after a media_publish call reached Instagram (posted or not). */
+  onPublish: (() => void) | null = null;
   constructor(private readonly clock: () => Date) {}
 
   async createReelsContainer(input: { igUserId: string; accessToken: string; videoUrl: string; caption: string }): Promise<{ containerId: string }> {
@@ -322,6 +330,7 @@ class ScriptedInstagram implements InstagramPublisher {
 
   async publishContainer(input: { igUserId: string; accessToken: string; containerId: string }): Promise<{ mediaId: string }> {
     this.calls.publish++;
+    this.onPublish?.();
     const c = this.containers.get(input.containerId)!;
     const how = this.publishes.shift() ?? "ok";
     if (how instanceof Error) throw how;
@@ -347,7 +356,7 @@ class ScriptedInstagram implements InstagramPublisher {
 
 /** The database side of the job, in memory: the post and what the job saved. */
 class FakeStore implements PublishJobStore {
-  ended: Array<{ failure: PublishFailure; stage: PublishStage; detail?: string }> = [];
+  ended: Array<{ failure: PublishFailure; stage: PublishStage }> = [];
   completed: Array<{ mediaId: string | null; permalink: string | null }> = [];
   messages: string[] = [];
   logs: PublishAttemptLog[] = [];
@@ -355,6 +364,8 @@ class FakeStore implements PublishJobStore {
   startAnswer: PublishStart | null;
   stale = false;
   approvalOk = true;
+  /** A working token for the approved account (reconcile reads with it). */
+  readerOk = true;
   constructor(
     public post: PostDocument,
     private readonly clock: () => Date,
@@ -402,12 +413,13 @@ class FakeStore implements PublishJobStore {
     this.completed.push({ mediaId: input.mediaId, permalink: input.permalink });
     return true;
   });
-  end = vi.fn(async (input: { failure: PublishFailure; stage: PublishStage; detail?: string }) => {
+  end = vi.fn(async (input: { failure: PublishFailure; stage: PublishStage }) => {
     this.post.state = "publish_failed";
     this.ended.push(input);
     return true;
   });
   log = vi.fn(async (entry: PublishAttemptLog) => void this.logs.push(entry));
+  reader = vi.fn(async () => (this.readerOk ? ({ igUserId: IG_USER, accessToken: { v: 1 } } as unknown as InstagramConnectionDocument) : null));
 }
 
 function jobSetup(options: { delays?: PublishDelays; post?: Partial<PostDocument>; publishSent?: boolean } = {}) {
@@ -691,5 +703,205 @@ describe("publish job: never twice", () => {
     expect(await s.run()).toBe("published");
     expect(s.store.completed).toEqual([{ mediaId: null, permalink: null }]);
     expect(s.ig.calls.publish).toBe(0);
+  });
+});
+
+// ---------- F30 code review fixes ----------
+
+describe("code review MUST 1: an unconfirmed attempt blocks every new approval", () => {
+  const T = new Date("2026-11-25T06:00:00Z");
+  it("isUnconfirmedPost: a sent media_publish without a media id, in any state but published; checkable only when settled", () => {
+    for (const state of ["publish_failed", "approval_invalidated", "cancelled"] as const) {
+      expect(isUnconfirmedPost({ state, publishAttemptedAt: T, igMediaId: null })).toBe(true);
+      expect(isCheckablePost({ state, publishAttemptedAt: T, igMediaId: null })).toBe(true);
+    }
+    // A job is still working on it: unconfirmed (blocks H2) but not yet "Check again".
+    expect(isUnconfirmedPost({ state: "outcome_unknown", publishAttemptedAt: T, igMediaId: null })).toBe(true);
+    expect(isCheckablePost({ state: "outcome_unknown", publishAttemptedAt: T, igMediaId: null })).toBe(false);
+    expect(isUnconfirmedPost({ state: "published", publishAttemptedAt: T, igMediaId: null })).toBe(false);
+    expect(isUnconfirmedPost({ state: "publish_failed", publishAttemptedAt: null, igMediaId: null })).toBe(false);
+    expect(isUnconfirmedPost({ state: "cancelled", publishAttemptedAt: T, igMediaId: "17910000000000001" })).toBe(false);
+  });
+
+  it("allowedActions: only retry_post (Check again), never publish, while such a post exists, whatever the project's step", () => {
+    const plan = new ObjectId();
+    const project = (state: ProjectDocument["state"]) =>
+      ({
+        _id: new ObjectId(),
+        ownerId: new ObjectId(),
+        state,
+        language: "en",
+        activeJobId: null,
+        currentRenderId: new ObjectId(),
+        currentPlanVersionId: plan,
+        approvedPlanVersionId: state === "storyboard_ready" ? null : plan,
+        planRequestCount: 1,
+      }) as unknown as ProjectDocument;
+    const unconfirmed = { state: "approval_invalidated" as const, publishAttemptedAt: T, igMediaId: null };
+    for (const state of ["video_ready", "publish_failed", "storyboard_ready"] as const) {
+      const actions = allowedActionsFor(project(state), null, null, { latestPost: unconfirmed });
+      expect(actions).toContain("retry_post");
+      expect(actions).not.toContain("publish");
+    }
+    // Once settled (the flag cleared), approving again is offered.
+    expect(allowedActionsFor(project("publish_failed"), null, null, { latestPost: { ...unconfirmed, publishAttemptedAt: null } })).toContain("publish");
+  });
+});
+
+describe("code review SHOULD 3 + 4: the job's reconcile and its plain stage errors", () => {
+  it("reconcile READS with the approved account's token even after the approval stopped matching: the lost reel is still found (published, one media)", async () => {
+    const s = jobSetup();
+    s.ig.publishes = ["lost"];
+    // A change lands right after media_publish was sent: the full re-check would fail now.
+    s.ig.onPublish = () => {
+      s.store.approvalOk = false;
+    };
+    expect(await s.run()).toBe("published");
+    expect(s.store.reader).toHaveBeenCalled();
+    expect(s.ig.calls.publish).toBe(1);
+    expect(s.ig.media).toHaveLength(1);
+  });
+
+  it("no working token for the approved account → unconfirmed at reconcile; never a second media_publish", async () => {
+    const s = jobSetup();
+    s.ig.publishes = ["lost"];
+    s.store.readerOk = false;
+    expect(await s.run()).toBe("failed");
+    expect(s.store.ended).toMatchObject([{ failure: "unconfirmed", stage: "reconcile" }]);
+    expect(s.ig.calls.publish).toBe(1);
+  });
+
+  it("stage errors: the store gets only the fixed plain reason; env names and details go to the server log only", async () => {
+    const s = jobSetup();
+    s.deps.publisher.mockReturnValue({ ok: false, problems: ["INSTAGRAM_APP_ID is missing."] } as never);
+    expect(await s.run()).toBe("failed");
+    const input = s.store.end.mock.calls[0]![0] as Record<string, unknown>;
+    expect(Object.keys(input).sort()).toEqual(["attempt", "failure", "jobId", "stage"]);
+    expect(JSON.stringify(s.store.ended)).not.toContain("INSTAGRAM_APP_ID");
+    expect(s.logs.join(" ")).toContain("INSTAGRAM_APP_ID is missing.");
+  });
+});
+
+describe("code review nit 8: reconcile's time window", () => {
+  const T = new Date("2026-11-25T06:00:00Z");
+  const media = (secondsFromT: number, caption = "Where does rain come from? #WaterCycle"): RecentMedia => ({
+    id: `1791${String(1e12 + secondsFromT + 100).slice(-13)}`,
+    caption,
+    timestamp: new Date(T.getTime() + secondsFromT * 1000).toISOString(),
+    permalink: null,
+  });
+
+  it("only media at or after the FIRST media_publish minus about a minute", () => {
+    expect(RECONCILE_SLACK_MS).toBe(60_000);
+    const post = postDoc({ publishAttemptedAt: T, firstPublishAttemptedAt: T });
+    expect(findPublishedMedia(post, [media(-90)], "FINISHED")).toBeUndefined();
+    expect(findPublishedMedia(post, [media(-30)], "FINISHED")?.timestamp).toBe(media(-30).timestamp);
+    expect(findPublishedMedia(post, [media(5, "Another reel")], "FINISHED")).toBeUndefined();
+  });
+
+  it("starts at the first send, not a later re-claim", () => {
+    const later = new Date(T.getTime() + 10 * 60_000);
+    expect(findPublishedMedia(postDoc({ publishAttemptedAt: later, firstPublishAttemptedAt: T }), [media(60)], "FINISHED")).toBeDefined();
+    expect(findPublishedMedia(postDoc({ publishAttemptedAt: later, firstPublishAttemptedAt: null }), [media(60)], "FINISHED")).toBeUndefined();
+  });
+
+  it("captions left out of the list: the newest media in the window counts only when the container is PUBLISHED", () => {
+    const post = postDoc({ publishAttemptedAt: T, firstPublishAttemptedAt: T });
+    const noCaption = { ...media(10), caption: null };
+    expect(findPublishedMedia(post, [noCaption], "PUBLISHED")?.id).toBe(noCaption.id);
+    expect(findPublishedMedia(post, [noCaption], "FINISHED")).toBeUndefined();
+  });
+});
+
+describe("Check again (H6 reconcile-only mode): reads Instagram, never posts", () => {
+  const T = new Date("2026-11-25T06:00:00Z");
+  const CONTAINER = "17900000000000020";
+
+  function checkSetup(options: { container?: string | null; containerStatus?: string; media?: boolean; post?: Partial<PostDocument> } = {}) {
+    const ig = new ScriptedInstagram(() => new Date(T.getTime() + 5000));
+    const container = options.container === undefined ? CONTAINER : options.container;
+    const post = postDoc({ state: "approval_invalidated", igContainerId: container, publishAttemptedAt: T, firstPublishAttemptedAt: T, ...options.post });
+    if (container) ig.containers.set(container, { id: container, caption: post.caption, status: options.containerStatus ?? "FINISHED" });
+    ig.statuses = [];
+    if (options.media) ig.media.push({ id: "17910000000000020", caption: post.caption, timestamp: new Date(T.getTime() + 5000).toISOString(), permalink: "https://www.instagram.com/reel/T0020/", containerId: container ?? "" });
+    const logs: PublishAttemptLog[] = [];
+    const deps = {
+      reader: vi.fn(async () => ({ igUserId: IG_USER, accessToken: { v: 1 } }) as unknown as InstagramConnectionDocument),
+      publisher: vi.fn(() => ({ ok: true as const, publisher: ig as InstagramPublisher })),
+      token: vi.fn(() => TOKEN),
+      confirm: vi.fn(async (input: { mediaId: string | null; permalink: string | null }): Promise<CheckedPost | null> => ({ post: { ...post, state: "published", igMediaId: input.mediaId, permalink: input.permalink }, project: null })),
+      clear: vi.fn(async (): Promise<PostDocument | null> => ({ ...post, publishAttemptedAt: null })),
+      log: vi.fn(async (entry: PublishAttemptLog) => void logs.push(entry)),
+    } satisfies CheckAgainDeps;
+    return { ig, post, deps, logs, run: () => checkPostAgain(post, deps) };
+  }
+
+  it("the reel is in the recent media → published with its id and link; no container, no media_publish", async () => {
+    const c = checkSetup({ containerStatus: "PUBLISHED", media: true });
+    const out = await c.run();
+    expect(out.outcome).toBe("published");
+    expect(c.deps.confirm).toHaveBeenCalledWith({ mediaId: "17910000000000020", permalink: "https://www.instagram.com/reel/T0020/" });
+    expect(c.ig.calls).toMatchObject({ create: 0, publish: 0 });
+    expect(c.deps.clear).not.toHaveBeenCalled();
+  });
+
+  it("the container is PUBLISHED but the media isn't listed → published without a link", async () => {
+    const c = checkSetup({ containerStatus: "PUBLISHED" });
+    expect((await c.run()).outcome).toBe("published");
+    expect(c.deps.confirm).toHaveBeenCalledWith({ mediaId: null, permalink: null });
+  });
+
+  it("proven NOT posted (container FINISHED / ERROR / EXPIRED, media list read, not in it) → the flag is cleared", async () => {
+    for (const status of ["FINISHED", "ERROR", "EXPIRED"]) {
+      const c = checkSetup({ containerStatus: status });
+      expect((await c.run()).outcome).toBe("not_posted");
+      expect(c.deps.clear).toHaveBeenCalledTimes(1);
+      expect(c.deps.confirm).not.toHaveBeenCalled();
+      expect(c.ig.calls).toMatchObject({ create: 0, publish: 0 });
+    }
+    // No container was ever made: only the media list decides.
+    const none = checkSetup({ container: null });
+    expect((await none.run()).outcome).toBe("not_posted");
+  });
+
+  it("no clear answer (media list unreadable, container status unreadable, still IN_PROGRESS) → unknown, nothing changes", async () => {
+    const outage = checkSetup();
+    outage.ig.recentMedia = async () => {
+      throw new InstagramPublishError("recent_media", "unavailable", 503);
+    };
+    const unreadable = checkSetup();
+    unreadable.ig.containers.clear(); // the status call fails
+    const busy = checkSetup({ containerStatus: "IN_PROGRESS" });
+    busy.ig.statuses = ["IN_PROGRESS"];
+    for (const c of [outage, unreadable, busy]) {
+      expect((await c.run()).outcome).toBe("unknown");
+      expect(c.deps.confirm).not.toHaveBeenCalled();
+      expect(c.deps.clear).not.toHaveBeenCalled();
+    }
+    expect(CHECK_AGAIN_MESSAGES.unknown).toContain("never posted twice");
+  });
+
+  it("no working token for the approved account → not_connected; Instagram not set up → not_set_up; no call to Instagram", async () => {
+    const a = checkSetup();
+    a.deps.reader.mockResolvedValue(null as never);
+    expect((await a.run()).outcome).toBe("not_connected");
+    const b = checkSetup();
+    b.deps.token.mockImplementation(() => {
+      throw new Error("bad key");
+    });
+    expect((await b.run()).outcome).toBe("not_connected");
+    const c = checkSetup();
+    c.deps.publisher.mockReturnValue({ ok: false, problems: ["x"] } as never);
+    expect((await c.run()).outcome).toBe("not_set_up");
+    for (const s of [a, b, c]) expect(s.ig.calls).toMatchObject({ status: 0, recent: 0, create: 0, publish: 0 });
+  });
+
+  it("already settled meanwhile → changed; the attempt log has no token", async () => {
+    const c = checkSetup({ containerStatus: "PUBLISHED", media: true });
+    c.deps.confirm.mockResolvedValue(null);
+    expect((await c.run()).outcome).toBe("changed");
+    expect(c.logs).toHaveLength(1);
+    expect(c.logs[0]).toMatchObject({ step: "reconcile", jobAttempt: 0, outcome: "published" });
+    expect(JSON.stringify(c.logs)).not.toContain(TOKEN);
   });
 });
