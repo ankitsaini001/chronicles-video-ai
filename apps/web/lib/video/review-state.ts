@@ -10,10 +10,10 @@ import type { ObjectId } from "mongodb";
  * the new version waits for approval on the storyboard). Then the video is shown read-only: no
  * caption fixes, no change requests here. F30: a project whose post failed (`publish_failed`) still
  * has its ready video (captions, changes and the caption box stay available; each change cancels the
- * failed post's approval).
+ * failed post's approval). F31: the same for `scheduled` (a waiting post; a change cancels its approval).
  */
 export function storyboardChangedSince(input: { state: ProjectState; currentPlanVersionId: ObjectId | null; renderPlanVersionId: ObjectId }): boolean {
-  const ready = input.state === "video_ready" || input.state === "publish_failed";
+  const ready = input.state === "video_ready" || input.state === "publish_failed" || input.state === "scheduled";
   return !ready || input.currentPlanVersionId === null || !input.renderPlanVersionId.equals(input.currentPlanVersionId);
 }
 

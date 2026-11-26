@@ -151,6 +151,8 @@ export function publishKeyOf(input: { projectId: ObjectId; renderId: ObjectId; c
 }
 
 const posts = (db: Db) => db.collection<PostDocument>(POSTS_COLLECTION);
+/** The jobs collection (its name only: jobs.ts is not imported here, to keep this module cycle-free). */
+const JOBS = "jobs";
 
 /**
  * Inside the caller's transaction: every `scheduled` / `publish_failed` post that matches (one
@@ -163,7 +165,7 @@ export async function invalidateOpenPosts(
   input: { ownerId: ObjectId; projectId?: ObjectId; reason: InvalidationReason; now: Date; extraFilter?: Filter<PostDocument> },
 ): Promise<number> {
   const filter: Filter<PostDocument> = { ownerId: input.ownerId, state: { $in: [...OPEN_POST_STATES] }, ...(input.projectId ? { projectId: input.projectId } : {}), ...input.extraFilter };
-  const found = await posts(db).find(filter, { session, projection: { _id: 1, projectId: 1, state: 1 } }).toArray();
+  const found = await posts(db).find(filter, { session, projection: { _id: 1, projectId: 1, state: 1, jobId: 1 } }).toArray();
   if (found.length === 0) return 0;
   const titles = await projectTitles(db, session, input.ownerId, found.map((p) => p.projectId));
   let changed = 0;
@@ -176,6 +178,9 @@ export async function invalidateOpenPosts(
     );
     if (moved.modifiedCount !== 1) continue;
     changed++;
+    // F31: a scheduled post's job sleeps until the time; it ends quietly when it wakes (the post is the
+    // real guard), and is marked cancelled now so nothing shows it as waiting.
+    if (post.state === "scheduled" && post.jobId) await cancelWaitingPublishJobs(db, session, { ownerId: input.ownerId, jobIds: [post.jobId], now: input.now });
     const words = POST_NOTIFICATIONS.approval_invalidated(titles.get(post.projectId.toHexString()) ?? "Your video");
     notes.push(newNotification({ ownerId: input.ownerId, type: "approval_invalidated", projectId: post.projectId, postId: post._id, ...words, now: input.now }));
   }
@@ -185,9 +190,26 @@ export async function invalidateOpenPosts(
 
 /** Inside the caller's transaction: the project's `scheduled` / `publish_failed` posts → `cancelled` (C5 archive). */
 export async function cancelOpenPosts(db: Db, session: ClientSession, input: { ownerId: ObjectId; projectId: ObjectId; now: Date }): Promise<number> {
+  // F31: the sleeping jobs of scheduled posts are cancelled too.
+  const waiting = await posts(db).find({ ownerId: input.ownerId, projectId: input.projectId, state: "scheduled", jobId: { $ne: null } }, { session, projection: { jobId: 1 } }).toArray();
+  await cancelWaitingPublishJobs(db, session, { ownerId: input.ownerId, jobIds: waiting.map((p) => p.jobId!), now: input.now });
   const result = await posts(db).updateMany(
     { ownerId: input.ownerId, projectId: input.projectId, state: { $in: [...OPEN_POST_STATES] } },
     { $set: { state: "cancelled", nextAttemptAt: null, updatedAt: input.now } },
+    { session },
+  );
+  return result.modifiedCount;
+}
+
+/**
+ * F31, inside the caller's transaction: publish jobs that still wait (`queued`: a scheduled post's job
+ * sleeping until its time) → `cancelled`. A job that already runs is left alone (its post's state stops it).
+ */
+export async function cancelWaitingPublishJobs(db: Db, session: ClientSession, input: { ownerId: ObjectId; jobIds: readonly ObjectId[]; now: Date }): Promise<number> {
+  if (input.jobIds.length === 0) return 0;
+  const result = await db.collection(JOBS).updateMany(
+    { _id: { $in: [...input.jobIds] }, ownerId: input.ownerId, type: "publish", state: "queued" },
+    { $set: { state: "cancelled", cancelRequestedAt: input.now, "progress.message": "Schedule cancelled.", finishedAt: input.now, updatedAt: input.now } },
     { session },
   );
   return result.modifiedCount;

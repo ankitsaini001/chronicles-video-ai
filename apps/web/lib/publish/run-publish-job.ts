@@ -8,6 +8,7 @@ import {
   type PublishStage,
   type PublishStart,
   type RecheckResult,
+  type WakeOutcome,
 } from "@bytereel/db";
 import { ObjectId } from "mongodb";
 import { InstagramPublishError, meaningOf, type InstagramPublisher, type RecentMedia } from "../instagram/publish-client";
@@ -17,6 +18,11 @@ import { InstagramPublishError, meaningOf, type InstagramPublisher, type RecentM
 // run it with fakes.
 //
 // Durable steps, each saved by Inngest as it finishes (step results hold no token and no link):
+//   schedule          F31: a scheduled post's time (null for Publish now and Try again)
+//   (sleep)           F31: step.sleepUntil(the time); the wait costs nothing
+//   wake              F31: ONE transaction, only while the post is still `scheduled`: post and project
+//                     → `publishing`. Cancelled / approval cancelled by a change → ends quietly, no
+//                     Instagram call. More than 1 hour late → "missed", never posted.
 //   start             the job becomes running for this attempt (deadline: about 10 minutes)
 //   approve           the FULL approval re-check (§9); anything different → no publish
 //   create_container  the re-check again RIGHT BEFORE the container; a private 1-hour R2 link to the
@@ -39,10 +45,16 @@ import { InstagramPublishError, meaningOf, type InstagramPublisher, type RecentM
 export interface PublishStepRunner {
   run<T>(id: string, fn: () => Promise<T>): Promise<T>;
   sleep(id: string, ms: number): Promise<void>;
+  /** F31: Inngest's step.sleepUntil. Without it (tests) the runner sleeps the difference with `sleep`. */
+  sleepUntil?(id: string, at: Date): Promise<void>;
 }
 
 /** What the worker needs from the database (packages/db/src/posts.ts). */
 export interface PublishJobStore {
+  /** F31: when a scheduled post's run must wake (ISO), or null (Publish now, Try again, nothing to do). */
+  scheduled(input: { jobId: string; attempt: number }): Promise<{ scheduledAt: string } | null>;
+  /** F31: the conditional `scheduled` → `publishing` move at the time (or "missed", or "skip"). */
+  wake(input: { jobId: string; attempt: number; runId: string | null }): Promise<WakeOutcome>;
   start(input: { jobId: string; attempt: number; runId: string | null }): Promise<PublishStart | null>;
   load(input: { jobId: string; attempt: number }): Promise<PublishContext | null>;
   recheck(post: PostDocument, now: Date): Promise<RecheckResult>;
@@ -122,6 +134,18 @@ export async function runPublishJob(input: { event: { jobId: string; attempt: nu
   const jobId = new ObjectId(event.jobId);
   const attempt = event.attempt;
   const label = `Publish job ${event.jobId} (attempt ${attempt})`;
+
+  // F31: a scheduled post sleeps until its time, then wakes only if it is still scheduled. The F30 run
+  // below (with its full re-checks) is unchanged.
+  const schedule = await step.run("schedule", () => store.scheduled({ jobId: event.jobId, attempt }));
+  if (schedule) {
+    const at = new Date(schedule.scheduledAt);
+    if (step.sleepUntil) await step.sleepUntil("wait-for-scheduled-time", at);
+    else if (at.getTime() > now().getTime()) await step.sleep("wait-for-scheduled-time", at.getTime() - now().getTime());
+    const woke = await step.run("wake", () => store.wake({ jobId: event.jobId, attempt, runId: input.runId }));
+    if (woke === "missed") log("warn", `${label}: the scheduled time was missed by more than an hour; not posted.`);
+    if (woke !== "go") return woke === "missed" ? "failed" : "skipped";
+  }
 
   const start = await step.run("start", () => store.start({ jobId: event.jobId, attempt, runId: input.runId }));
   if (!start) return "skipped";

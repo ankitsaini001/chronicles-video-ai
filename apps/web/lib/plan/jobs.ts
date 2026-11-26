@@ -14,7 +14,7 @@ import {
   type ProjectDocument,
 } from "@bytereel/db";
 import type { Db } from "mongodb";
-import { getInngest, PLAN_REQUESTED, POST_PUBLISH_REQUESTED, REVISION_REQUESTED, VIDEO_GENERATE_REQUESTED, VIDEO_RECAPTION_REQUESTED } from "../../inngest/client";
+import { getInngest, JOB_CANCELLED, PLAN_REQUESTED, POST_PUBLISH_REQUESTED, REVISION_REQUESTED, VIDEO_GENERATE_REQUESTED, VIDEO_RECAPTION_REQUESTED } from "../../inngest/client";
 
 /** The Inngest event that starts each job type. */
 const EVENT_OF: Partial<Record<JobDocument["type"], string>> = {
@@ -65,6 +65,34 @@ export async function sendPlanEvent(db: Db, job: JobDocument, log: Log = default
   return ok;
 }
 
+/**
+ * F31: tell Inngest a waiting job was cancelled (H5), AFTER the commit, so its sleeping run stops
+ * (`cancelOn` in publish-post). Best effort: if it is lost, the run wakes later and ends quietly,
+ * because the post is no longer `scheduled`.
+ */
+export async function sendJobCancelled(jobId: string, log: Log = defaultLog): Promise<void> {
+  const inngest = getInngest(process.env);
+  if (!inngest.ok) return log("warn", `Job ${jobId}: cancel not sent (Inngest is not set up). Its run ends by itself when it wakes.`);
+  try {
+    await inngest.client.send({ id: `${jobId}:cancelled`, name: JOB_CANCELLED, data: { jobId } });
+  } catch (error) {
+    log("warn", `Job ${jobId}: couldn't send the cancel to Inngest (${error instanceof Error ? error.message : String(error)}). Its run ends by itself when it wakes.`);
+  }
+}
+
+/**
+ * F31: a scheduled post's waiting job gets the stuck-job rule when the post is read (it is not the
+ * project's active job): after its time + 1 hour it becomes "missed"; a lost start event is sent again.
+ * True when the post may have changed (read it again).
+ */
+export async function refreshScheduledPost(db: Db, post: Pick<PostDocument, "state" | "jobId" | "scheduledAt">, log: Log = defaultLog): Promise<boolean> {
+  if (post.state !== "scheduled" || !post.jobId) return false;
+  const job = await getJob(db, post.jobId);
+  if (!job || job.state !== "queued") return false;
+  const fresh = await refreshJob(db, job, log);
+  return fresh.state !== job.state;
+}
+
 /** Apply the stuck-job rule to a job and send its event again when due. Returns the job as it is now. */
 export async function refreshJob(db: Db, job: JobDocument, log: Log = defaultLog): Promise<JobDocument> {
   const checked = await checkStuckJob(db, job);
@@ -96,6 +124,11 @@ export async function loadProjectWithJobs(db: Db, ownerId: string, projectId: st
       const fresh = await refreshJob(db, job, log);
       if (fresh.state !== job.state) project = (await getOwnedProject(db, ownerId, projectId)) ?? project;
     }
+  }
+  // F31: a scheduled post's sleeping job (not the active job): the missed rule and a lost event.
+  if (project.state === "scheduled" && project.currentRenderId) {
+    const waiting = await latestPostOf(db, { ownerId: project.ownerId, projectId: project._id });
+    if (waiting && (await refreshScheduledPost(db, waiting, log))) project = (await getOwnedProject(db, ownerId, projectId)) ?? project;
   }
   const activeJob = project.activeJobId ? await getJob(db, project.activeJobId) : null;
   const [latestPlanJob, latestReviseJob, latestGenerateJob, latestCaptionJob, latestPost] = await Promise.all([

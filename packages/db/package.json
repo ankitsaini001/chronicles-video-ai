@@ -12,6 +12,7 @@
     "./idea-text": "./src/idea-text.ts",
     "./languages": "./src/languages.ts",
     "./post-caption": "./src/post-caption.ts",
+    "./post-schedule": "./src/post-schedule.ts",
     "./voices": "./src/voices.ts"
   },
   "dependencies": {

@@ -232,6 +232,7 @@ export type AllowedAction =
   | "cancel_job"
   | "publish"
   | "retry_post"
+  | "cancel_post"
   | "archive";
 
 /**
@@ -260,6 +261,8 @@ export type AllowedAction =
  * - F30: `publish` (H2) in video_ready with a video, or in publish_failed / scheduled when the newest
  *   post's approval was cancelled (approve again); `retry_post` (H6) in publish_failed when the newest
  *   post failed. `edit_captions` also in publish_failed / scheduled (F4 cancels the post's approval).
+ * - F31: `cancel_post` (H5) in scheduled while the newest post is `scheduled` or `approval_invalidated`;
+ *   a missed schedule (SCHEDULE_MISSED) offers `publish`, never `retry_post`.
  * - Language switch (languages.ts): a project in a switched-off language (Hindi/Hinglish for now)
  *   loses every action that costs AI or voice: `retry_job`, `request_revision`, `edit_idea` (only
  *   useful for its Try again), and since F23 `approve_storyboard` / `generate_video` (approving now
@@ -274,7 +277,7 @@ export function allowedActionsFor(
     activeJob?: JobDocument | null;
     latestGenerateJob?: JobDocument | null;
     latestCaptionJob?: JobDocument | null;
-    latestPost?: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "firstPublishAttemptedAt" | "igMediaId">>) | null;
+    latestPost?: PostForActions | null;
   } = {},
 ): AllowedAction[] {
   if (doc.state === "archived") return [];
@@ -294,14 +297,22 @@ export function allowedActionsFor(
  * An unconfirmed post (its publish may be live) blocks every new approval: only "Check again"
  * (`retry_post`, H6) is offered until it is confirmed or proven not posted (code review MUST 1).
  */
-function postActionsFor(doc: ProjectDocument, latestPost: (Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "firstPublishAttemptedAt" | "igMediaId">>) | null): AllowedAction[] {
+function postActionsFor(doc: ProjectDocument, latestPost: PostForActions | null): AllowedAction[] {
   if (!doc.currentRenderId) return [];
   if (latestPost && isCheckablePost({ state: latestPost.state, firstPublishAttemptedAt: latestPost.firstPublishAttemptedAt ?? null, igMediaId: latestPost.igMediaId ?? null })) return ["retry_post"];
   if (doc.state === "video_ready") return ["publish"];
-  if ((doc.state === "publish_failed" || doc.state === "scheduled") && latestPost?.state === "approval_invalidated") return ["publish"];
-  if (doc.state === "publish_failed" && latestPost?.state === "publish_failed") return ["retry_post"];
+  // F31: a scheduled post can be cancelled (H5); one whose approval a change cancelled can be approved
+  // again (H2, Publish now or Schedule) or cancelled.
+  if (doc.state === "scheduled" && latestPost?.state === "scheduled") return ["cancel_post"];
+  if (doc.state === "scheduled" && latestPost?.state === "approval_invalidated") return ["publish", "cancel_post"];
+  if (doc.state === "publish_failed" && latestPost?.state === "approval_invalidated") return ["publish"];
+  // F31: a missed schedule is never tried again on its old approval (H6 refuses): approve again.
+  if (doc.state === "publish_failed" && latestPost?.state === "publish_failed") return latestPost.lastError?.code === "SCHEDULE_MISSED" ? ["publish"] : ["retry_post"];
   return [];
 }
+
+/** What allowedActions reads of the project's newest post. */
+type PostForActions = Pick<PostDocument, "state"> & Partial<Pick<PostDocument, "firstPublishAttemptedAt" | "igMediaId" | "lastError">>;
 
 /** Actions that start an AI or voice job (or lead only to one): refused for a switched-off language. */
 const AI_ACTIONS: readonly AllowedAction[] = ["retry_job", "request_revision", "edit_idea", "approve_storyboard", "generate_video", "edit_captions"];

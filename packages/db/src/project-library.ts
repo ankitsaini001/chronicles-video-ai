@@ -14,7 +14,7 @@ import {
   type ProjectStep,
   type VoiceGender,
 } from "./projects";
-import { cancelOpenPosts } from "./post-approval";
+import { cancelOpenPosts, POSTS_COLLECTION, toPostSummary, type PostDocument, type PostSummaryResource } from "./post-approval";
 import { rendersForCards } from "./renders";
 
 // "My videos" (F21; docs/API.md C1, C4 rename, C5 archive; DATABASE.md §4.8, §6.6).
@@ -62,7 +62,8 @@ export type ProjectSummaryResource = {
   state: ProjectState;
   currentStep: ProjectStep;
   thumbnailUrl: string | null;
-  latestPost: null;
+  /** F31: the newest post of a `scheduled` project (its time and whether it still needs approval); null otherwise. */
+  latestPost: PostSummaryResource | null;
   activeJobType: JobType | null;
   activeJobState: JobState | null;
   stateVersion: number;
@@ -75,7 +76,13 @@ export type ProjectSummaryResource = {
 /** The card's video: a short-lived thumbnail link and the storyboard version it was made from (F23). */
 export type CardVideo = { thumbnailUrl: string | null; planVersionId: ObjectId };
 
-export function toProjectSummary(doc: ProjectDocument, activeJobType: JobType | null, activeJobState: JobState | null = null, video: CardVideo | null = null): ProjectSummaryResource {
+export function toProjectSummary(
+  doc: ProjectDocument,
+  activeJobType: JobType | null,
+  activeJobState: JobState | null = null,
+  video: CardVideo | null = null,
+  latestPost: Pick<PostDocument, "_id" | "state" | "mode" | "scheduledAt" | "permalink"> | null = null,
+): ProjectSummaryResource {
   return {
     id: doc._id.toHexString(),
     title: doc.title,
@@ -86,7 +93,7 @@ export function toProjectSummary(doc: ProjectDocument, activeJobType: JobType | 
     // The current video's thumbnail (F23; a 15-minute presigned link, issued after the owner check);
     // posts arrive with publishing (F30).
     thumbnailUrl: video?.thumbnailUrl ?? null,
-    latestPost: null,
+    latestPost: latestPost ? toPostSummary(latestPost) : null,
     activeJobType: doc.activeJobId ? activeJobType : null,
     activeJobState: doc.activeJobId ? activeJobState : null,
     stateVersion: doc.stateVersion,
@@ -152,6 +159,28 @@ export async function listProjects(
     }
     if (changed) return listProjects(db, ownerId, page, undefined, thumbnailUrl);
   }
+  // F31: the newest post of each `scheduled` project (the card shows its time). Its sleeping job is
+  // not the active job, so the stuck-job rule (the missed rule after its time + 1 hour) runs here too,
+  // once its time has passed.
+  const scheduledIds = items.filter((d) => d.state === "scheduled").map((d) => d._id);
+  const newestPosts = new Map<string, PostDocument>();
+  if (scheduledIds.length) {
+    const found = await db
+      .collection<PostDocument>(POSTS_COLLECTION)
+      .find({ ownerId: new ObjectId(ownerId), projectId: { $in: scheduledIds } }, { projection: { caption: 0, approval: 0 } })
+      .sort({ createdAt: -1, _id: -1 })
+      .toArray();
+    for (const post of found) if (!newestPosts.has(post.projectId.toHexString())) newestPosts.set(post.projectId.toHexString(), post);
+    if (refreshJob) {
+      let changed = false;
+      for (const post of newestPosts.values()) {
+        if (post.state !== "scheduled" || !post.jobId || !post.scheduledAt || post.scheduledAt.getTime() > Date.now()) continue;
+        const job = await db.collection<JobDocument>(JOBS_COLLECTION).findOne({ _id: post.jobId, ownerId: new ObjectId(ownerId), state: "queued" });
+        if (job && (await refreshJob(job)).state !== job.state) changed = true;
+      }
+      if (changed) return listProjects(db, ownerId, page, undefined, thumbnailUrl);
+    }
+  }
   const jobOf = (id: ObjectId | null) => (id ? (jobs.find((j) => j._id.equals(id)) ?? null) : null);
   const renderIds = items.flatMap((d) => (d.currentRenderId ? [d.currentRenderId] : []));
   const renders = await rendersForCards(db, new ObjectId(ownerId), renderIds);
@@ -169,7 +198,7 @@ export async function listProjects(
   return {
     items: items.map((d) => {
       const job = jobOf(d.activeJobId);
-      return toProjectSummary(d, job?.type ?? null, job?.state ?? null, d.currentRenderId ? (videos.get(d.currentRenderId.toHexString()) ?? null) : null);
+      return toProjectSummary(d, job?.type ?? null, job?.state ?? null, d.currentRenderId ? (videos.get(d.currentRenderId.toHexString()) ?? null) : null, newestPosts.get(d._id.toHexString()) ?? null);
     }),
     nextCursor: docs.length > page.limit && last ? encodeCursor({ u: last.updatedAt.toISOString(), i: last._id.toHexString(), t: tabKey }) : null,
   };

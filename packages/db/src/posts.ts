@@ -23,6 +23,7 @@ import {
   type PostState,
 } from "./post-approval";
 import { cleanPostCaptionText, POST_CAPTION_LIMITS, postCaptionLength } from "./post-caption";
+import { istDateTimeLabel, parseScheduledAt, SCHEDULE_MESSAGES, scheduleProblem, SCHEDULE_LIMITS } from "./post-schedule";
 import { ProjectActionError, PROJECTS_COLLECTION, type ProjectDocument } from "./projects";
 import { RENDERS_COLLECTION, type RenderDocument } from "./renders";
 
@@ -62,7 +63,7 @@ export const PUBLISH_MESSAGES = {
   DONE: "Your reel is live!",
 } as const;
 
-export type PublishErrorCode = "APPROVAL_STALE" | "INSTAGRAM_NOT_CONNECTED" | "INSTAGRAM_TOKEN_EXPIRED" | "PUBLISH_LIMIT_REACHED" | "PUBLISH_FAILED" | "INTERNAL";
+export type PublishErrorCode = "APPROVAL_STALE" | "INSTAGRAM_NOT_CONNECTED" | "INSTAGRAM_TOKEN_EXPIRED" | "PUBLISH_LIMIT_REACHED" | "PUBLISH_FAILED" | "SCHEDULE_MISSED" | "INTERNAL";
 
 /** Why a post failed, in plain words (post.lastError / job.error). `retryable` → Try again (H6). */
 export const PUBLISH_FAILURES = {
@@ -80,6 +81,9 @@ export const PUBLISH_FAILURES = {
     retryable: true,
   },
   internal: { code: "INTERNAL", message: "Something went wrong on our side. Please try again.", retryable: true },
+  // F31 (founder decision 3): a scheduled post that hadn't started publishing 1 hour after its time is
+  // never posted late. Not retryable: Publish now or Schedule again is a NEW approval (H2).
+  missed: { code: "SCHEDULE_MISSED", message: "This post missed its scheduled time, so it wasn't posted. Publish now or pick a new time.", retryable: false },
 } as const satisfies Record<string, { code: PublishErrorCode; message: string; retryable: boolean }>;
 export type PublishFailure = keyof typeof PUBLISH_FAILURES;
 
@@ -100,7 +104,9 @@ export const POST_MESSAGES = {
   TOKEN_EXPIRED: "Instagram needs reconnecting. Please connect again, then approve.",
   APPROVE_AGAIN: "Something changed since you approved this post. Please check it and approve it again.",
   NOT_RETRYABLE: "This post can't be tried again. Please approve it again.",
-  SCHEDULE_LATER: "Scheduling is coming soon. Please choose Publish now.",
+  SCHEDULE_MISSED: SCHEDULE_MESSAGES.MISSED_REFUSED,
+  CANCEL_PUBLISHING: "This post is being published right now and can't be cancelled.",
+  CANCEL_NOT_ALLOWED: "This post can't be cancelled.",
   ARCHIVED: "This project is archived.",
 } as const;
 
@@ -117,7 +123,8 @@ export function hashtagCount(caption: string): number {
 /**
  * H2 body (API.md H2), strict. `caption` is cleaned like the caption box (H7: control and invisible
  * characters, NFC; not trimmed), then 1–2,200 characters (code points, not only spaces), ≤ 30
- * hashtags. `mode: "scheduled"` comes with F31 (400 until then).
+ * hashtags. F31: `mode: "scheduled"` needs `scheduledAt` (ISO-8601 with an offset); its window (now +
+ * 10 min to now + 7 days) and 5-minute step are checked by approvePost (they depend on "now").
  */
 export const CreatePostBodySchema = z
   .strictObject({
@@ -130,7 +137,10 @@ export const CreatePostBodySchema = z
     expectedStateVersion: z.number({ error: "must be a whole number" }).int({ error: "must be a whole number" }).min(1, { error: "must be at least 1" }),
   })
   .superRefine((body, ctx) => {
-    if (body.mode === "scheduled") ctx.addIssue({ code: "custom", path: ["mode"], message: POST_MESSAGES.SCHEDULE_LATER });
+    if (body.mode === "scheduled" && body.scheduledAt === undefined) ctx.addIssue({ code: "custom", path: ["scheduledAt"], message: "is required for scheduled posts" });
+    if (body.mode === "scheduled" && body.scheduledAt !== undefined && parseScheduledAt(body.scheduledAt) === null) {
+      ctx.addIssue({ code: "custom", path: ["scheduledAt"], message: "must be a date and time with an offset, like 2026-11-28T19:00:00+05:30" });
+    }
     if (body.mode === "now" && body.scheduledAt !== undefined) ctx.addIssue({ code: "custom", path: ["scheduledAt"], message: "is only for scheduled posts" });
     if (body.caption.trim() === "") ctx.addIssue({ code: "custom", path: ["caption"], message: "can't be empty" });
     if (postCaptionLength(body.caption) > POST_CAPTION_LIMITS.textMax) ctx.addIssue({ code: "custom", path: ["caption"], message: `must be at most ${POST_CAPTION_LIMITS.textMax.toLocaleString("en-IN")} characters` });
@@ -277,7 +287,7 @@ function pendingStages(): JobStage[] {
 
 const QUEUED_PROGRESS = { stage: "approve", percent: 0, message: PUBLISH_MESSAGES.QUEUED };
 
-export function newPublishJob(input: { ownerId: ObjectId; projectId: ObjectId; postId: ObjectId; renderId: ObjectId; now: Date }): JobDocument {
+export function newPublishJob(input: { ownerId: ObjectId; projectId: ObjectId; postId: ObjectId; renderId: ObjectId; now: Date; scheduledAt?: Date | null }): JobDocument {
   const key = publishJobKey(input.postId);
   return {
     _id: new ObjectId(),
@@ -290,7 +300,8 @@ export function newPublishJob(input: { ownerId: ObjectId; projectId: ObjectId; p
     state: "queued",
     attempt: 1,
     stages: pendingStages(),
-    progress: QUEUED_PROGRESS,
+    // F31: a scheduled post's job waits (queued) until its time; the line says when.
+    progress: input.scheduledAt ? { ...QUEUED_PROGRESS, message: `Scheduled for ${istDateTimeLabel(input.scheduledAt)}` } : QUEUED_PROGRESS,
     error: null,
     needsInput: null,
     result: { postId: input.postId },
@@ -321,7 +332,9 @@ async function audit(db: Db, session: ClientSession, input: { actorId: ObjectId;
 export type ApprovePostResult = { post: PostDocument; job: JobDocument; project: ProjectDocument };
 
 /**
- * H2 "Publish now" (approval #2; API.md H2, §9; DATABASE.md §7.2 row 9), ONE transaction. Refusals,
+ * H2 "Publish now" or "Schedule post" (approval #2; API.md H2, §9; DATABASE.md §7.2 row 9), ONE
+ * transaction. F31: `mode: "scheduled"` first checks the time (now + 10 min to now + 7 days, on a
+ * 5-minute step; 400 INVALID_INPUT at `scheduledAt`, nothing saved). Refusals,
  * in order: 404 · archived / published / publishing (409 INVALID_STATE) · a job running (409
  * JOB_ALREADY_RUNNING) · ANY post of the project whose publish may have gone out and isn't confirmed
  * (409 INVALID_STATE `retry_instead`: Check again first, whatever that post's state) · another tab
@@ -332,6 +345,9 @@ export type ApprovePostResult = { post: PostDocument; job: JobDocument; project:
  * token (409 INSTAGRAM_TOKEN_EXPIRED). Then: the post (`publishing`, approval snapshot with a new id,
  * `publishKey`), its queued job, project → `publishing` (+1 stateVersion; the approved caption
  * becomes the caption box's text), a replaced failed post → `cancelled`, audit `post.approved`.
+ * Scheduled (F31): the post is `scheduled` (attempts 0, `scheduledAt` in UTC), its job is queued and
+ * sleeps until the time (the event is still sent at once), and the project → `scheduled` with NO
+ * `activeJobId`: a change (D3/D4/D5/D7/F4/H7/G3/G4) stays allowed and cancels the approval at once.
  */
 export async function approvePost(
   db: Db,
@@ -348,6 +364,17 @@ export async function approvePost(
   const { body } = input;
   if (!isHex(input.projectId) || !isHex(input.ownerId)) throw new ProjectActionError("NOT_FOUND", POST_MESSAGES.PROJECT_NOT_FOUND);
   const ownerId = new ObjectId(input.ownerId);
+  const scheduled = body.mode === "scheduled";
+  const scheduledAt = scheduled && body.scheduledAt !== undefined ? parseScheduledAt(body.scheduledAt) : null;
+  if (scheduled) {
+    // F31: the window and the 5-minute step (refused, never rounded: the creator approves exactly this time).
+    const problem = scheduledAt ? scheduleProblem(scheduledAt, now) : SCHEDULE_MESSAGES.BAD_TIME;
+    if (problem) {
+      const from = new Date(now.getTime() + SCHEDULE_LIMITS.minLeadMs).toISOString();
+      const to = new Date(now.getTime() + SCHEDULE_LIMITS.maxLeadMs).toISOString();
+      throw new ProjectActionError("INVALID_INPUT", problem, { issues: [{ path: "scheduledAt", message: `must be between ${from} and ${to}, on a ${SCHEDULE_LIMITS.stepMinutes}-minute step` }] });
+    }
+  }
   const session = db.client.startSession();
   let result: ApprovePostResult | null = null;
   try {
@@ -393,7 +420,7 @@ export async function approvePost(
 
       const postId = new ObjectId();
       const approvalId = new ObjectId();
-      const job = newPublishJob({ ownerId, projectId: project._id, postId, renderId: render._id, now });
+      const job = newPublishJob({ ownerId, projectId: project._id, postId, renderId: render._id, now, scheduledAt });
       const post: PostDocument = {
         _id: postId,
         ownerId,
@@ -402,8 +429,8 @@ export async function approvePost(
         renderId: render._id,
         connectionId: connection._id,
         caption: body.caption,
-        mode: "now",
-        scheduledAt: null,
+        mode: scheduled ? "scheduled" : "now",
+        scheduledAt,
         approval: {
           id: approvalId,
           renderId: render._id,
@@ -415,7 +442,7 @@ export async function approvePost(
           approvedAt: now,
         },
         publishKey: publishKeyOf({ projectId: project._id, renderId: render._id, connectionId: connection._id, approvalId }),
-        state: "publishing",
+        state: scheduled ? "scheduled" : "publishing",
         jobId: job._id,
         destination: { username: connection.username, profilePictureUrl: connection.profilePictureUrl },
         igContainerId: null,
@@ -424,7 +451,8 @@ export async function approvePost(
         igMediaId: null,
         permalink: null,
         publishAttemptedAt: null,
-        attempts: 1,
+        // A scheduled post's first attempt starts when it wakes up (wakeScheduledPost adds it).
+        attempts: scheduled ? 0 : 1,
         nextAttemptAt: null,
         lastError: null,
         publishedAt: null,
@@ -442,8 +470,9 @@ export async function approvePost(
         { _id: project._id, ownerId, stateVersion: project.stateVersion, activeJobId: null, state: project.state },
         {
           $set: {
-            state: "publishing",
-            activeJobId: job._id,
+            state: scheduled ? "scheduled" : "publishing",
+            // F31: a sleeping scheduled job is NOT the project's active job (changes stay allowed).
+            activeJobId: scheduled ? null : job._id,
             lastError: null,
             updatedAt: now,
             ...(sameCaption ? {} : { captionDraft: { text: body.caption, updatedAt: now, source: project.captionDraft?.source ?? "edited" } }),
@@ -453,7 +482,7 @@ export async function approvePost(
         { session, returnDocument: "after" },
       );
       if (!moved) throw new ProjectActionError("STALE_VERSION", "This project changed in another tab, refresh.", { expectedStateVersion: body.expectedStateVersion, currentStateVersion: project.stateVersion + 1 });
-      await audit(db, session, { actorId: ownerId, action: "post.approved", postId, data: { projectId: project._id, renderId: render._id, igUserId: connection.igUserId, approvalId, mode: "now" }, now });
+      await audit(db, session, { actorId: ownerId, action: "post.approved", postId, data: { projectId: project._id, renderId: render._id, igUserId: connection.igUserId, approvalId, mode: body.mode, scheduledAt }, now });
       result = { post, job, project: moved };
       if (input.idempotencyLock) {
         const answer = input.respond(result);
@@ -499,6 +528,8 @@ export async function retryPost(
       const post = await posts(db).findOne({ _id: new ObjectId(input.postId), ownerId }, { session });
       if (!post) throw new ProjectActionError("NOT_FOUND", POST_MESSAGES.POST_NOT_FOUND);
       if (post.state === "approval_invalidated") throw new ProjectActionError("APPROVAL_STALE", POST_MESSAGES.APPROVE_AGAIN, { reason: "approval_invalidated" });
+      // F31: a missed schedule is never tried again on its old approval: Publish now or Schedule again (H2).
+      if (post.state === "publish_failed" && post.lastError?.code === PUBLISH_FAILURES.missed.code) throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.SCHEDULE_MISSED, { reason: "schedule_missed" });
       if (post.state !== "publish_failed") throw new ProjectActionError("INVALID_STATE", POST_MESSAGES.NOT_RETRYABLE, { postState: post.state });
       const projects = db.collection<ProjectDocument>(PROJECTS_COLLECTION);
       const project = await projects.findOne({ _id: post.projectId, ownerId }, { session });

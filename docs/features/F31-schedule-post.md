@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | ⬜ Not started |
+| **Status** | 🔄 In progress (plan and design approved 2026-11-26; building with the stand-in Instagram) |
 | **Phase** | A5 · Instagram publishing |
 | **Depends on** | F30 |
-| **Design** | — |
-| **Data (MongoDB / storage)** | — |
+| **Design** | Stitch: ByteReel — Step 4 Schedule, Step 4 Post Scheduled, Step 4 Needs Approval (`docs/design/stitch/step4-schedule.html`, `step4-scheduled.html`, `step4-needs-approval.html`) |
+| **Data (MongoDB / storage)** | `posts` (`mode: scheduled`, `scheduledAt`), `jobs` (no new index: `posts.state_scheduledAt` exists) |
 | **API endpoints** (docs/API.md) | H2, H5 |
 
 ## Goal
@@ -36,4 +36,4 @@ _We break this into small steps together when we start this feature._
 ## Progress log
 | Date | What happened |
 |---|---|
-| | |
+| 2026-11-26 | Plan and design approved by the founder; building. Step 1 (server) done: H2 scheduled mode, the job's sleep + wake, the missed rule, H5. |

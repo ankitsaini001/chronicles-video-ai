@@ -34,6 +34,9 @@ export const VIDEO_RECAPTION_REQUESTED = "video.recaption.requested";
 /** Event that starts publishing a post (API.md H2, H6; F30). Carries ids only (+ postId). */
 export const POST_PUBLISH_REQUESTED = "post.publish.requested";
 
+/** F31: a waiting job was cancelled (H5 Cancel schedule): stops its sleeping run (`cancelOn`). Carries `{ jobId }`. */
+export const JOB_CANCELLED = "job.cancelled";
+
 /**
  * Only ONE video job step runs at a time across the whole app (F23, founder 2026-11-15), shared by
  * `generate-video` and `fix-captions` (F25: a caption fix re-renders the video): renders run

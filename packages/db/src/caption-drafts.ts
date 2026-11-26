@@ -14,8 +14,12 @@ import { USAGE_LIMITS } from "./usage";
 // in the SAME transaction (post → `approval_invalidated` + notification; PRD §7: a caption change
 // invalidates the approval), so Try again becomes "approve again".
 
-/** F30: the project states in which the caption may be edited (H1, H7). */
-export const CAPTION_EDIT_STATES: readonly ProjectState[] = ["video_ready", "publish_failed"];
+/**
+ * F30: the project states in which the caption may be edited (H1, H7). F31 adds `scheduled`: the
+ * "needs approval" and Schedule-again forms keep the caption box; a saved text that differs from a
+ * still-scheduled post's approved caption cancels that approval (the same rule as `publish_failed`).
+ */
+export const CAPTION_EDIT_STATES: readonly ProjectState[] = ["video_ready", "publish_failed", "scheduled"];
 const EDITABLE = { $in: [...CAPTION_EDIT_STATES] };
 
 /** How long one AI suggestion holds the project's lease (H1 itself stops after 30 s). */
@@ -201,7 +205,7 @@ async function saveDraftWhere(
     await session.withTransaction(async () => {
       saved = false;
       const current = await projects.findOne({ _id: input.projectId, ownerId: input.ownerId }, { session, projection: { state: 1 } });
-      if (current?.state !== "video_ready" && current?.state !== "publish_failed") return;
+      if (!current || !CAPTION_EDIT_STATES.includes(current.state)) return;
       const result = await projects.updateOne({ _id: input.projectId, ownerId: input.ownerId, state: current.state, ...input.filter }, input.update, { session });
       if (result.matchedCount !== 1) return;
       if (current.state === "video_ready") {

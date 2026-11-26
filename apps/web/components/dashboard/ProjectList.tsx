@@ -10,6 +10,7 @@ import { usePopover } from "@/components/ui/usePopover";
 import {
   cardActions,
   cardStatus,
+  scheduledLine,
   LANGUAGE_LABELS,
   PLACEHOLDER_BACKGROUNDS,
   projectHref,
@@ -182,6 +183,7 @@ function ProjectCard({
   onArchive: () => void;
 }) {
   const status = cardStatus(item);
+  const scheduledAt = scheduledLine(item);
   const language = LANGUAGE_LABELS[item.language];
   const actions = cardActions(item);
   const titleLang = item.language === "hi" ? "hi" : undefined;
@@ -205,6 +207,13 @@ function ProjectCard({
           </li>
           <li className="rounded-full border border-line bg-surface-2 px-2.5 py-0.5 font-mono text-xs text-muted">{VOICE_LABELS[item.voiceGender]}</li>
         </ul>
+        {scheduledAt && (
+          // F31: when the scheduled post goes out (India time).
+          <p data-testid="card-scheduled-at" className="text-xs font-medium text-warning">
+            {item.latestPost?.state === "approval_invalidated" ? "Was due " : "Posts "}
+            {scheduledAt}
+          </p>
+        )}
         <div className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 pt-1">
           <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", TONES[status.tone])}>{status.label}</span>
           <time dateTime={item.updatedAt} className="font-mono text-[11px] tracking-wide text-muted">

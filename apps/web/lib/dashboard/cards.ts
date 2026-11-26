@@ -1,4 +1,5 @@
 import type { ProjectSummaryResource } from "@bytereel/db";
+import { istDateTimeLabel } from "@bytereel/db/post-schedule";
 
 // What a "My videos" card shows (F21; Stitch "My videos"). Plain functions (no React, no
 // database), shared by the page (server) and the card list (browser), so both render the same text.
@@ -6,7 +7,7 @@ import type { ProjectSummaryResource } from "@bytereel/db";
 export type CardTone = "progress" | "warning" | "success" | "danger" | "muted";
 export type CardStatus = { label: string; tone: CardTone };
 
-type StatusInput = Pick<ProjectSummaryResource, "state" | "activeJobType" | "storyboardApproved"> & Partial<Pick<ProjectSummaryResource, "activeJobState">>;
+type StatusInput = Pick<ProjectSummaryResource, "state" | "activeJobType" | "storyboardApproved"> & Partial<Pick<ProjectSummaryResource, "activeJobState" | "latestPost">>;
 
 /** A plain-language status for the card's pill. "…" = work is running right now. */
 export function cardStatus(p: StatusInput): CardStatus {
@@ -30,6 +31,8 @@ export function cardStatus(p: StatusInput): CardStatus {
     case "video_ready":
       return { label: "Video ready", tone: "success" };
     case "scheduled":
+      // F31: a change cancelled the post's approval: it won't go out until the creator approves again.
+      if (p.latestPost?.state === "approval_invalidated") return { label: "Needs approval", tone: "warning" };
       return { label: "Scheduled", tone: "warning" };
     case "publishing":
       return { label: "Publishing…", tone: "progress" };
@@ -40,6 +43,12 @@ export function cardStatus(p: StatusInput): CardStatus {
     case "archived":
       return { label: "Archived", tone: "muted" };
   }
+}
+
+/** F31: when a scheduled card's post goes out, in India time ("Fri 28 Nov, 7:00 PM IST"), or null. */
+export function scheduledLine(p: Pick<ProjectSummaryResource, "state" | "latestPost">): string | null {
+  if (p.state !== "scheduled" || !p.latestPost?.scheduledAt || (p.latestPost.state !== "scheduled" && p.latestPost.state !== "approval_invalidated")) return null;
+  return istDateTimeLabel(new Date(p.latestPost.scheduledAt));
 }
 
 /** Where a card opens: the storyboard screen, the video step (F23), else the project page. */

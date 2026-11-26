@@ -18,12 +18,14 @@ import { sendPlanEvent } from "@/lib/plan/jobs";
 import { assertPublishReady } from "@/lib/publish/api";
 import { pageQuery } from "@/lib/storyboard/api";
 
-// H2 POST /api/v1/projects/{projectId}/posts (docs/API.md H2, §9; F30): "Publish now", approval #2.
+// H2 POST /api/v1/projects/{projectId}/posts (docs/API.md H2, §9; F30, F31): "Publish now" or "Schedule post", approval #2.
 // The creator approves the EXACT video (renderId + mp4Sha256), the Instagram account (connectionId)
 // and the caption they see. Idempotency-Key required (a double click replays the first answer).
-// Rate: 10 per hour (`publish`, shared with H6). Body (strict): mode "now" ("scheduled" → 400 until
-// F31), renderId, mp4Sha256, connectionId, caption (1–2,200 characters, ≤ 30 hashtags),
-// expectedStateVersion. Order: Inngest, token keys and R2 set up (else 500, nothing saved) → ONE
+// Rate: 10 per hour (`publish`, shared with H6 and H5). Body (strict): mode "now" | "scheduled" (+
+// scheduledAt: ISO with an offset, now + 10 min to now + 7 days, on a 5-minute step; F31), renderId,
+// mp4Sha256, connectionId, caption (1–2,200 characters, ≤ 30 hashtags), expectedStateVersion.
+// Scheduled: the post waits `scheduled`, the project is `scheduled`, and the event below is still sent
+// at once: the job sleeps until the time (inngest/functions/publish-post.ts). Order: Inngest, token keys and R2 set up (else 500, nothing saved) → ONE
 // transaction (packages/db/src/posts.ts approvePost: every check, the post with its approval
 // snapshot and publishKey, the queued publish job, project → publishing, audit post.approved, the
 // answer on the Idempotency-Key record) → AFTER the commit `post.publish.requested`.

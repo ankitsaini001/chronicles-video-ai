@@ -64,9 +64,14 @@ describe("H2 body (CreatePostBodySchema)", () => {
     expect(CreatePostBodySchema.parse({ ...goodBody, caption: "a\r\nb" }).caption).toBe("a\nb");
   });
 
-  it("refuses Schedule until F31 with the plain words, and scheduledAt with Publish now", () => {
-    expect(issuesOf({ ...goodBody, mode: "scheduled", scheduledAt: "2026-12-01T10:00:00Z" })).toContain(`mode: ${POST_MESSAGES.SCHEDULE_LATER}`);
+  it("F31: Schedule needs a scheduledAt with an offset; scheduledAt with Publish now is refused", () => {
+    expect(issuesOf({ ...goodBody, mode: "scheduled", scheduledAt: "2026-12-01T10:00:00Z" })).toEqual([]);
+    expect(issuesOf({ ...goodBody, mode: "scheduled", scheduledAt: "2026-12-01T15:30:00+05:30" })).toEqual([]);
+    expect(issuesOf({ ...goodBody, mode: "scheduled" })).toContain("scheduledAt: is required for scheduled posts");
+    expect(issuesOf({ ...goodBody, mode: "scheduled", scheduledAt: "2026-12-01 10:00" })[0]).toMatch(/^scheduledAt: must be a date and time with an offset/);
+    expect(issuesOf({ ...goodBody, mode: "scheduled", scheduledAt: "2026-12-01T10:00:00" })[0]).toMatch(/^scheduledAt: must be a date and time with an offset/);
     expect(issuesOf({ ...goodBody, scheduledAt: "2026-12-01T10:00:00Z" })).toContain("scheduledAt: is only for scheduled posts");
+    expect(POST_MESSAGES).not.toHaveProperty("SCHEDULE_LATER");
   });
 
   it("caption: not empty or only spaces, at most 2,200 characters (code points), at most 30 hashtags", () => {
@@ -166,11 +171,11 @@ describe("Post resource (API.md §11.3)", () => {
 // ---------- plain words ----------
 
 describe("plain words", () => {
-  it("every failure has a plain message without Meta's words; only a changed approval can't be tried again", () => {
+  it("every failure has a plain message without Meta's words; only a changed approval and (F31) a missed schedule can't be tried again", () => {
     for (const [name, f] of Object.entries(PUBLISH_FAILURES)) {
       expect(f.message.length).toBeGreaterThan(20);
       expect(f.message).not.toMatch(/meta|graph|error code|exception/i);
-      expect(f.retryable).toBe(name !== "approval_stale");
+      expect(f.retryable).toBe(name !== "approval_stale" && name !== "missed");
     }
     expect(PUBLISH_FAILURES.limit.code).toBe("PUBLISH_LIMIT_REACHED");
   });
@@ -375,6 +380,9 @@ class FakeStore implements PublishJobStore {
     this.startAnswer = { postId: post._id.toHexString(), deadline: new Date(clock().getTime() + PUBLISH_RETRY_WINDOW_MS).toISOString(), publishSent };
   }
 
+  // F31: a Publish now post (no schedule); tests/schedule.test.ts covers the scheduled start.
+  scheduled = vi.fn(async (): Promise<{ scheduledAt: string } | null> => null);
+  wake = vi.fn(async () => "go" as const);
   start = vi.fn(async () => this.startAnswer);
   load = vi.fn(async (): Promise<PublishContext | null> => (this.stale ? null : { job: { progress: { stage: "approve" } } as unknown as JobDocument, post: { ...this.post } }));
   recheck = vi.fn(async (): Promise<RecheckResult> => {
@@ -483,8 +491,10 @@ describe("publish job: the happy path", () => {
     expect(s.store.rechecks).toBeGreaterThanOrEqual(4);
     expect(s.store.messages).toEqual(expect.arrayContaining([PUBLISH_MESSAGES.SENDING, PUBLISH_MESSAGES.PROCESSING, PUBLISH_MESSAGES.PUBLISHING]));
     expect(s.sleeps[0]).toBe(FAKE_DELAYS.firstCheckMs);
-    expect(s.steps[0]).toBe("start");
-    expect(s.steps[1]).toBe("approve");
+    // F31: the first step asks whether the post waits for a time (a Publish now post doesn't).
+    expect(s.steps[0]).toBe("schedule");
+    expect(s.steps[1]).toBe("start");
+    expect(s.steps[2]).toBe("approve");
     expect(s.clean()).toBe(true);
     expect(s.store.logs.map((l) => `${l.step}:${l.outcome}`)).toEqual(["create_container:ok", "poll:in_progress", "poll:finished", "publish:ok", "permalink:ok"]);
   });

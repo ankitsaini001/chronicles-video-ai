@@ -40,6 +40,11 @@ export const POST_NOTIFICATIONS = {
   }),
   post_published: (title: string, username: string) => ({ title: "Your reel is live", message: `"${title}" was posted to @${username}.` }),
   post_failed: (title: string) => ({ title: "Your post didn't go out", message: `"${title}" couldn't be posted to Instagram. Open it to see why and try again.` }),
+  /** F31: a scheduled post that couldn't go out within an hour of its time (type `post_failed`). `due`: "Fri 28 Nov, 7:00 PM IST". */
+  post_missed: (title: string, due: string) => ({
+    title: "Your scheduled post missed its time",
+    message: `"${title}" was due at ${due} but couldn't go out at that time, so it wasn't posted. Open it to publish now or pick a new time.`,
+  }),
 } as const;
 
 export function newNotification(input: { ownerId: ObjectId; type: NotificationType; projectId: ObjectId | null; postId: ObjectId | null; title: string; message: string; now: Date }): NotificationDocument {

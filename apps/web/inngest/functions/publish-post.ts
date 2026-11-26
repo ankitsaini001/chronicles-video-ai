@@ -11,8 +11,10 @@ import {
   recheckPublishApproval,
   releasePublishClaim,
   savePublishContainer,
+  scheduledWait,
   setPublishProgress,
   startPublishAttempt,
+  wakeScheduledPost,
 } from "@bytereel/db";
 import { isStorageKey } from "@bytereel/storage";
 import type { Inngest } from "inngest";
@@ -21,7 +23,7 @@ import { instagramPublisherFromEnv, isFakeInstagram } from "@/lib/instagram/prov
 import { FAKE_DELAYS, REAL_DELAYS, runPublishJob, type PublishJobStore } from "@/lib/publish/run-publish-job";
 import { connectionToken } from "@/lib/publish/token";
 import { storageFromEnv } from "@/lib/video/storage";
-import { POST_PUBLISH_REQUESTED } from "../client";
+import { JOB_CANCELLED, POST_PUBLISH_REQUESTED } from "../client";
 
 // `publish-post` (F30; API.md H2, H6; ARCHITECTURE §17.3–17.4): post.publish.requested → the approved
 // video goes to Instagram as a Reel. The work itself is lib/publish/run-publish-job.ts; this file
@@ -34,6 +36,9 @@ import { POST_PUBLISH_REQUESTED } from "../client";
 // - Retries: 3 per step (Inngest). A step that may have sent media_publish is never re-sent blindly:
 //   the post's claim makes the repeat go to reconcile.
 // - Events carry ids only: { jobId, projectId, ownerId, attempt, postId }.
+// - F31: a scheduled post's run sleeps until its time (step.sleepUntil, at most 7 days: Inngest's free
+//   plan limit), so `finish` allows 8 days. `cancelOn` job.cancelled (H5 sends it) stops a sleeping run
+//   early; that is only tidiness: the wake step changes nothing unless the post is still `scheduled`.
 
 const EventData = z.object({
   jobId: z.string().regex(/^[0-9a-f]{24}$/),
@@ -53,6 +58,8 @@ function database() {
 
 function store(db: ReturnType<typeof getDb>): PublishJobStore {
   return {
+    scheduled: (input) => scheduledWait(db, input),
+    wake: (input) => wakeScheduledPost(db, input),
     start: (input) => startPublishAttempt(db, input),
     load: (input) => loadPublishContext(db, input),
     recheck: (post, now) => recheckPublishApproval(db, post, now),
@@ -84,14 +91,16 @@ export function createPublishPostFunction(inngest: Inngest) {
       // Tidiness only: the safety comes from the claim's attempt check (claimPublishCall), not from this.
       concurrency: [{ key: "event.data.postId", limit: 1 }],
       retries: 3,
-      timeouts: { start: "30m", finish: "1h" },
+      // `finish` counts the whole run, sleeps included: up to 7 days of waiting + the ~10 minutes of work.
+      timeouts: { start: "30m", finish: "8d" },
+      cancelOn: [{ event: JOB_CANCELLED, if: "async.data.jobId == event.data.jobId" }],
     },
     async ({ event, step, runId }) => {
       const data = EventData.safeParse(event.data);
       if (!data.success) return { outcome: "ignored", reason: "bad event data" };
       const db = database();
       const outcome = await runPublishJob(
-        { event: { jobId: data.data.jobId, attempt: data.data.attempt }, runId, step: { run: (id, fn) => step.run(id, fn) as never, sleep: (id, ms) => step.sleep(id, ms) } },
+        { event: { jobId: data.data.jobId, attempt: data.data.attempt }, runId, step: { run: (id, fn) => step.run(id, fn) as never, sleep: (id, ms) => step.sleep(id, ms), sleepUntil: (id, at) => step.sleepUntil(id, at) } },
         {
           store: store(db),
           publisher: () => {

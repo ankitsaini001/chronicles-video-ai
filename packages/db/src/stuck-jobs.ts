@@ -3,7 +3,9 @@ import { endCaptionJob } from "./caption-fixes";
 import { endGenerateJob, lastGenerateActivity } from "./generate-jobs";
 import { getJob, JOBS_COLLECTION, type JobDocument } from "./jobs";
 import { failPlanJob, STUCK_JOB_RULES } from "./plan-jobs";
+import { SCHEDULE_LIMITS } from "./post-schedule";
 import { endPublishJob } from "./posts";
+import { settleMissedSchedule, waitingScheduledPost } from "./scheduled-posts";
 import { failReviseJob } from "./revisions";
 
 // The stuck-job rule (ARCHITECTURE §20.3, DATABASE.md Q11, API.md §8.5), checked whenever the status
@@ -30,6 +32,12 @@ import { failReviseJob } from "./revisions";
 // run, and give up by themselves after ~10 min): running with no update for 10 min, or queued for
 // 15 min → failed (INTERNAL, retryable): the post and project become `publish_failed` (Try again; a
 // publish that may have gone out is checked on Instagram first).
+// F31: a SCHEDULED post's job waits `queued` (sleeping in Inngest) until its time, so it is never
+// failed for waiting. Instead: more than 1 hour past its time and still `scheduled` → missed
+// (settleMissedSchedule: never posted, Publish now or Schedule again). Its start event is sent again
+// only when it was never handed over, or when the time passed 2 minutes ago and the job hasn't woken
+// (e.g. the Inngest Dev Server restarted and forgot the sleep): the same event id, so Inngest drops it
+// if the first run is still there, and the wake step lets only one run publish.
 
 /** Generate jobs: failed only when the whole video queue has been still for this long. */
 export const GENERATE_IDLE_LIMIT_MS = 15 * 60_000;
@@ -79,6 +87,24 @@ export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Da
       return { job: await reload(), resendEventId: null };
     }
   } else if (job.type === "publish") {
+    const waiting = job.state === "queued" ? await waitingScheduledPost(db, job) : null;
+    if (waiting?.scheduledAt) {
+      const due = waiting.scheduledAt.getTime();
+      if (at > due + SCHEDULE_LIMITS.missedAfterMs) {
+        await settleMissedSchedule(db, { jobId: job._id, now });
+        return { job: await reload(), resendEventId: null };
+      }
+      // Sleeping until its time: not stuck. Resend only when it was never handed over, or it should have woken.
+      const lastTried = job.event.lastTriedAt?.getTime() ?? null;
+      const resend = job.event.sentAt
+        ? at - due >= STUCK_JOB_RULES.sentResendMs && (lastTried === null || at - lastTried >= STUCK_JOB_RULES.sentResendMs)
+        : lastTried === null || at - lastTried >= STUCK_JOB_RULES.unsentResendMs;
+      if (!resend) return { job, resendEventId: null };
+      const claimed = await db
+        .collection<JobDocument>(JOBS_COLLECTION)
+        .updateOne({ _id: job._id, state: "queued", attempt: job.attempt, "event.id": job.event.id, "event.lastTriedAt": job.event.lastTriedAt }, { $set: { "event.lastTriedAt": now } });
+      return { job, resendEventId: claimed.matchedCount === 1 ? job.event.id : null };
+    }
     if (job.state === "running" && at - job.updatedAt.getTime() >= STUCK_JOB_RULES.runningStaleMs) {
       // No progress for 10 minutes (stuck-job rule): the plain "Something went wrong" line, retryable.
       await endPublishJob(db, { jobId: job._id, attempt: job.attempt, failure: "internal", staleBefore: new Date(at - STUCK_JOB_RULES.runningStaleMs), now });
