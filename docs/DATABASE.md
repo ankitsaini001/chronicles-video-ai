@@ -1116,6 +1116,12 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
   - `publishAttempts` rows from Check again have `jobAttempt: 0`, `step: "reconcile"`, `request.via: "check_again"`.
   - `lastError` and `jobs.stages[].error` hold only the fixed plain line of `PUBLISH_FAILURES` (no technical detail).
   - G3 to another `igUserId` reads `posts` for an in-flight post inside its transaction and is refused (nothing written) while one exists.
+- **Re-review fixes (2026-11-26):**
+  - The unconfirmed rule is based on **`firstPublishAttemptedAt`** (`{ firstPublishAttemptedAt: { $ne: null }, igMediaId: null, state: { $ne: "published" } }`), not `publishAttemptedAt`, which a released claim resets.
+  - `releasePublishClaim` clears `firstPublishAttemptedAt` too only when Instagram clearly refused the FIRST send (`refused` and `publishAttemptedAt` equal to `firstPublishAttemptedAt`, conditional on both).
+  - `clearCheckedPost` clears both marks.
+  - `confirmCheckedPost` moves the project only while `currentRenderId` = `approval.renderId` (its audit records `projectPublished`).
+  - Audit `via` is `check_again` or `ops_cli` (the founder's `npm run db -- clear-unconfirmed-post`, which needs `--apply` to write).
 
 #### 4.24 `notifications`
 **Purpose:** in-app messages for the bell and the banners on your next visit ("Your video is ready", "Post published", "Instagram needs reconnecting"). V1 sends no emails, so this is how ByteReel tells you things.

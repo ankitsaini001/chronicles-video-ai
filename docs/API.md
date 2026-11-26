@@ -1929,6 +1929,15 @@ Success `202` → `{ post: Post, job: Job }`. Errors: `400 INVALID_INPUT` (missi
 - **`publishKey` (nit 6):** keeps one post document per approval. It does not by itself stop a second reel: the post's state (conditional updates), the `media_publish` claim and the unconfirmed-attempt rule do. (The H2 text above, "can never publish twice", is about the same approval's own repeats.)
 - **H7 (nit 7):** the project's state is read inside the save's transaction (H1 and H7), so the caption save and the approval cancel act on one consistent state.
 
+**As built (F30 re-review fixes, 2026-11-26):**
+- **"Unconfirmed" = a send EVER happened** (`firstPublishAttemptedAt` set), no `igMediaId`, not `published`. It replaces `publishAttemptedAt` in the rule above, because a released claim sets `publishAttemptedAt` back to null: a lost first send followed by a refused second send still blocks H2 (`retry_instead`). The mark is cleared only by a clear refusal of the FIRST send itself (nothing went out), by Check again proving "not posted", or by the founder's ops command.
+- **Check again and FINISHED:** a FINISHED container (or none) proves "not posted" only once the latest send is at least 30 minutes old. Before that the answer is `200 { outcome: "unknown" }` with "Instagram hasn't confirmed yet. Please check again in a few minutes." ERROR and EXPIRED are proof at any time. (`message` for `unknown` changed to this text.)
+- **Check again → published:** the project is moved to `published` only while its `currentRenderId` is still the post's `approval.renderId` (and it isn't archived). Otherwise only the post is saved, and the newer video stays publishable.
+- **No working token for the approved account:** `409 INSTAGRAM_NOT_CONNECTED` with `details.reason: "check_needs_account"`. The page then shows "Connect Instagram", which returns to the publish page.
+- **The page** decides Check again vs Try again with the server's own `postRetryMode`.
+- **G3 warning (page only, no new endpoint):** while the creator has an unconfirmed post (any project), the Connect card shows "Your last post on @old hasn't been confirmed yet. If you switch accounts, we can't check it." and asks to confirm before going to Instagram.
+- **Ops (not an API):** `npm run db -- clear-unconfirmed-post <postId> --published <link> | --not-posted [--apply]` settles a stuck post after a manual check on Instagram (docs/features/F30-publish-now.md "Ops"). It uses the same database functions as Check again; the audit shows `via: ops_cli`.
+
 ### 14.9 Admin (`role = admin`; every call audit-logged)
 
 All admin endpoints: auth **admin** (`403 FORBIDDEN`, `details.reason: "admin_only"` for creators), rate 120/min, lists use `limit` 1–100 (50) + `cursor`. Admins see **metadata only** (no plan text, captions, videos or tokens) except what a list explicitly shows.
