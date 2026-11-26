@@ -1122,6 +1122,10 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
   - `clearCheckedPost` clears both marks.
   - `confirmCheckedPost` moves the project only while `currentRenderId` = `approval.renderId` (its audit records `projectPublished`).
   - Audit `via` is `check_again` or `ops_cli` (the founder's `npm run db -- clear-unconfirmed-post`, which needs `--apply` to write).
+- **Final review fixes (2026-11-26):**
+  - `claimPublishCall` is an update PIPELINE: `publishAttemptedAt` and **`lastPublishSentAt`** (new field: the latest send, kept when a claim is released) = now; `firstPublishAttemptedAt: { $ifNull: ["$firstPublishAttemptedAt", now] }`, which fills a missing OR null field. `$min` was wrong here: in MongoDB null ranks below every date, so `$min` never replaced an explicit null.
+  - `releasePublishClaim` (refused first send) and `clearCheckedPost` remove `firstPublishAttemptedAt` and `lastPublishSentAt` with `$unset` (never write null).
+  - Check again's 30-minute rule counts from `lastPublishSentAt`.
 
 #### 4.24 `notifications`
 **Purpose:** in-app messages for the bell and the banners on your next visit ("Your video is ready", "Post published", "Instagram needs reconnecting"). V1 sends no emails, so this is how ByteReel tells you things.

@@ -1938,6 +1938,11 @@ Success `202` → `{ post: Post, job: Job }`. Errors: `400 INVALID_INPUT` (missi
 - **G3 warning (page only, no new endpoint):** while the creator has an unconfirmed post (any project), the Connect card shows "Your last post on @old hasn't been confirmed yet. If you switch accounts, we can't check it." and asks to confirm before going to Instagram.
 - **Ops (not an API):** `npm run db -- clear-unconfirmed-post <postId> --published <link> | --not-posted [--apply]` settles a stuck post after a manual check on Instagram (docs/features/F30-publish-now.md "Ops"). It uses the same database functions as Check again; the audit shows `via: ops_cli`.
 
+**As built (F30 final review fixes, 2026-11-26):**
+- **The "ever sent" mark is set again by every later send.** The claim fills `firstPublishAttemptedAt` with an update pipeline (`$ifNull`), which works whether the field is missing or null. Before, `$min` left an explicit null as it was, so a refused first send followed by a lost second one could be re-approved and posted twice. The two clear paths (a refused first send; Check again "not posted" / the ops command) now remove the fields (`$unset`) instead of writing null.
+- **Check again's 30 minutes** count from `lastPublishSentAt`, the latest send, set on every claim and kept when a claim is released.
+- **The page** shows the approve-again form on a failed post only when the post isn't unconfirmed (`isUnconfirmedPost`), so it never offers a form that H2 would refuse with `retry_instead`.
+
 ### 14.9 Admin (`role = admin`; every call audit-logged)
 
 All admin endpoints: auth **admin** (`403 FORBIDDEN`, `details.reason: "admin_only"` for creators), rate 120/min, lists use `limit` 1–100 (50) + `cursor`. Admins see **metadata only** (no plan text, captions, videos or tokens) except what a list explicitly shows.
