@@ -1951,7 +1951,8 @@ paths:
       description: |
         H2. The creator approves the exact render (renderId + mp4Sha256), destination (connectionId; igUserId is
         copied server side) and caption (captionHash computed server side). mode=now starts publishing;
-        mode=scheduled needs scheduledAt between now + 10 min and now + 75 days.
+        mode=scheduled needs scheduledAt (ISO-8601 with an offset) between now + 10 min and now + 7 days, on a
+        5-minute step (refused, never rounded; F31, was 75 days).
         **Idempotency-Key and expectedStateVersion required.** Rate limit 10/hour.
         409: STALE_VERSION, APPROVAL_STALE (render_not_current, mp4_hash_mismatch, connection_changed),
         INSTAGRAM_NOT_CONNECTED, INSTAGRAM_TOKEN_EXPIRED, INVALID_STATE, JOB_ALREADY_RUNNING.
@@ -1959,8 +1960,11 @@ paths:
         (unique): one post document per approval. What stops a second reel is the post's state, the media_publish
         claim and the unconfirmed-attempt rule (409 INVALID_STATE retry_instead: "We're still checking whether your
         last post went live. Tap Check again first." while ANY earlier publish of the project may be live).
-        As built (F30): only mode=now; mode=scheduled → 400 ("Scheduling is coming soon. Please choose Publish now.")
-        until F31. The caption is cleaned like H7 (NFC), then 1–2,200 code points, not only spaces, ≤ 30 hashtags.
+        As built (F30): only mode=now (until F31). As built (F31): mode=scheduled → post `scheduled`, project `scheduled`
+        with no activeJobId, the job queued and sleeping until scheduledAt (post.publish.requested sent at once). 400
+        INVALID_INPUT at scheduledAt: "Pick a time at least 10 minutes from now." / "Pick a time within the next 7
+        days." / "Pick a time on a 5-minute step (for example 7:00 or 7:05)." More than 1 hour late at wake (or at a
+        read) → never posted: publish_failed SCHEDULE_MISSED (not retryable). The caption is cleaned like H7 (NFC), then 1–2,200 code points, not only spaces, ≤ 30 hashtags.
         Rate limit `publish` 10/hour shared with H6. INVALID_STATE details.reason: video_not_ready, already_published,
         live_post, retry_instead (a failed post whose publish may have gone out: use H6). Allowed project states:
         video_ready, publish_failed, scheduled (no live post). Inngest, token keys and R2 must be set up (else 500,
@@ -2100,7 +2104,13 @@ paths:
     post:
       operationId: cancelPost
       summary: Cancel a scheduled post
-      description: H5. scheduled or approval_invalidated → cancelled (conditional update); project back to video_ready. Already cancelled → 200. Rate limit 10/hour.
+      description: |
+        H5. scheduled or approval_invalidated → cancelled (conditional update); the waiting job → cancelled; project back
+        to video_ready (when it is scheduled/publish_failed with no job of its own running); audit post.cancelled. Already
+        cancelled → 200 with the post, nothing written. Rate limit `publish` 10/hour shared with H2 and H6. As built
+        (F31): body `{}` (strict), no Idempotency-Key; owner only (404); publishing/outcome_unknown → 409 "This post is
+        being published right now and can't be cancelled."; published/publish_failed → 409 "This post can't be
+        cancelled."; after the commit `job.cancelled { jobId }` stops the sleeping run (cancelOn).
       tags: [Publish]
       security:
         - sessionCookie: []
@@ -2128,7 +2138,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: INVALID_STATE (publishing, published, …).
+          description: INVALID_STATE (publishing, outcome_unknown, published, publish_failed).
           content:
             application/json:
               schema:
@@ -3008,6 +3018,7 @@ components:
         - INSTAGRAM_OAUTH_FAILED
         - PUBLISH_LIMIT_REACHED
         - PUBLISH_FAILED
+        - SCHEDULE_MISSED
         - INVALID_SIGNATURE
         - INTERNAL
 
@@ -3433,6 +3444,7 @@ components:
           type: [string, 'null']
           description: Presigned R2 URL, valid 15 minutes.
         latestPost:
+          description: As built (F31) on C1 cards — the newest post of a `scheduled` project (its time); null for other states.
           anyOf:
             - $ref: '#/components/schemas/PostSummary'
             - type: 'null'
@@ -4601,7 +4613,7 @@ components:
       type: object
       additionalProperties: false
       required: [mode, renderId, mp4Sha256, connectionId, caption, expectedStateVersion]
-      description: scheduledAt is required iff mode = scheduled (≥ now + 10 min, ≤ now + 75 days). As built (F30) — mode=scheduled is refused (400) until F31; scheduledAt with mode=now → 400; caption 1–2,200 code points after cleaning, not only spaces, at most 30 hashtags.
+      description: scheduledAt is required iff mode = scheduled (ISO-8601 with an offset; ≥ now + 10 min, ≤ now + 7 days, on a 5-minute step; F31). As built (F30) — mode=scheduled was refused (400) until F31; scheduledAt with mode=now → 400; caption 1–2,200 code points after cleaning, not only spaces, at most 30 hashtags.
       properties:
         mode:
           $ref: '#/components/schemas/PostMode'

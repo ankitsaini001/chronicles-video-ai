@@ -85,7 +85,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F28 | [Connect / disconnect Instagram](F28-instagram-connect.md) | F24 | 🧪 Testing |
 | F29 | [AI caption + hashtags](F29-ai-caption.md) | F28 | 🔨 Building |
 | F30 | [Publish now (approval #2) + Published screen](F30-publish-now.md) | F29 | 🔨 Building |
-| F31 | [Schedule a post](F31-schedule-post.md) | F30 | 🔄 In progress |
+| F31 | [Schedule a post](F31-schedule-post.md) | F30 | 🧪 Testing |
 | F32 | [Instagram token refresh + notifications bell](F32-token-refresh-notifications.md) | F31 | ⬜ Not started |
 
 ### A6 · Settings, admin and launch
@@ -99,7 +99,7 @@ This folder is our build plan. **One file = one feature.** If we ever lose track
 | F37 | [Meta callbacks + Privacy and Terms pages](F37-meta-callbacks-legal.md) | F28 | ⬜ Not started |
 | F38 | [Deploy to production + invite beta users](F38-deploy-production.md) | F37 | ⬜ Not started |
 
-**Now:** **F28 — Connect / disconnect Instagram** is 🧪 Testing (built 2026-11-22: Step 4 page, connect through Instagram's own login, token encrypted, Disconnect; e2e 41/41 with a stand-in Instagram). Next: code review, then the founder's real connect (Meta app setup, `.env`, `npm run db -- indexes --feature F28 --apply`; see the F28 file). **F29 — AI caption + hashtags** is 🔨 Building: built with stand-ins 2026-11-24 (caption box on Step 4, H1 + new H7; e2e 31/31), waiting for code review and the founder's test after F28's real connect. **F30 — Publish now (approval #2) + Published screen** is 🔨 Building: built with the stand-in Instagram 2026-11-25 (H2/H3/H4/H6, the publish job with re-checks and reconcile, the approval-cancel rules, Step 4 publish form, progress/failed/Published screens; unit tests and e2e 47/47), waiting for code review and the founder's one real Reel. Phases A1–A4 done (F22–F27). Hindi/Hinglish hidden behind one switch (see "Language switch" below).
+**Now:** **F28 — Connect / disconnect Instagram** is 🧪 Testing (built 2026-11-22: Step 4 page, connect through Instagram's own login, token encrypted, Disconnect; e2e 41/41 with a stand-in Instagram). Next: code review, then the founder's real connect (Meta app setup, `.env`, `npm run db -- indexes --feature F28 --apply`; see the F28 file). **F29 — AI caption + hashtags** is 🔨 Building: built with stand-ins 2026-11-24 (caption box on Step 4, H1 + new H7; e2e 31/31), waiting for code review and the founder's test after F28's real connect. **F30 — Publish now (approval #2) + Published screen** is 🔨 Building: built with the stand-in Instagram 2026-11-25 (H2/H3/H4/H6, the publish job with re-checks and reconcile, the approval-cancel rules, Step 4 publish form, progress/failed/Published screens; unit tests and e2e 47/47), waiting for code review and the founder's one real Reel. **F31 — Schedule a post** is 🧪 Testing: built with the stand-in Instagram 2026-11-27 (Schedule on Step 4 in IST with 5-minute steps, 10 minutes to 7 days ahead; the Scheduled view with Change time / Cancel schedule; Needs approval and Missed views; the job sleeps until the time and posts only if nothing changed; more than 1 hour late → never posted; H5 cancel; e2e 47/47, F30 e2e 71/71), waiting for code review and the founder's test. Phases A1–A4 done (F22–F27). Hindi/Hinglish hidden behind one switch (see "Language switch" below).
 
 ## Language switch (Hindi/Hinglish hidden, founder 2026-11-14)
 Only English is on. Hindi and Hinglish are **hidden, not removed** (PRD decision #27): all their code, prompts, voice presets, fonts and saved projects stay.

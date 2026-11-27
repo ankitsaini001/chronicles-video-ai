@@ -1050,7 +1050,7 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 | `renderId`, `connectionId` | ObjectId | Which video, which Instagram connection | Yes |
 | `caption` | string 1–2,200 | Caption + hashtags (≤ 30 hashtags) | Yes |
 | `mode` | `now` \| `scheduled` | Publish now or later | Yes |
-| `scheduledAt` | date? (UTC) | 10 min to 75 days ahead; shown in the user's timezone | When scheduled |
+| `scheduledAt` | date? (UTC) | 10 min to **7 days** ahead, on a 5-minute step (F31, founder 2026-11-26; was 75 days); shown in India time (IST) | When scheduled |
 | `approval` | `{ id, renderId, mp4Sha256, connectionId, igUserId, captionHash, approvedBy, approvedAt }` | **Approval #2 snapshot.** `id` is a new approval id for **every** approval | Yes |
 | `publishKey` | string, unique | `pub:{projectId}:{renderId}:{connectionId}:{approvalId}`: at most **one post document per approval**. *(Corrected 2026-11-26, F30 code review: the key alone does not stop a second reel; the post's state, the `media_publish` claim and the unconfirmed-attempt rule do, see "As built (F30)".)* | Yes |
 | `state` | `draft` (reserved) \| `scheduled` \| `publishing` \| `outcome_unknown` \| `published` \| `publish_failed` \| `approval_invalidated` \| `cancelled` | Post status (ARCHITECTURE §7.4) | Yes |
@@ -1070,8 +1070,16 @@ A C7 brainstorm call (F14) has no `projectId`/`jobId`:
 **Indexes**
 - unique `publishKey`: one post document per approval (not, by itself, "never posts twice": see "As built (F30)").
 - `{ ownerId: 1, createdAt: -1 }`: the user's posts, newest first.
-- `{ state: 1, scheduledAt: 1 }`: find scheduled posts that are due. **Open item for F30/F31:** a post can be scheduled up to 75 days ahead, and the publish job waits with Inngest's `sleepUntil`. Check the Inngest **free plan's maximum sleep** before F31. If it is shorter than 75 days, a small cron uses this index to start posts that are due.
+- `{ state: 1, scheduledAt: 1 }`: find scheduled posts that are due. **Open item for F30/F31:** a post can be scheduled up to 75 days ahead, and the publish job waits with Inngest's `sleepUntil`. Check the Inngest **free plan's maximum sleep** before F31. If it is shorter than 75 days, a small cron uses this index to start posts that are due. *(Settled in F31: the window is 7 days, Inngest's free-plan sleep limit, so no cron is needed; the index stays for a later sweep/admin view.)*
 - unique partial `projectId` where `state` is `scheduled`, `publishing` or `outcome_unknown`: **one live post per project** (API A-14; see Q5).
+
+**As built (F31 "Schedule a post", 2026-11-26/27).** No new collection, field or index (`posts.mode`, `posts.scheduledAt` and `{ state, scheduledAt }` already existed).
+- **H2 Schedule** (§7.2 row 9): post `scheduled` (`mode: "scheduled"`, `scheduledAt` UTC, `attempts: 0`), its `publish` job `queued` (`progress.message` "Scheduled for Sat 28 Nov, 7:00 PM IST"), project `scheduled` with **`activeJobId: null`** (the sleeping job is not the project's active job, so changes stay allowed and cancel the approval at once). The window (now + 10 min to now + 7 days) and the 5-minute step are refused, never rounded.
+- **The wake** (`wakeScheduledPost`, `packages/db/src/scheduled-posts.ts`), ONE transaction, conditional on the post still being `scheduled`: post → `publishing` (`attempts` +1), project `scheduled` (no active job, same `stateVersion`) → `publishing` with `activeJobId` = the job (+1), job `queuedAt` = now and `inngestRunId`. Otherwise nothing is sent; a still-`queued` job of a post that is no longer `scheduled` → `cancelled`.
+- **Missed** (`SCHEDULE_MISSED`, not retryable): a post still `scheduled` more than 1 hour after `scheduledAt` → post `publish_failed` (`lastError`), job `failed`, project `scheduled` → `publish_failed` (+1, only while it has no active job), notification `post_failed` (missed words), audit `post.missed` (`via: job | read`), ONE transaction. Found by the job when it wakes late, or at read time by the stuck-job rule (which never fails a sleeping scheduled job for waiting).
+- **Changes / archive:** `invalidateOpenPosts` and `cancelOpenPosts` also mark a `scheduled` post's waiting job `cancelled` (`cancelWaitingPublishJobs`: only `queued` publish jobs) in the same transaction.
+- **H5** (§7.2 row 10, as planned): post `scheduled`/`approval_invalidated` → `cancelled` (conditional), the waiting job → `cancelled`, project → `video_ready` (+1, only while `scheduled`/`publish_failed` with no active job), audit `post.cancelled`; already `cancelled` → nothing written.
+- **Caption box:** `CAPTION_EDIT_STATES` (H1, H7) now also has `scheduled`; a saved text that differs from a still-`scheduled` post's approved caption cancels that approval (the `publish_failed` rule).
 
 #### 4.23 `publishAttempts`
 **Purpose:** the paper trail of every call ByteReel made to Instagram for a post (PRD §7). If a post fails or a creator asks "did it post?", this shows each step and Instagram's answer.
@@ -1623,5 +1631,5 @@ These were the gaps and contradictions in the source documents. **Decided 2026-1
 **Q10 — decided (2026-11-13).** The founder wants to keep records of deleted accounts. Final rule (6.7): a 30-day soft delete, then personal data is erased and an anonymous `deletionLog` entry (4.26) is kept forever. Keeping the personal data itself was ruled out because the DPDP Act requires erasure on request and Meta requires deleting Instagram data.
 
 **Open items for later features (not questions for now)**
-- **F30/F31:** check the Inngest free plan's maximum sleep for posts scheduled up to 75 days ahead; fallback: a small cron that uses the `posts { state, scheduledAt }` index (4.22).
+- ~~**F30/F31:** check the Inngest free plan's maximum sleep for posts scheduled up to 75 days ahead; fallback: a small cron that uses the `posts { state, scheduledAt }` index (4.22).~~ **Settled (F31, founder 2026-11-26):** scheduling is limited to 7 days (the free plan's longest sleep); no cron.
 - **F05:** read the current M0 limits (connections, operations per second, data transfer) on Atlas (§9), and choose the Atlas region together with the Vercel function region (§2.1).
