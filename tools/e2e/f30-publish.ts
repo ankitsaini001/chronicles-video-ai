@@ -29,7 +29,7 @@ import { ObjectId } from "mongodb";
  * daily limit). Its "Instagram" is the test database's `e2eFakeInstagram` collection, so this check
  * counts the reels that went live.
  *
- * It proves: signed out → 401; the Step 4 form (WHEN with Publish now, Schedule "Coming soon", the
+ * It proves: signed out → 401; the Step 4 form (WHEN with Publish now and Schedule (F31), the
  * approval tick, Publish now); H2 refusals (no Idempotency-Key, Schedule, another MP4, another tab,
  * another account, another user's project) save nothing; H2 → 202, a double click replays ONE post;
  * while publishing a second H2, H6 and archive are refused and the page shows the progress view;
@@ -298,11 +298,11 @@ async function main(): Promise<void> {
   check("B connects Instagram (stand-in)", await connect(b, pb.projectId));
   const form = await get(b.cookie, `/projects/${pb.projectId}/publish`);
   check(
-    "Step 4: WHEN with Publish now and Schedule 'Coming soon', the approval tick naming the video version and @account, Publish now",
+    "Step 4: WHEN with Publish now and Schedule (F31: no longer 'Coming soon'), the approval tick naming the video version and @account, Publish now",
     form.status === 200 &&
       form.text.includes('data-testid="when-now"') &&
       form.text.includes('data-testid="when-schedule"') &&
-      form.text.includes("Coming soon") &&
+      !form.text.includes("Coming soon") &&
       form.text.includes('data-testid="publish-approve"') &&
       form.text.includes(`I approve posting video version 1 to @e2e_b${tag}.`) &&
       form.text.includes('data-testid="publish-now"') &&
@@ -311,14 +311,15 @@ async function main(): Promise<void> {
   );
   const good = await bodyFor(b, pb, "How plants eat sunlight 🌱 #Photosynthesis");
   const noKey = await h2(b, pb.projectId, good, null);
-  const scheduled = await h2(b, pb.projectId, { ...good, mode: "scheduled", scheduledAt: "2026-12-01T10:00:00Z" });
+  // F31: Schedule exists now; a time more than 7 days away is refused (tools/e2e/f31-schedule.ts covers scheduling).
+  const scheduled = await h2(b, pb.projectId, { ...good, mode: "scheduled", scheduledAt: new Date(Date.now() + 30 * 24 * 3600_000).toISOString().slice(0, 14) + "00:00.000Z" });
   const otherMp4 = await h2(b, pb.projectId, { ...good, mp4Sha256: `sha256:${"e".repeat(64)}` });
   const otherTab = await h2(b, pb.projectId, { ...good, expectedStateVersion: 4 });
   const otherAccount = await h2(b, pb.projectId, { ...good, connectionId: new ObjectId().toHexString() });
   const pa = await seedReadyProject(a.id, "How rainbows form / F30 e2e");
   const foreign = await h2(b, pa.projectId, good);
   check("H2 without an Idempotency-Key → 400", noKey.status === 400, `${noKey.status} ${noKey.json.error?.code}`);
-  check("H2 Schedule → 400 with 'Scheduling is coming soon'", scheduled.status === 400 && JSON.stringify(scheduled.json).includes("Scheduling is coming soon"), String(scheduled.status));
+  check("H2 Schedule 30 days away → 400 'Pick a time within the next 7 days.' (F31)", scheduled.status === 400 && scheduled.json.error?.message === "Pick a time within the next 7 days.", String(scheduled.status));
   check("H2 another MP4 → 409 APPROVAL_STALE mp4_hash_mismatch", otherMp4.status === 409 && otherMp4.json.error?.code === "APPROVAL_STALE" && otherMp4.json.error.details?.reason === "mp4_hash_mismatch", `${otherMp4.status} ${otherMp4.json.error?.code}`);
   check("H2 from another tab (old stateVersion) → 409 STALE_VERSION", otherTab.status === 409 && otherTab.json.error?.code === "STALE_VERSION", `${otherTab.status} ${otherTab.json.error?.code}`);
   check("H2 another Instagram connection → 409 APPROVAL_STALE connection_changed", otherAccount.status === 409 && otherAccount.json.error?.details?.reason === "connection_changed", `${otherAccount.status}`);
@@ -446,7 +447,7 @@ async function main(): Promise<void> {
   );
   const staleRetry = await h6(c, errId);
   const againPage = await get(c.cookie, `/projects/${perr.projectId}/publish`);
-  check("Try again on the cancelled approval → 409 APPROVAL_STALE; the page asks to approve again", staleRetry.status === 409 && staleRetry.json.error?.code === "APPROVAL_STALE" && againPage.text.includes("Needs your approval") && againPage.text.includes('data-testid="publish-now"'), `${staleRetry.status}`);
+  check("Try again on the cancelled approval → 409 APPROVAL_STALE; the page asks to approve again", staleRetry.status === 409 && staleRetry.json.error?.code === "APPROVAL_STALE" && againPage.text.includes("Needs approval") && againPage.text.includes('data-testid="publish-now"'), `${staleRetry.status}`);
   const reapproved = await publish(c, perr, "How volcanoes erupt 🌋 #Volcano");
   check(
     "a NEW approval (H2) publishes the edited caption; the old post is cancelled; ONE reel",
@@ -522,7 +523,7 @@ async function main(): Promise<void> {
   );
   const chgRetry = await h6(e, chgId);
   const chgPage = await get(e.cookie, `/projects/${pchg.projectId}/publish`);
-  check("Try again → 409 APPROVAL_STALE; the page asks to approve again", chgRetry.status === 409 && chgRetry.json.error?.code === "APPROVAL_STALE" && chgPage.text.includes("Needs your approval"), String(chgRetry.status));
+  check("Try again → 409 APPROVAL_STALE; the page asks to approve again", chgRetry.status === 409 && chgRetry.json.error?.code === "APPROVAL_STALE" && chgPage.text.includes("Needs approval"), String(chgRetry.status));
 
   // ---------- D3 (narration edit), C5 (archive) and G4 (Disconnect) cancel a failed post (user E) ----------
   const pd3 = await seedReadyProject(e.id, "How clouds form / F30 e2e");
@@ -683,7 +684,7 @@ async function main(): Promise<void> {
       !("firstPublishAttemptedAt" in afterB) &&
       !("lastPublishSentAt" in afterB) &&
       afterB.state === "approval_invalidated" &&
-      formPage.text.includes("Needs your approval") &&
+      formPage.text.includes("Needs approval") &&
       formPage.text.includes('data-testid="publish-now"') &&
       (await liveReels(droppedCaption)) === 0 &&
       (await containersFor(droppedCaption))[0]?.publishCalls === 1,
