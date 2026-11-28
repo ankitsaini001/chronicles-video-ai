@@ -17,8 +17,11 @@ import {
   SCHEDULE_MESSAGES,
   scheduleProblem,
   toIstIso,
+  checkStuckJob,
   invalidateOpenPosts,
   retryPost,
+  scheduledWait,
+  startPublishAttempt,
   wakeScheduledPost,
   type JobDocument,
   type PostDocument,
@@ -272,6 +275,68 @@ describe("wakeScheduledPost (the job's wake step)", () => {
     const { db, calls } = fakeDb({ "jobs.findOne": () => d.job, "posts.findOne": () => d.post });
     expect(await wakeScheduledPost(db, { jobId: d.job._id.toHexString(), attempt: 1, runId: "run-2", now: new Date("2026-11-28T13:31:00.000Z") })).toBe("skip");
     expect(calls.some((c) => c.name.endsWith("updateOne") || c.name.endsWith("updateMany"))).toBe(false);
+  });
+});
+
+describe("code review MUST 1: only the run that woke a scheduled post may publish it", () => {
+  const ok = { modifiedCount: 1, matchedCount: 1 };
+  it("scheduledWait gives the time to EVERY attempt-1 run of a scheduled post, whatever its state; none to Try again or Publish now", async () => {
+    const d = docs("publishing");
+    const { db } = fakeDb({ "jobs.findOne": () => d.job, "posts.findOne": (filter: { mode?: string }) => (filter.mode === "scheduled" ? d.post : null) });
+    expect(await scheduledWait(db, { jobId: d.job._id.toHexString(), attempt: 1 })).toEqual({ scheduledAt: d.post.scheduledAt!.toISOString() });
+    expect(await scheduledWait(db, { jobId: d.job._id.toHexString(), attempt: 2 })).toBeNull();
+    const now = fakeDb({ "jobs.findOne": () => d.job, "posts.findOne": () => null });
+    expect(await scheduledWait(now.db, { jobId: d.job._id.toHexString(), attempt: 1 })).toBeNull();
+  });
+
+  it("a second run that starts AFTER the first woke the post: schedule → wake says skip → no Instagram call at all", async () => {
+    const d = docs("publishing");
+    (d.job as { inngestRunId: string | null }).inngestRunId = "run-1";
+    const { db, calls } = fakeDb({ "jobs.findOne": () => d.job, "posts.findOne": (filter: { mode?: string }) => (filter.mode === "scheduled" || filter.mode === undefined ? d.post : null) });
+    const publisher = vi.fn(() => ({ ok: false as const, problems: ["never"] }));
+    const store = {
+      scheduled: (input: { jobId: string; attempt: number }) => scheduledWait(db, input),
+      wake: (input: { jobId: string; attempt: number; runId: string | null }) => wakeScheduledPost(db, { ...input, now: new Date("2026-11-28T13:31:00.000Z") }),
+      start: vi.fn(async () => null),
+    } as unknown as PublishJobStore;
+    const steps: string[] = [];
+    const out = await runPublishJob(
+      {
+        event: { jobId: d.job._id.toHexString(), attempt: 1 },
+        runId: "run-2",
+        step: { run: async (id, fn) => (steps.push(id), fn()), sleep: async () => undefined, sleepUntil: async () => undefined },
+      },
+      { store, publisher, token: vi.fn(() => "never"), videoUrl: vi.fn(async () => "never"), delays: FAKE_DELAYS, now: () => new Date("2026-11-28T13:31:00.000Z"), log: () => undefined },
+    );
+    expect(out).toBe("skipped");
+    expect(steps).toEqual(["schedule", "wake"]);
+    expect(store.start).not.toHaveBeenCalled();
+    expect(publisher).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.name.endsWith("updateOne") || c.name.endsWith("updateMany") || c.name.endsWith("findOneAndUpdate"))).toBe(false);
+  });
+
+  it("startPublishAttempt refuses a scheduled post's first attempt for any run but the one that woke it", async () => {
+    const d = docs("publishing");
+    (d.job as { inngestRunId: string | null }).inngestRunId = "run-1";
+    const project = { ...d.project, state: "publishing", activeJobId: d.job._id };
+    const handlers = { "jobs.findOne": () => d.job, "posts.findOne": () => d.post, "projects.findOne": () => project, "jobs.findOneAndUpdate": () => d.job };
+    const other = fakeDb(handlers);
+    expect(await startPublishAttempt(other.db, { jobId: d.job._id.toHexString(), attempt: 1, runId: "run-2" })).toBeNull();
+    expect(other.calls.some((c) => c.name === "jobs.findOneAndUpdate")).toBe(false);
+    expect(await startPublishAttempt(fakeDb(handlers).db, { jobId: d.job._id.toHexString(), attempt: 1, runId: null })).toBeNull();
+    const same = fakeDb(handlers);
+    expect(await startPublishAttempt(same.db, { jobId: d.job._id.toHexString(), attempt: 1, runId: "run-1" })).not.toBeNull();
+  });
+
+  it("the stuck-job rule never re-sends a sleeping scheduled job's event after its time (only one never handed over)", async () => {
+    const d = docs("scheduled", { scheduledAt: new Date("2026-11-28T13:30:00.000Z") });
+    const sent = { ...d.job, event: { id: "pubjob:x", sentAt: new Date("2026-11-26T06:00:00.000Z"), lastTriedAt: null }, queuedAt: new Date("2026-11-26T06:00:00.000Z") } as unknown as JobDocument;
+    const a = fakeDb({ "posts.findOne": () => d.post });
+    expect((await checkStuckJob(a.db, sent, new Date("2026-11-28T13:35:00.000Z"))).resendEventId).toBeNull();
+    expect(a.calls.map((c) => c.name)).toEqual(["posts.findOne"]);
+    const unsent = { ...sent, event: { id: "pubjob:x", sentAt: null, lastTriedAt: null } } as unknown as JobDocument;
+    const b = fakeDb({ "posts.findOne": () => d.post, "jobs.updateOne": () => ok });
+    expect((await checkStuckJob(b.db, unsent, new Date("2026-11-26T06:01:00.000Z"))).resendEventId).toBe("pubjob:x");
   });
 });
 

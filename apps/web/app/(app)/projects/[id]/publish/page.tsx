@@ -6,7 +6,6 @@ import {
   getJob,
   isCheckablePost,
   istDateTimeLabel,
-  istTimeLabel,
   isUnconfirmedPost,
   postRetryMode,
   PUBLISH_FAILURES,
@@ -206,7 +205,7 @@ export default async function PublishPage({ params, searchParams }: { params: Pr
       await form({
         again: null,
         badge: "Needs approval",
-        banner: { title: "Missed its time", text: `This post was due at ${istTimeLabel(due)} but couldn't go out at that time. Publish now or pick a new time.` },
+        banner: { title: "Missed its time", text: `This post was due at ${istDateTimeLabel(due)} but couldn't go out at that time. Publish now or pick a new time.` },
       }),
       true,
     );

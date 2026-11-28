@@ -102,6 +102,7 @@ export const POST_MESSAGES = {
   ACCOUNT_CHANGED: "Your Instagram account changed. Please review and approve again.",
   NOT_CONNECTED: "Please connect your Instagram first.",
   TOKEN_EXPIRED: "Instagram needs reconnecting. Please connect again, then approve.",
+  TOKEN_ENDS_BEFORE: "Your Instagram connection ends before this time. Reconnect Instagram, then schedule.",
   APPROVE_AGAIN: "Something changed since you approved this post. Please check it and approve it again.",
   NOT_RETRYABLE: "This post can't be tried again. Please approve it again.",
   SCHEDULE_MISSED: SCHEDULE_MESSAGES.MISSED_REFUSED,
@@ -417,6 +418,11 @@ export async function approvePost(
       if (!connection || connection.status === "revoked" || !connection.accessToken) throw new ProjectActionError("INSTAGRAM_NOT_CONNECTED", POST_MESSAGES.NOT_CONNECTED);
       if (!connection._id.equals(new ObjectId(body.connectionId))) throw new ProjectActionError("APPROVAL_STALE", POST_MESSAGES.ACCOUNT_CHANGED, { reason: "connection_changed" });
       if (connection.status !== "active" || connection.tokenExpiresAt.getTime() <= now.getTime()) throw new ProjectActionError("INSTAGRAM_TOKEN_EXPIRED", POST_MESSAGES.TOKEN_EXPIRED);
+      // F31 (code review NICE 4): the connection must still work at the time (+ the 1-hour grace). Until
+      // F32 refreshes tokens, a post scheduled past the token's end would only fail at its time.
+      if (scheduledAt && connection.tokenExpiresAt.getTime() <= scheduledAt.getTime() + SCHEDULE_LIMITS.missedAfterMs) {
+        throw new ProjectActionError("INSTAGRAM_TOKEN_EXPIRED", POST_MESSAGES.TOKEN_ENDS_BEFORE, { reason: "expires_before_schedule" });
+      }
 
       const postId = new ObjectId();
       const approvalId = new ObjectId();
@@ -622,6 +628,9 @@ export async function startPublishAttempt(db: Db, input: { jobId: string; attemp
   const post = await posts(db).findOne({ _id: job.inputRef.postId, ownerId: job.ownerId, jobId: job._id, state: { $in: ["publishing", "outcome_unknown"] } });
   const project = await db.collection<ProjectDocument>(PROJECTS_COLLECTION).findOne({ _id: job.projectId, ownerId: job.ownerId, activeJobId: job._id, state: "publishing" });
   if (!post || !project) return null;
+  // F31 code review MUST 1 (belt and braces): a scheduled post's first attempt belongs to the ONE run that
+  // woke it (wakeScheduledPost saved its run id); any other run of the same job stops here.
+  if (post.mode === "scheduled" && input.attempt === 1 && (!input.runId || job.inngestRunId !== input.runId)) return null;
   const deadline = job.publish?.attempt === input.attempt ? job.publish.deadline : new Date(now.getTime() + PUBLISH_RETRY_WINDOW_MS);
   const updated = await jobs.findOneAndUpdate(
     { _id: job._id, attempt: input.attempt, state: { $in: ["queued", "running"] } },

@@ -79,6 +79,7 @@ export function PublishForm(props: PublishFormProps) {
   const approveId = useId();
   const dateId = useId();
   const timeId = useId();
+  const whenName = useId();
 
   const shownCaption = useRef(props.initialDraft?.text ?? "");
   const onTextChange = useCallback((text: string) => {
@@ -185,9 +186,10 @@ export function PublishForm(props: PublishFormProps) {
         <h2 id="when-heading" className="font-mono text-xs font-semibold tracking-widest text-amber uppercase">
           When
         </h2>
+        {/* Native radio inputs (code review SHOULD 2): Tab reaches the group, the arrow keys move to and select the other choice. */}
         <div role="radiogroup" aria-labelledby="when-heading" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <WhenChoice testId="when-now" title="Publish now" hint="Post to your account straight away" checked={!scheduled} disabled={busy} onSelect={() => changeWhen(() => setMode("now"))} />
-          <WhenChoice testId="when-schedule" title="Schedule" hint="Pick a date and time (IST)" checked={scheduled} disabled={busy} onSelect={() => changeWhen(() => setMode("scheduled"))} />
+          <WhenChoice name={whenName} testId="when-now" title="Publish now" hint="Post to your account straight away" checked={!scheduled} disabled={busy} onSelect={() => changeWhen(() => setMode("now"))} />
+          <WhenChoice name={whenName} testId="when-schedule" title="Schedule" hint="Pick a date and time (IST)" checked={scheduled} disabled={busy} onSelect={() => changeWhen(() => setMode("scheduled"))} />
         </div>
         {scheduled && (
           <div data-testid="schedule-picker" className="flex flex-col gap-3 rounded-xl border border-line bg-surface-2 p-4">
@@ -305,35 +307,25 @@ export function PublishForm(props: PublishFormProps) {
   );
 }
 
-function WhenChoice(props: { testId: string; title: string; hint: string; checked: boolean; disabled: boolean; onSelect: () => void }) {
+function WhenChoice(props: { name: string; testId: string; title: string; hint: string; checked: boolean; disabled: boolean; onSelect: () => void }) {
   return (
-    <div
-      role="radio"
-      aria-checked={props.checked}
-      aria-disabled={props.disabled || undefined}
-      tabIndex={props.checked ? 0 : -1}
+    <label
       data-testid={props.testId}
-      onClick={() => !props.disabled && props.onSelect()}
-      onKeyDown={(event) => {
-        if (props.disabled) return;
-        if (event.key === " " || event.key === "Enter" || event.key.startsWith("Arrow")) {
-          event.preventDefault();
-          props.onSelect();
-        }
-      }}
       className={cn(
-        "cursor-pointer rounded-xl p-4 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-cream",
+        "block rounded-xl p-4 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-gold-cream",
+        props.disabled ? "cursor-not-allowed" : "cursor-pointer",
         props.checked ? "border-2 border-amber bg-amber/10 shadow-[0_0_15px_#f5a52426]" : "border border-line bg-surface-2 opacity-75 hover:opacity-100",
       )}
     >
-      <div className="mb-1 flex items-center gap-2.5">
+      <input type="radio" name={props.name} checked={props.checked} disabled={props.disabled} onChange={() => props.onSelect()} className="sr-only" />
+      <span className="mb-1 flex items-center gap-2.5">
         <span aria-hidden="true" className={cn("flex size-4 items-center justify-center rounded-full border", props.checked ? "border-amber" : "border-muted/50")}>
           {props.checked && <span className="size-2 rounded-full bg-amber" />}
         </span>
         <span className="text-[15px] font-bold text-text">{props.title}</span>
-      </div>
-      <p className="pl-6.5 text-xs text-muted">{props.hint}</p>
-    </div>
+      </span>
+      <span className="block pl-6.5 text-xs text-muted">{props.hint}</span>
+    </label>
   );
 }
 

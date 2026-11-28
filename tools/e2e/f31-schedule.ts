@@ -8,7 +8,6 @@ import {
   getDb,
   indexesForFeatures,
   istDateTimeLabel,
-  istTimeLabel,
   POST_MESSAGES,
   readDbConfig,
   SCHEDULE_MESSAGES,
@@ -45,7 +44,9 @@ import { ObjectId } from "mongodb";
  * again (Schedule, and Publish now) posts exactly once; missed (> 1 hour late) when the job wakes late
  * AND at read time → never posted, SCHEDULE_MISSED, notification, Try again refused, the Missed view,
  * approving again posts once; up to 1 hour late still posts; an expired token at the time →
- * INSTAGRAM_TOKEN_EXPIRED, reconnect the same account, Try again posts once.
+ * INSTAGRAM_TOKEN_EXPIRED, reconnect the same account, Try again posts once. Code review: a SECOND run (a
+ * fresh event id) of an already-woken scheduled post sends nothing (one container, one reel); H2 Schedule
+ * for a time after the connection ends → 409.
  *
  * TEMP FILES: never in /tmp. In every terminal used below, first run from the repo root:
  *   mkdir -p runs/.tmp && export TMPDIR="$PWD/runs/.tmp"
@@ -268,10 +269,11 @@ async function schedule(t: Tester, p: Seeded, caption: string): Promise<{ status
  * The TEST-ONLY time shift: the post's time moves to `when` in the test database, and the same job is
  * handed to the private Inngest again (new event id). Returns Inngest's id of that event.
  */
-async function shiftAndRedeliver(postId: string, when: Date): Promise<string | null> {
+async function shiftAndRedeliver(postId: string, when: Date | null): Promise<string | null> {
   const post = await postDoc(postId);
   if (!post?.jobId) return null;
-  await posts().updateOne({ _id: post._id }, { $set: { scheduledAt: when } });
+  // `when` null: no shift, only one more delivery of the same job (a second run).
+  if (when) await posts().updateOne({ _id: post._id }, { $set: { scheduledAt: when } });
   const job = await jobDoc(post.jobId);
   const r = await fetch(`${INNGEST}/e/f31-e2e`, {
     method: "POST",
@@ -619,10 +621,10 @@ async function main(): Promise<void> {
   const missPage = await get(d.cookie, `/projects/${pd1.projectId}/publish`);
   const c3d = await send(d.cookie, "GET", `/api/v1/projects/${pd1.projectId}`);
   check(
-    "the Missed view: 'Missed its time', 'This post was due at <time> IST but couldn't go out at that time. Publish now or pick a new time.', the form; allowedActions publish (no retry_post)",
+    "the Missed view: 'Missed its time', 'This post was due at <date, time> IST but couldn't go out at that time. Publish now or pick a new time.', the form; allowedActions publish (no retry_post)",
     missPage.status === 200 &&
       missPage.text.includes("Missed its time") &&
-      missPage.text.includes(`This post was due at ${istTimeLabel(missed!.scheduledAt!)} but couldn't go out at that time. Publish now or pick a new time.`) &&
+      missPage.text.includes(`This post was due at ${istDateTimeLabel(missed!.scheduledAt!)} but couldn't go out at that time. Publish now or pick a new time.`) &&
       missPage.text.includes('data-testid="publish-now"') &&
       c3d.json.allowedActions?.includes("publish") &&
       !c3d.json.allowedActions?.includes("retry_post"),
@@ -652,6 +654,38 @@ async function main(): Promise<void> {
   const lateDone = await settled(late.postId);
   await runsOf(lateEvent);
   check("woke 30 minutes late (within the hour) → posted normally, EXACTLY ONE reel", lateDone?.state === "published" && (await liveReels(lateCaption)) === 1, `${lateDone?.state}`);
+
+  // ---------- code review MUST 1: a second run of an already-woken scheduled post (user D) ----------
+  const pd4 = await seedReadyProject(d.id, "How auroras glow / F31 e2e");
+  const twoCaption = "How auroras glow [e2e:slow] #Auroras";
+  const two = await schedule(d, pd4, twoCaption);
+  await shiftAndRedeliver(two.postId, soon(3));
+  let woken: PostDocument | null = null;
+  for (let i = 0; i < 120 && woken?.state !== "publishing"; i++) {
+    woken = await postDoc(two.postId);
+    if (woken?.state === "publishing") break;
+    await sleep(250);
+  }
+  // The first run has woken the post (it is being published, slowly): a fresh event starts a SECOND run.
+  const secondEvent = await shiftAndRedeliver(two.postId, null);
+  const twoDone = await settled(two.postId);
+  const secondRuns = await runsOf(secondEvent);
+  check(
+    "a second run (fresh event id) of an already-woken scheduled post ends without any Instagram call: EXACTLY ONE container and ONE reel",
+    woken?.state === "publishing" && completed(secondRuns) && twoDone?.state === "published" && (await containersFor(twoCaption)) === 1 && (await liveReels(twoCaption)) === 1 && twoDone.attempts === 1,
+    `${woken?.state} ${statusOf(secondRuns)} ${twoDone?.state} containers=${await containersFor(twoCaption)} reels=${await liveReels(twoCaption)}`,
+  );
+
+  // ---------- code review NICE 4: the connection ends before the time ----------
+  const pd5 = await seedReadyProject(d.id, "How meteors fall / F31 e2e");
+  await db.collection("instagramConnections").updateOne({ ownerId: d.id }, { $set: { tokenExpiresAt: new Date(Date.now() + 15 * 60_000) } });
+  const ends = await h2(d, pd5.projectId, await bodyFor(d, pd5, "How meteors fall #Meteors", "scheduled", 20));
+  await db.collection("instagramConnections").updateOne({ ownerId: d.id }, { $set: { tokenExpiresAt: new Date(Date.now() + 60 * 86_400_000) } });
+  check(
+    "H2 Schedule for a time after the Instagram connection ends → 409 INSTAGRAM_TOKEN_EXPIRED 'Your Instagram connection ends before this time…', nothing saved",
+    ends.status === 409 && ends.json.error?.code === "INSTAGRAM_TOKEN_EXPIRED" && ends.json.error?.message === POST_MESSAGES.TOKEN_ENDS_BEFORE && ends.json.error?.details?.reason === "expires_before_schedule" && (await posts().countDocuments({ projectId: new ObjectId(pd5.projectId) })) === 0,
+    `${ends.status} ${ends.json.error?.code}`,
+  );
 
   // ---------- no secrets saved ----------
   const saved = JSON.stringify(await db.collection("publishAttempts").find({ ownerId: { $in: [a.id, b.id, c.id, d.id] } }).toArray());

@@ -35,9 +35,9 @@ import { failReviseJob } from "./revisions";
 // F31: a SCHEDULED post's job waits `queued` (sleeping in Inngest) until its time, so it is never
 // failed for waiting. Instead: more than 1 hour past its time and still `scheduled` → missed
 // (settleMissedSchedule: never posted, Publish now or Schedule again). Its start event is sent again
-// only when it was never handed over, or when the time passed 2 minutes ago and the job hasn't woken
-// (e.g. the Inngest Dev Server restarted and forgot the sleep): the same event id, so Inngest drops it
-// if the first run is still there, and the wake step lets only one run publish.
+// ONLY when it was never handed over (as before F31). There is no re-send after the time (F31 code
+// review MUST 1): Inngest drops a repeated event id only for 24 hours, so a re-send for a post scheduled
+// further ahead would start a real second run. A sleep that was lost is covered by the missed rule.
 
 /** Generate jobs: failed only when the whole video queue has been still for this long. */
 export const GENERATE_IDLE_LIMIT_MS = 15 * 60_000;
@@ -94,11 +94,9 @@ export async function checkStuckJob(db: Db, job: JobDocument, now: Date = new Da
         await settleMissedSchedule(db, { jobId: job._id, now });
         return { job: await reload(), resendEventId: null };
       }
-      // Sleeping until its time: not stuck. Resend only when it was never handed over, or it should have woken.
+      // Sleeping until its time: not stuck. Re-sent only when it was never handed over (never after the time).
       const lastTried = job.event.lastTriedAt?.getTime() ?? null;
-      const resend = job.event.sentAt
-        ? at - due >= STUCK_JOB_RULES.sentResendMs && (lastTried === null || at - lastTried >= STUCK_JOB_RULES.sentResendMs)
-        : lastTried === null || at - lastTried >= STUCK_JOB_RULES.unsentResendMs;
+      const resend = !job.event.sentAt && (lastTried === null || at - lastTried >= STUCK_JOB_RULES.unsentResendMs);
       if (!resend) return { job, resendEventId: null };
       const claimed = await db
         .collection<JobDocument>(JOBS_COLLECTION)

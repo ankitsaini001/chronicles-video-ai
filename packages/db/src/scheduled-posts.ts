@@ -32,12 +32,17 @@ async function audit(db: Db, session: ClientSession, input: { actorId: ObjectId;
   await db.collection(AUDIT_LOGS_COLLECTION).insertOne({ schemaVersion: 1, actorId: input.actorId, action: input.action, subject: { type: "post", id: input.postId }, data: input.data, at: input.now }, { session });
 }
 
-/** The job's first step for a scheduled post: when to wake (ISO), or null when this run doesn't wait (a Publish now post, a Try again, or nothing left to do). */
+/**
+ * The job's first step: when to wake (ISO), or null when this run doesn't wait (a Publish now post, or a
+ * Try again: attempt 2 and later). F31 code review MUST 1: EVERY attempt-1 run of a scheduled post gets
+ * its time, whatever the post's state now, so every such run goes through the wake step, and only the run
+ * that woke the post may continue (a second run, e.g. a re-delivered event, ends quietly there).
+ */
 export async function scheduledWait(db: Db, input: { jobId: string; attempt: number }): Promise<{ scheduledAt: string } | null> {
-  if (!isHex(input.jobId)) return null;
-  const job = await db.collection<JobDocument>(JOBS_COLLECTION).findOne({ _id: new ObjectId(input.jobId), type: "publish", attempt: input.attempt, state: "queued" });
+  if (!isHex(input.jobId) || input.attempt !== 1) return null;
+  const job = await db.collection<JobDocument>(JOBS_COLLECTION).findOne({ _id: new ObjectId(input.jobId), type: "publish", attempt: 1 });
   if (!job?.inputRef.postId) return null;
-  const post = await posts(db).findOne({ _id: job.inputRef.postId, ownerId: job.ownerId, jobId: job._id, state: "scheduled" }, { projection: { scheduledAt: 1 } });
+  const post = await posts(db).findOne({ _id: job.inputRef.postId, ownerId: job.ownerId, jobId: job._id, mode: "scheduled" }, { projection: { scheduledAt: 1 } });
   return post?.scheduledAt ? { scheduledAt: post.scheduledAt.toISOString() } : null;
 }
 
@@ -95,7 +100,9 @@ async function endAsMissed(db: Db, session: ClientSession, input: { job: JobDocu
  *   APPROVAL_STALE (approve again), nothing is sent;
  * - else `go`: post → `publishing` (attempts + 1), project → `publishing` with this job as its active job
  *   (+1 stateVersion), the job stays `queued` with `queuedAt` = now (the F30 run's `start` makes it
- *   running) and records this run. A repeat of the step by the same run answers `go` again.
+ *   running) and records this run (`inngestRunId`). A repeat of the step by the SAME run answers `go`
+ *   again; any OTHER run (the post is no longer `scheduled`) answers `skip` and sends nothing (code
+ *   review MUST 1), and `start` also refuses it (startPublishAttempt).
  */
 export async function wakeScheduledPost(db: Db, input: { jobId: string; attempt: number; runId: string | null; now?: Date }): Promise<WakeOutcome> {
   const now = input.now ?? new Date();
@@ -140,7 +147,9 @@ export async function wakeScheduledPost(db: Db, input: { jobId: string; attempt:
         { $set: { state: "publishing", activeJobId: job._id, lastError: null, updatedAt: now }, $inc: { stateVersion: 1 } },
         { session },
       );
-      if (moved.modifiedCount !== 1) throw new Error("The project changed while the scheduled post woke up; the transaction is retried.");
+      // The project changed between the read and the write: abort the whole transaction (nothing is saved,
+      // the post stays `scheduled`); the step fails and Inngest runs it again (3 retries), which reads afresh.
+      if (moved.modifiedCount !== 1) throw new Error("The project changed while the scheduled post woke up; nothing was saved and the step will be run again.");
       await jobs.updateOne(
         { _id: job._id, attempt: job.attempt, state: "queued" },
         { $set: { queuedAt: now, progress: { stage: "approve", percent: 0, message: PUBLISH_MESSAGES.QUEUED }, ...(input.runId ? { inngestRunId: input.runId } : {}), updatedAt: now } },
